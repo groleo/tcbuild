@@ -1,0 +1,35 @@
+config NCURSES
+    string
+
+choice
+    bool
+    prompt "Version"
+
+
+config NCURSES_V_5_7
+    bool
+    prompt "5.7"
+
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+
+config NCURSES_V_snapshot
+    bool
+    prompt "latest snapshot (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+config NCURSES_V_specific_date
+    bool
+    prompt "<specific date> (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+endchoice
+
+config NCURSES_VERSION
+    string
+    prompt "Enter date (YYYYMMDD)" if NCURSES_V_specific_date
+    default "snapshot" if NCURSES_V_snapshot
+    default "5.7" if NCURSES_V_5_7
+
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!

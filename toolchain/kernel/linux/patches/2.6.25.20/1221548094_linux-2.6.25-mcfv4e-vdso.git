@@ -1,0 +1,763 @@
+From 2dd01418b6d253167ffdfdd17b3fea80a77e1bcc Mon Sep 17 00:00:00 2001
+From: Kurt Mahan <kmahan@freescale.com>
+Date: Tue, 16 Sep 2008 00:54:54 -0600
+Subject: [PATCH] VDSO Initial Checkin.
+
+Provide a Dynamic Shared Object (DSO) to provide needed functionality
+for implementing TLS/NPTL.
+
+LTIBName: mcfv4e-vdso
+Signed-off-by: Kurt Mahan <kmahan@freescale.com>
+---
+ arch/m68k/Kconfig                   |    9 ++
+ arch/m68k/coldfire/Makefile         |    2 +
+ arch/m68k/coldfire/vdso/Makefile    |   46 +++++++++++
+ arch/m68k/coldfire/vdso/vdso-bin.S  |   14 ++++
+ arch/m68k/coldfire/vdso/vdso-lib.S  |  143 +++++++++++++++++++++++++++++++++++
+ arch/m68k/coldfire/vdso/vdso-note.S |   27 +++++++
+ arch/m68k/coldfire/vdso/vdso.c      |  103 +++++++++++++++++++++++++
+ arch/m68k/coldfire/vdso/vdso.lds.S  |   89 ++++++++++++++++++++++
+ arch/m68k/mm/cf-mmu.c               |    6 +-
+ arch/m68k/mm/init.c                 |    9 ++
+ include/asm-m68k/auxvec.h           |    4 +-
+ include/asm-m68k/elf.h              |   12 ++--
+ include/asm-m68k/mmu.h              |    7 ++
+ include/asm-m68k/mmu_context.h      |   37 +++++++--
+ include/asm-m68k/page.h             |    2 +-
+ 15 files changed, 491 insertions(+), 19 deletions(-)
+ create mode 100644 arch/m68k/coldfire/vdso/Makefile
+ create mode 100644 arch/m68k/coldfire/vdso/vdso-bin.S
+ create mode 100644 arch/m68k/coldfire/vdso/vdso-lib.S
+ create mode 100644 arch/m68k/coldfire/vdso/vdso-note.S
+ create mode 100644 arch/m68k/coldfire/vdso/vdso.c
+ create mode 100644 arch/m68k/coldfire/vdso/vdso.lds.S
+
+diff --git a/arch/m68k/Kconfig b/arch/m68k/Kconfig
+index 44702cb..826c320 100644
+--- a/arch/m68k/Kconfig
++++ b/arch/m68k/Kconfig
+@@ -461,6 +461,15 @@ config NOR_FLASH_BASE
+ 	default 0x00000000 if M54455EVB
+ 	default 0xE0000000 if M547X_8X
+ 
++config VDSO
++        bool "Support VDSO page"
++        depends on MMU && M5445X
++        default n
++        help
++          This will enable support for the kernel mapping a vDSO page
++          in process space, and subsequently handing down the entry point
++          to the libc through the ELF auxiliary vector.
++
+ config M68KFPU_EMU
+ 	bool "Math emulation support (EXPERIMENTAL)"
+ 	depends on EXPERIMENTAL
+diff --git a/arch/m68k/coldfire/Makefile b/arch/m68k/coldfire/Makefile
+index 34d73b1..bf91bd3 100644
+--- a/arch/m68k/coldfire/Makefile
++++ b/arch/m68k/coldfire/Makefile
+@@ -20,3 +20,5 @@ obj-$(CONFIG_M5445X)	+= mcf5445x-devices.o
+ obj-$(CONFIG_M547X_8X)	+= m547x_8x-devices.o
+ obj-$(CONFIG_M547X_8X)	+= mcf548x-devices.o
+ obj-$(CONFIG_MCD_DMA)	+= m547x_8x-dma.o
++
++obj-$(CONFIG_VDSO)	+= vdso/
+diff --git a/arch/m68k/coldfire/vdso/Makefile b/arch/m68k/coldfire/vdso/Makefile
+new file mode 100644
+index 0000000..6d69620
+--- /dev/null
++++ b/arch/m68k/coldfire/vdso/Makefile
+@@ -0,0 +1,46 @@
++#
++# Makefile for arch/m68k/coldfire/vdso with special rules
++# for building the DSO lib
++#
++# Based on arch/sh/kernel/vsyscall/Makefile
++#
++# Kurt Mahan <kmahan@freescale.com>
++#
++
++obj-y := vdso.o vdso-bin.o
++
++$(obj)/vdso-bin.o: $(obj)/vdso.lds $(obj)/vdso-lib.so
++
++#
++# The DSO Lib
++#
++
++# special linker script for building DSO images
++quiet_cmd_vdso = VDSO $@
++      cmd_vdso = $(LD) -nostdlib --eh-frame-hdr $(SYSCFLAGS_$(@F)) \
++			-T $(obj)/vdso.lds $(filter-out FORCE,$^) -o $@
++
++vdso-flags = -shared -s -soname=linux-gate.so.1
++
++SYSCFLAGS_vdso-lib.so	= $(vdso-flags)
++
++$(obj)/vdso-lib.so: $(obj)/vdso-lib.o $(obj)/vdso-note.o FORCE
++	$(call if_changed,vdso)
++
++$(obj)/vdso.lds: $(srctree)/arch/m68k/coldfire/vdso/vdso.lds.S FORCE
++	cp $< $@
++
++#
++# Create a special relocatable object that should mirror the
++# symbol table and layout of the linked DSO lib.  With ld -R
++# these symbols can be refered to in the kernel code rather
++# than as hand-coded addresses
++#
++# extra-y += vdso-syms.o
++# $(obj)/built-in.o: $(obj)/vdso-syms.o
++# $(obj)/built-in.o: ld_flags += -R (obj)/vdso-syms.o
++
++# SYSCFLAGS_vdso-syms.o = -r
++# $(obj)/vdso-syms.o: $(src)/vdso.lds \
++# 	    $(obj)/vdso-lib.o $(obj)/vdso-note.o FORCE
++# 	$(call if_changed,vdso)
+diff --git a/arch/m68k/coldfire/vdso/vdso-bin.S b/arch/m68k/coldfire/vdso/vdso-bin.S
+new file mode 100644
+index 0000000..09da700
+--- /dev/null
++++ b/arch/m68k/coldfire/vdso/vdso-bin.S
+@@ -0,0 +1,14 @@
++/*
++ * Setup vdso lib (.so) as binary image.
++ */
++
++#include <linux/init.h>
++
++__INITDATA
++
++	.globl vdso_bin_start, vdso_bin_end
++vdso_bin_start:
++	.incbin "arch/m68k/coldfire/vdso/vdso-lib.so"
++vdso_bin_end:
++
++__FINIT
+diff --git a/arch/m68k/coldfire/vdso/vdso-lib.S b/arch/m68k/coldfire/vdso/vdso-lib.S
+new file mode 100644
+index 0000000..cd6a773
+--- /dev/null
++++ b/arch/m68k/coldfire/vdso/vdso-lib.S
+@@ -0,0 +1,143 @@
++/*
++ * VDSO userspace code
++ *
++ * Copyright (C) 2008 Freescale Semiconductor, Inc.  All rights reserved.
++ *   Kurt Mahan <kmahan@freescale.com>
++ *
++ * This is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * The TLS ptr is stored at base + 0xffc.
++ *
++ * Dwarf Information
++ *	Spec: http://dwarfstd.org/Dwarf3.pdf
++ *
++ *	M68k -> Dwarf Register Numbering:
++ *	  d0  = 0
++ *	  d7  = 7
++ *	  a0  = 8
++ *	  a7  = 15
++ *	  fp0 = 16
++ *	  fp7 = 23
++ *	  pc  = 25
++ */
++
++	.text
++/*
++ * Read the thread pointer into a0.
++ */
++	.balign	32
++	.globl	__kernel_read_tp
++	.type __kernel_read_tp,@function
++__kernel_read_tp:
++.LSTART_read_tp:
++	movel	(.LTLSPTR),%a0
++	rts
++.LEND_read_tp:
++	.size __kernel_read_tp,.-.LSTART_read_tp
++
++/*
++ * Set the thread pointer to the value in a0.
++ */
++	.balign	32
++	.globl	__kernel_write_tp
++	.type __kernel_write_tp,@function
++__kernel_write_tp:
++.LSTART_write_tp:
++	movel	%a0,(.LTLSPTR)
++	rts
++.LEND_write_tp:
++	.size __kernel_write_tp,.-.LSTART_write_tp
++
++/*
++ * Atomic compare exchange.
++ */
++	.balign	32
++	.globl	__kernel_atomic_cmpxchg_32
++	.type __kernel_atomic_cmpxchg_32,@function
++__kernel_atomic_cmpxchg_32:
++.LSTART_atomic_cmpxchg_32:
++	rts
++.LEND_atomic_cmpxchg_32:
++	.size __kernel_atomic_cmpxchg_32,.-.LSTART_atomic_cmpxchg_32
++
++/*
++ * Atomic memory barrier.  Can not clobber any registers
++ * other than condition codes.
++ */
++	.balign	32
++	.globl	__kernel_atomic_barrier
++	.type __kernel_atomic_barrier,@function
++__kernel_atomic_barrier:
++.LSTART_atomic_barrier:
++	/* no code needed for uniprocs */
++	rts
++.LEND_atomic_barrier:
++	.size __kernel_atomic_barrier,.-.LSTART_atomic_barrier
++	.previous
++
++/*
++ * Dwarf Unwind Info
++ */
++	.section .eh_frame_hdr,"a",@progbits
++.LCIE:
++	.long	.LCIE_end - .LCIE_start
++.LCIE_start:
++	.long	0		/* CIE ID */
++	.byte	0x1		/* Version number */
++	.string	"zRS"		/* NUL-terminated augmentation string */
++	.uleb128 0x1		/* Code alignment factor */
++	.sleb128 -4		/* Data alignment factor */
++	.byte	0x0a		/* Return address register column */
++				/* Augmentation length and data (none) */
++	.byte	0xc		/* DW_CFA_def_cfa */
++	.uleb128 0x8		/* a0 */
++	.uleb128 0x0		/* offset 0 */
++
++	.align 2
++.LCIE_end:
++
++	.long	.LFDE0_end-.LFDE0_start	/* Length FDE */
++.LFDE0_start:
++	.long	.LCIE			/* CIE pointer */
++	.long	.LSTART_read_tp-.	/* start address */
++	.long	.LEND_read_tp-.LSTART_read_tp
++	.uleb128 0
++	.align 2
++.LFDE0_end:
++
++	.long	.LFDE1_end-.LFDE1_start	/* Length FDE */
++.LFDE1_start:
++	.long	.LCIE			/* CIE pointer */
++	.long	.LSTART_write_tp-.	/* start address */
++	.long	.LEND_write_tp-.LSTART_read_tp
++	.uleb128 0
++	.align 2
++.LFDE1_end:
++
++	.long	.LFDE2_end-.LFDE2_start	/* Length FDE */
++.LFDE2_start:
++	.long	.LCIE			/* CIE pointer */
++	.long	.LSTART_atomic_cmpxchg_32-.	/* start address */
++	.long	.LEND_atomic_cmpxchg_32-.LSTART_atomic_cmpxchg_32
++	.uleb128 0
++	.align 2
++.LFDE2_end:
++
++	.long	.LFDE3_end-.LFDE3_start	/* Length FDE */
++.LFDE3_start:
++	.long	.LCIE			/* CIE pointer */
++	.long	.LSTART_atomic_barrier-.	/* start address */
++	.long	.LEND_atomic_barrier-.LSTART_atomic_barrier
++	.uleb128 0
++	.align 2
++.LFDE3_end:
++	.previous
++
++	.section .tlsptr,"a",@progbits
++.LTLSPTR:
++	.long	0x0		/* tls ptr loc - 0xffc */
++	.previous
++
+diff --git a/arch/m68k/coldfire/vdso/vdso-note.S b/arch/m68k/coldfire/vdso/vdso-note.S
+new file mode 100644
+index 0000000..c732e27
+--- /dev/null
++++ b/arch/m68k/coldfire/vdso/vdso-note.S
+@@ -0,0 +1,27 @@
++/*
++ * This supplies .note.* sections to go into the PT_NOTE inside the vDSO text.
++ * Here we can supply some information useful to userland.
++ *
++ * Based on arch/sh/kernel/vsyscall/vsyscall-note.S
++ */
++
++#include <linux/uts.h>
++#include <linux/version.h>
++
++#define ASM_ELF_NOTE_BEGIN(name, flags, vendor, type)			      \
++	.section name, flags;						      \
++	.balign 4;							      \
++	.long 1f - 0f;		/* name length */			      \
++	.long 3f - 2f;		/* data length */			      \
++	.long type;		/* note type */				      \
++0:	.asciz vendor;		/* vendor name */			      \
++1:	.balign 4;							      \
++2:
++
++#define ASM_ELF_NOTE_END						      \
++3:	.balign 4;		/* pad out section */			      \
++	.previous
++
++	ASM_ELF_NOTE_BEGIN(".note.kernel-version", "a", UTS_SYSNAME, 0)
++	.long LINUX_VERSION_CODE
++	ASM_ELF_NOTE_END
+diff --git a/arch/m68k/coldfire/vdso/vdso.c b/arch/m68k/coldfire/vdso/vdso.c
+new file mode 100644
+index 0000000..82939bb
+--- /dev/null
++++ b/arch/m68k/coldfire/vdso/vdso.c
+@@ -0,0 +1,103 @@
++/*
++ * arch/m68k/coldfire/vdso/vdso.c
++ *
++ * Based on arch/sh/kernel/vsyscall/vsyscall.c
++ *
++ * Copyright (C) 2008 Freescale Semiconductor, Inc.  All rights reserved.
++ *   Kurt Mahan <kmahan@freescale.com>
++ *
++ * This is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ */
++
++#include <linux/mm.h>
++#include <linux/slab.h>
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/gfp.h>
++#include <linux/module.h>
++#include <linux/elf.h>
++#include <linux/sched.h>
++#include <linux/err.h>
++
++unsigned int vdso_enabled = 1;
++EXPORT_SYMBOL_GPL(vdso_enabled);
++
++static struct page *vdso_pages[1];
++
++extern const char vdso_bin_start, vdso_bin_end;
++
++int __init vdso_init(void)
++{
++	void *vdso_page = (void *)get_zeroed_page(GFP_ATOMIC);
++	vdso_pages[0] = virt_to_page(vdso_page);
++
++	printk(KERN_INFO "** VDSO_INIT\n");
++
++	/* copy dso bin in */
++	memcpy(vdso_page,
++	       &vdso_bin_start, &vdso_bin_end - &vdso_bin_start);
++
++	return 0;
++}
++
++/* setup VMA at program startup for the vdso page */
++int arch_setup_additional_pages(struct linux_binprm *bprm,
++				int executable_stack)
++{
++	struct mm_struct *mm = current->mm;
++	unsigned long addr;
++	int ret;
++
++	printk(KERN_INFO "** arch_setup_additional_pages\n");
++
++	down_write(&mm->mmap_sem);
++	addr = get_unmapped_area(NULL, 0, PAGE_SIZE, 0, 0);
++	if (IS_ERR_VALUE(addr)) {
++		ret = addr;
++		goto up_fail;
++	}
++
++	ret = install_special_mapping(mm, addr, PAGE_SIZE,
++				      VM_READ | VM_EXEC |
++				      VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC |
++				      VM_ALWAYSDUMP,
++				      vdso_pages);
++
++	if (unlikely(ret))
++		goto up_fail;
++
++	current->mm->context.vdso = (void *)addr;
++
++up_fail:
++	up_write(&mm->mmap_sem);
++	return ret;
++}
++
++/*
++ * check vma name
++ */
++const char *arch_vma_name(struct vm_area_struct *vma)
++{
++	if (vma->vm_mm && vma->vm_start == (long)vma->vm_mm->context.vdso)
++		return "[vdso]";
++
++	return NULL;
++}
++
++struct vm_area_struct *get_gate_vma(struct task_struct *task)
++{
++	return NULL;
++}
++
++int in_gate_area(struct task_struct *task, unsigned long address)
++{
++	return 0;
++}
++
++int in_gate_area_no_task(unsigned long address)
++{
++	return 0;
++}
+diff --git a/arch/m68k/coldfire/vdso/vdso.lds.S b/arch/m68k/coldfire/vdso/vdso.lds.S
+new file mode 100644
+index 0000000..ce1690f
+--- /dev/null
++++ b/arch/m68k/coldfire/vdso/vdso.lds.S
+@@ -0,0 +1,89 @@
++/*
++ * Linker script for vdso DSO.  The vdso page is an ELF shared
++ * object prelinked to its virtual address, and with only one read-only
++ * segment (that fits in one page).  This script controls its layout.
++ *
++ * Based on arch/sh/kernel/vsyscall/vsyscall.lds.S
++ *
++ * Copyright (C) 2008 Freescale Semiconductor, Inc.  All rights reserved.
++ *   Kurt Mahan <kmahan@freescale.com>
++ *
++ * This is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ */
++
++OUTPUT_FORMAT("elf32-m68k", "elf32-m68k", "elf32-m68k")
++OUTPUT_ARCH(m68k)
++
++/* The ELF entry point can be used to set the AT_SYSINFO value.  */
++ENTRY(__kernel_read_tp);
++
++SECTIONS
++{
++	. = SIZEOF_HEADERS;
++
++	.hash		: { *(.hash) }			:text
++	.gnu.hash	: { *(.gnu.hash) }
++	.dynsym		: { *(.dynsym) }
++	.dynstr		: { *(.dynstr) }
++	.gnu.version	: { *(.gnu.version) }
++	.gnu.version_d	: { *(.gnu.version_d) }
++	.gnu.version_r	: { *(.gnu.version_r) }
++
++	/*
++	 * This linker script is used both with -r and with -shared.
++	 * For the layouts to match, we need to skip more than enough
++	 * space for the dynamic symbol table et al.  If this amount
++	 * is insufficient, ld -shared will barf.  Just increase it here.
++	 */
++	. = 0x400;
++
++	.text		: { *(.text) } 			:text	=0x90909090
++	.note		: { *(.note.*) }		:text	:note
++	.eh_frame_hdr	: { *(.eh_frame_hdr ) }		:text	:eh_frame_hdr
++	.eh_frame	: {
++		KEEP (*(.eh_frame))
++		LONG (0)
++	}						:text
++	.dynamic	: { *(.dynamic) }		:text	:dynamic
++	.useless	: {
++	      *(.got.plt) *(.got)
++	      *(.data .data.* .gnu.linkonce.d.*)
++	      *(.dynbss)
++	      *(.bss .bss.* .gnu.linkonce.b.*)
++	}						:text
++
++	/* stick our ptr somewhere we can tweak it from the kernel */
++	. = 0xffc;
++	.tlsptr		: { *(.tlsptr) }
++}
++
++/*
++ * We must supply the ELF program headers explicitly to get just one
++ * PT_LOAD segment, and set the flags explicitly to make segments read-only.
++ */
++PHDRS
++{
++	text		PT_LOAD FILEHDR PHDRS FLAGS(5);	/* PF_R|PF_X */
++	dynamic		PT_DYNAMIC FLAGS(4);		/* PF_R */
++	note		PT_NOTE FLAGS(4);		/* PF_R */
++	eh_frame_hdr	PT_GNU_EH_FRAME;
++}
++
++/*
++ * This controls what symbols we export from the DSO.
++ */
++VERSION
++{
++	LINUX_2.6 {
++	global:
++		__kernel_read_tp;
++		__kernel_write_tp;
++		__kernel_atomic_cmpxchg_32;
++		__kernel_atomic_barrier;
++
++	local: *;
++	};
++}
+diff --git a/arch/m68k/mm/cf-mmu.c b/arch/m68k/mm/cf-mmu.c
+index a067d15..30c7b10 100644
+--- a/arch/m68k/mm/cf-mmu.c
++++ b/arch/m68k/mm/cf-mmu.c
+@@ -39,7 +39,11 @@
+ 
+ #undef DEBUG
+ 
++#ifdef CONFIG_VDSO
++unsigned long next_mmu_context;
++#else
+ mm_context_t next_mmu_context;
++#endif
+ unsigned long context_map[LAST_CONTEXT / BITS_PER_LONG + 1];
+ 
+ atomic_t nr_free_contexts;
+@@ -190,7 +194,7 @@ int cf_tlb_miss(struct pt_regs *regs, int write, int dtlb, int extension_word)
+ 	}
+ 	
+         set_pte(pte, pte_mkyoung(*pte));
+-        asid = mm->context & 0xff;
++        asid = cpu_context(mm) & 0xff;
+         if (!pte_dirty(*pte) && !KMAPAREA(mmuar))
+     	    set_pte(pte, pte_wrprotect(*pte));
+ 
+diff --git a/arch/m68k/mm/init.c b/arch/m68k/mm/init.c
+index 769d908..53549b1 100644
+--- a/arch/m68k/mm/init.c
++++ b/arch/m68k/mm/init.c
+@@ -30,6 +30,10 @@
+ #endif
+ #include <asm/tlb.h>
+ 
++#ifdef CONFIG_VDSO
++int vdso_init(void);
++#endif
++
+ DEFINE_PER_CPU(struct mmu_gather, mmu_gathers);
+ 
+ static bootmem_data_t __initdata bootmem_data[MAX_NUMNODES];
+@@ -164,6 +168,11 @@ void __init mem_init(void)
+ 	       codepages << (PAGE_SHIFT-10),
+ 	       datapages << (PAGE_SHIFT-10),
+ 	       initpages << (PAGE_SHIFT-10));
++
++#ifdef CONFIG_VDSO
++	/* init the vdso page */
++	vdso_init();
++#endif
+ }
+ 
+ #ifdef CONFIG_BLK_DEV_INITRD
+diff --git a/include/asm-m68k/auxvec.h b/include/asm-m68k/auxvec.h
+index ae1ebcf..0b3cb4b 100644
+--- a/include/asm-m68k/auxvec.h
++++ b/include/asm-m68k/auxvec.h
+@@ -5,8 +5,8 @@
+  * for more of them.
+  */
+ 
+-#ifdef CONFIG_VSYSCALL
+-/* Entry point to the vsyscall page */
++#ifdef CONFIG_VDSO
++/* Entry point to the vdso page */
+ #define	AT_SYSINFO_EHDR		33
+ #endif
+ 
+diff --git a/include/asm-m68k/elf.h b/include/asm-m68k/elf.h
+index 892addd..1b739ca 100644
+--- a/include/asm-m68k/elf.h
++++ b/include/asm-m68k/elf.h
+@@ -139,13 +139,13 @@ typedef struct user_m68kfp_struct elf_fpregset_t;
+ /*
+  * VDSO
+  */
+-#ifdef CONFIG_VSYSCALL
++#ifdef CONFIG_VDSO
+ extern unsigned int vdso_enabled;
+ 
+ #define	VDSO_BASE		((unsigned long)current->mm->context.vdso)
+ #define	VDSO_SYM(x)		(VDSO_BASE + (unsigned long)(x))
+ 
+-#define	VSYSCALL_AUX_ENT					\
++#define	VDSO_AUX_ENT					\
+ 	if (vdso_enabled)					\
+ 		NEW_AUX_ENT(AT_SYSINFO_EHDR, VDSO_BASE);
+ 
+@@ -157,14 +157,14 @@ extern int arch_setup_additional_pages(struct linux_binprm *bprm,
+ 				       int executable_stack);
+ 
+ #else
+-/* no VSYSCALL_AUX_ENT */
+-#define	VSYSCALL_AUX_ENT
++/* no VDSO_AUX_ENT */
++#define	VDSO_AUX_ENT
+ #endif
+ 
+ #define ARCH_DLINFO						\
+ do {								\
+-	/* vsyscall entry */					\
+-	VSYSCALL_AUX_ENT;					\
++	/* vdso entry */					\
++	VDSO_AUX_ENT;					\
+ } while (0);
+ 
+ #endif
+diff --git a/include/asm-m68k/mmu.h b/include/asm-m68k/mmu.h
+index ccd36d2..a187a16 100644
+--- a/include/asm-m68k/mmu.h
++++ b/include/asm-m68k/mmu.h
+@@ -1,7 +1,14 @@
+ #ifndef __MMU_H
+ #define __MMU_H
+ 
++#ifdef CONFIG_VDSO
++typedef struct {
++	unsigned long		id;
++	void			*vdso;
++} mm_context_t;
++#else
+ /* Default "unsigned long" context */
+ typedef unsigned long mm_context_t;
++#endif
+ 
+ #endif
+diff --git a/include/asm-m68k/mmu_context.h b/include/asm-m68k/mmu_context.h
+index c1498bd..72edfb6 100644
+--- a/include/asm-m68k/mmu_context.h
++++ b/include/asm-m68k/mmu_context.h
+@@ -161,9 +161,23 @@ static inline void activate_mm(struct mm_struct *prev_mm,
+ #define LAST_CONTEXT		255
+ #define FIRST_CONTEXT		1
+ 
++#ifdef CONFIG_VDSO
++#define cpu_context(mm)	((mm)->context.id)
++#else
++#define cpu_context(mm)	((mm)->context)
++#endif
++
++#ifdef CONFIG_VDSO
++extern void set_context(unsigned long context, pgd_t *pgd);
++#else
+ extern void set_context(mm_context_t context, pgd_t *pgd);
++#endif
+ extern unsigned long context_map[];
++#ifdef CONFIG_VDSO
++extern unsigned long next_mmu_context;
++#else
+ extern mm_context_t next_mmu_context;
++#endif
+ 
+ extern atomic_t nr_free_contexts;
+ extern struct mm_struct *context_mm[LAST_CONTEXT+1];
+@@ -171,9 +185,13 @@ extern void steal_context(void);
+ 
+ static inline void get_mmu_context(struct mm_struct *mm)
+ {
++#ifdef CONFIG_VDSO
++	unsigned long ctx;
++#else
+ 	mm_context_t ctx;
++#endif
+ 
+-	if (mm->context != NO_CONTEXT)
++	if (cpu_context(mm) != NO_CONTEXT)
+ 		return;
+ 	while (atomic_dec_and_test_lt(&nr_free_contexts)) {
+ 		atomic_inc(&nr_free_contexts);
+@@ -186,23 +204,24 @@ static inline void get_mmu_context(struct mm_struct *mm)
+ 			ctx = 0;
+ 	}
+ 	next_mmu_context = (ctx + 1) & LAST_CONTEXT;
+-	mm->context = ctx;
++	cpu_context(mm) = ctx;
+ 	context_mm[ctx] = mm;
+ }
+ 
+ /*
+  * Set up the context for a new address space.
+  */
+-#define init_new_context(tsk, mm)	(((mm)->context = NO_CONTEXT), 0)
++#define init_new_context(tsk, mm)	((cpu_context(mm) = NO_CONTEXT), 0)
++/* #define init_new_context(tsk, mm)	(((mm)->context = NO_CONTEXT), 0) */
+ 
+ /*
+  * We're finished using the context for an address space.
+  */
+ static inline void destroy_context(struct mm_struct *mm)
+ {
+-	if (mm->context != NO_CONTEXT) {
+-		clear_bit(mm->context, context_map);
+-		mm->context = NO_CONTEXT;
++	if (cpu_context(mm) != NO_CONTEXT) {
++		clear_bit(cpu_context(mm), context_map);
++		cpu_context(mm) = NO_CONTEXT;
+ 		atomic_inc(&nr_free_contexts);
+ 	}
+ }
+@@ -211,7 +230,7 @@ static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
+ 	struct task_struct *tsk)
+ {
+ 	get_mmu_context(tsk->mm);
+-	set_context(tsk->mm->context, next->pgd);
++	set_context(cpu_context(tsk->mm), next->pgd);
+ }
+ 
+ /*
+@@ -222,7 +241,7 @@ static inline void activate_mm(struct mm_struct *active_mm,
+ 	struct mm_struct *mm)
+ {
+ 	get_mmu_context(mm);
+-	set_context(mm->context, mm->pgd);
++	set_context(cpu_context(mm), mm->pgd);
+ }
+ 
+ #define deactivate_mm(tsk, mm) do { } while (0)
+@@ -274,7 +293,7 @@ static inline void load_ksp_mmu(struct task_struct *task)
+ 	    goto bug;
+ 
+         set_pte(pte, pte_mkyoung(*pte));
+-        asid = mm->context & 0xff;
++        asid = cpu_context(mm) & 0xff;
+         if (!pte_dirty(*pte) && mmuar<=PAGE_OFFSET)
+     	    set_pte(pte, pte_wrprotect(*pte));
+ 
+diff --git a/include/asm-m68k/page.h b/include/asm-m68k/page.h
+index 00dda52..ecb4754 100644
+--- a/include/asm-m68k/page.h
++++ b/include/asm-m68k/page.h
+@@ -252,7 +252,7 @@ static inline __attribute_const__ int __virt_to_node_shift(void)
+ 
+ #include <asm-generic/page.h>
+ 
+-#ifdef CONFIG_VSYSCALL
++#ifdef CONFIG_VDSO
+ /* vDSO support */
+ #define __HAVE_ARCH_GATE_AREA
+ #endif
+-- 
+1.6.0.1
+

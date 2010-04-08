@@ -1,0 +1,41 @@
+From 69ae947b15379384efea551a286779c82f564a21 Mon Sep 17 00:00:00 2001
+From: Kurt Mahan <kmahan@freescale.com>
+Date: Fri, 22 Aug 2008 12:11:04 -0600
+Subject: [PATCH] Resolve head.o build failure on some machines.
+
+LTIBName: m5445x-head-build-fix
+Signed-off-by: Kurt Mahan <kmahan@freescale.com>
+---
+ arch/m68k/coldfire/Makefile |    2 ++
+ arch/m68k/kernel/Makefile   |    2 +-
+ 2 files changed, 3 insertions(+), 1 deletions(-)
+
+diff --git a/arch/m68k/coldfire/Makefile b/arch/m68k/coldfire/Makefile
+index 384116b..34d73b1 100644
+--- a/arch/m68k/coldfire/Makefile
++++ b/arch/m68k/coldfire/Makefile
+@@ -3,6 +3,8 @@
+ #
+ 
+ obj-y:= entry.o config.o cache.o signal.o muldi3.o traps.o ints.o
++extra-y:= head.o
++
+ ifdef CONFIG_M5445X
+ ifneq ($(strip $(CONFIG_USB) $(CONFIG_USB_GADGET_MCF5445X)),)
+ 	obj-y	+= usb.o usb/
+diff --git a/arch/m68k/kernel/Makefile b/arch/m68k/kernel/Makefile
+index d7bbfa1..9e45d81 100644
+--- a/arch/m68k/kernel/Makefile
++++ b/arch/m68k/kernel/Makefile
+@@ -11,7 +11,7 @@ ifndef CONFIG_COLDFIRE
+   obj-y := entry.o signal.o traps.o ints.o
+   obj-$(CONFIG_PCI) += bios32.o
+ else   # CONFIG_COLDFIRE
+-  extra-y := ../coldfire/head.o vmlinux.lds
++  extra-y := vmlinux.lds
+ ifdef CONFIG_M547X_8X
+   obj-$(CONFIG_PCI) += bios32_mcf548x.o
+ endif
+-- 
+1.6.0.1
+

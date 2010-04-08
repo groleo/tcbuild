@@ -1,0 +1,242 @@
+# MIPS specific config options
+
+config ARCH_mips
+    select ARCH_SUPPORTS_BOTH_ENDIAN
+    select ARCH_DEFAULT_BE
+    select ARCH_SUPPORT_ARCH
+    select ARCH_SUPPORT_ABI
+    select ARCH_SUPPORT_TUNE
+    help
+      The MIPS architecture, as defined by:
+        http://www.mips.com/
+
+
+########
+choice
+    bool
+    prompt "Variant"
+
+config ARCH_mips_4kc
+    bool
+    prompt "4kc"
+
+config ARCH_mips_4km
+    bool
+    prompt "4km"
+
+config ARCH_mips_4kp
+    bool
+    prompt "4kp"
+
+config ARCH_mips_4ksc
+    bool
+    prompt "4ksc"
+
+config ARCH_mips_4kec
+    bool
+    prompt "4kec"
+
+config ARCH_mips_4kem
+    bool
+    prompt "4kem"
+
+config ARCH_mips_4kep
+    bool
+    prompt "4kep"
+
+config ARCH_mips_4ksd
+    bool
+    prompt "4ksd"
+
+config ARCH_mips_5kc
+    bool
+    prompt "5kc"
+
+config ARCH_mips_5kf
+    bool
+    prompt "5kf"
+
+config ARCH_mips_20kc
+    bool
+    prompt "20kc"
+
+config ARCH_mips_24kc
+    bool
+    prompt "24kc"
+
+config ARCH_mips_24kf2_1
+    bool
+    prompt "24kf2_1"
+
+config ARCH_mips_24kf1_1
+    bool
+    prompt "24kf1_1"
+
+config ARCH_mips_24kec
+    bool
+    prompt "24kec"
+
+config ARCH_mips_24kef2_1
+    bool
+    prompt "24kef2_1"
+
+config ARCH_mips_24kef1_1
+    bool
+    prompt "24kef1_1"
+
+config ARCH_mips_34kc
+    bool
+    prompt "34kc"
+
+config ARCH_mips_34kf2_1
+    bool
+    prompt "34kf2_1"
+
+config ARCH_mips_34kf1_1
+    bool
+    prompt "34kf1_1"
+
+config ARCH_mips_74kc
+    bool
+    prompt "74kc"
+
+config ARCH_mips_74kf2_1
+    bool
+    prompt "74kf2_1"
+
+config ARCH_mips_74kf1_1
+    bool
+    prompt "74kf1_1"
+
+config ARCH_mips_74kf3_2
+    bool
+    prompt "74kf3_2"
+
+config ARCH_mips_loongson2e
+    bool
+    prompt "loongson2e"
+
+config ARCH_mips_loongson2f
+    bool
+    prompt "loongson2f"
+
+config ARCH_mips_m4k
+    bool
+    prompt "m4k"
+
+config ARCH_mips_octeon
+    bool
+    prompt "octeon"
+
+config ARCH_mips_orion
+    bool
+    prompt "orion"
+
+config ARCH_mips_r2000
+    bool
+    prompt "r2000"
+
+config ARCH_mips_r3000
+    bool
+    prompt "r3000"
+
+config ARCH_mips_r3900
+    bool
+    prompt "r3900"
+
+config ARCH_mips_r4000
+    bool
+    prompt "r4000"
+
+config ARCH_mips_r4400
+    bool
+    prompt "r4400"
+
+config ARCH_mips_r4600
+    bool
+    prompt "r4600"
+
+config ARCH_mips_r4650
+    bool
+    prompt "r4650"
+
+config ARCH_mips_r6000
+    bool
+    prompt "r6000"
+
+config ARCH_mips_r8000
+    bool
+    prompt "r8000"
+
+config ARCH_mips_rm7000
+    bool
+    prompt "rm7000"
+
+config ARCH_mips_rm9000
+    bool
+    prompt "rm9000"
+
+config ARCH_mips_r10000
+    bool
+    prompt "r10000"
+
+config ARCH_mips_r12000
+    bool
+    prompt "r12000"
+
+config ARCH_mips_r14000
+    bool
+    prompt "r14000"
+
+config ARCH_mips_r16000
+    bool
+    prompt "r16000"
+
+config ARCH_mips_sb1
+    bool
+    prompt "sb1"
+
+config ARCH_mips_sr71000
+    bool
+    prompt "sr71000"
+
+config ARCH_mips_vr4100
+    bool
+    prompt "vr4100"
+
+config ARCH_mips_vr4111
+    bool
+    prompt "vr4111"
+
+config ARCH_mips_vr4120
+    bool
+    prompt "vr4120"
+
+config ARCH_mips_vr4130
+    bool
+    prompt "vr4130"
+
+config ARCH_mips_vr4300
+    bool
+    prompt "vr4300"
+
+config ARCH_mips_vr5000
+    bool
+    prompt "vr5000"
+
+config ARCH_mips_vr5400
+    bool
+    prompt "vr5400"
+
+config ARCH_mips_vr5500
+    bool
+    prompt "vr5500"
+
+config ARCH_mips_and
+    bool
+    prompt "and"
+
+config ARCH_mips_xlr
+    bool
+    prompt "xlr"
+endchoice

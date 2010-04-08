@@ -1,0 +1,20 @@
+--- uClibc-0.9.30.1.orig/ldso/include/dl-syscall.h	2008-09-18 18:10:12.000000000 +0300
++++ uClibc-0.9.30.1/ldso/include/dl-syscall.h	2009-03-27 17:17:16.944491833 +0200
+@@ -152,7 +152,7 @@
+ # define __NR__dl_mmap __NR_mmap
+ static __always_inline _syscall6(void *, _dl_mmap, void *, start, size_t, length,
+                         int, prot, int, flags, int, fd, off_t, offset);
+-
++#if !defined (__mcoldfire__) // Might be a kernel problem. failed on 2.6.25
+ /* then try mmap2() */
+ #elif defined(__NR_mmap2)
+ 
+@@ -176,7 +176,7 @@
+ 	return __syscall_mmap2(addr, size, prot, flags,
+ 	                       fd, (off_t) (offset >> MMAP2_PAGE_SHIFT));
+ }
+-
++#endif
+ /* finally, fall back to mmap(), syscall1() style */
+ #elif defined(__NR_mmap)
+ 

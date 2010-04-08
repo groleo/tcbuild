@@ -1,0 +1,406 @@
+# m68k specific options
+
+config ARCH_m68k
+    select ARCH_SUPPORT_ARCH
+    select ARCH_SUPPORT_CPU
+    select ARCH_SUPPORT_TUNE
+    help
+      The m68k architecture, as defined by.
+
+########
+choice
+    bool
+    prompt "CPU Type"
+
+
+config ARCH_m68k_51
+    bool
+    prompt "51"
+
+config ARCH_m68k_51ac
+    bool
+    prompt "51ac"
+
+config ARCH_m68k_51cn
+    bool
+    prompt "51cn"
+
+config ARCH_m68k_51em
+    bool
+    prompt "51em"
+
+config ARCH_m68k_51qe
+    bool
+    prompt "51qe"
+
+config ARCH_m68k_5202
+    bool
+    prompt "5202"
+
+config ARCH_m68k_5204
+    bool
+    prompt "5204"
+
+config ARCH_m68k_5206
+    bool
+    prompt "5206"
+
+config ARCH_m68k_5206e
+    bool
+    prompt "5206e"
+
+config ARCH_m68k_5207
+    bool
+    prompt "5207"
+
+config ARCH_m68k_5208
+    bool
+    prompt "5208"
+
+config ARCH_m68k_5210a
+    bool
+    prompt "5210a"
+
+config ARCH_m68k_5211a
+    bool
+    prompt "5211a"
+
+config ARCH_m68k_5211
+    bool
+    prompt "5211"
+
+config ARCH_m68k_5212
+    bool
+    prompt "5212"
+
+config ARCH_m68k_5213
+    bool
+    prompt "5213"
+
+config ARCH_m68k_5214
+    bool
+    prompt "5214"
+
+config ARCH_m68k_5216
+    bool
+    prompt "5216"
+
+config ARCH_m68k_52230
+    bool
+    prompt "52230"
+
+config ARCH_m68k_52231
+    bool
+    prompt "52231"
+
+config ARCH_m68k_52232
+    bool
+    prompt "52232"
+
+config ARCH_m68k_52233
+    bool
+    prompt "52233"
+
+config ARCH_m68k_52234
+    bool
+    prompt "52234"
+
+config ARCH_m68k_52235
+    bool
+    prompt "52235"
+
+config ARCH_m68k_5224
+    bool
+    prompt "5224"
+
+config ARCH_m68k_5225
+    bool
+    prompt "5225"
+
+config ARCH_m68k_52252
+    bool
+    prompt "52252"
+
+config ARCH_m68k_52254
+    bool
+    prompt "52254"
+
+config ARCH_m68k_52255
+    bool
+    prompt "52255"
+
+config ARCH_m68k_52256
+    bool
+    prompt "52256"
+
+config ARCH_m68k_52258
+    bool
+    prompt "52258"
+
+config ARCH_m68k_52259
+    bool
+    prompt "52259"
+
+config ARCH_m68k_5232
+    bool
+    prompt "5232"
+
+config ARCH_m68k_5233
+    bool
+    prompt "5233"
+
+config ARCH_m68k_5234
+    bool
+    prompt "5234"
+
+config ARCH_m68k_5235
+    bool
+    prompt "5235"
+
+config ARCH_m68k_523x
+    bool
+    prompt "523x"
+
+config ARCH_m68k_5249
+    bool
+    prompt "5249"
+
+config ARCH_m68k_5250
+    bool
+    prompt "5250"
+
+config ARCH_m68k_5270
+    bool
+    prompt "5270"
+
+config ARCH_m68k_5271
+    bool
+    prompt "5271"
+
+config ARCH_m68k_5272
+    bool
+    prompt "5272"
+
+config ARCH_m68k_5274
+    bool
+    prompt "5274"
+
+config ARCH_m68k_5275
+    bool
+    prompt "5275"
+
+config ARCH_m68k_5280
+    bool
+    prompt "5280"
+
+config ARCH_m68k_5281
+    bool
+    prompt "5281"
+
+config ARCH_m68k_5282
+    bool
+    prompt "5282"
+
+config ARCH_m68k_528x
+    bool
+    prompt "528x"
+
+config ARCH_m68k_53011
+    bool
+    prompt "53011"
+
+config ARCH_m68k_53012
+    bool
+    prompt "53012"
+
+config ARCH_m68k_53013
+    bool
+    prompt "53013"
+
+config ARCH_m68k_53014
+    bool
+    prompt "53014"
+
+config ARCH_m68k_53015
+    bool
+    prompt "53015"
+
+config ARCH_m68k_53016
+    bool
+    prompt "53016"
+
+config ARCH_m68k_53017
+    bool
+    prompt "53017"
+
+config ARCH_m68k_5307
+    bool
+    prompt "5307"
+
+config ARCH_m68k_5327
+    bool
+    prompt "5327"
+
+config ARCH_m68k_5328
+    bool
+    prompt "5328"
+
+config ARCH_m68k_5329
+    bool
+    prompt "5329"
+
+config ARCH_m68k_532x
+    bool
+    prompt "532x"
+
+config ARCH_m68k_5372
+    bool
+    prompt "5372"
+
+config ARCH_m68k_5373
+    bool
+    prompt "5373"
+
+config ARCH_m68k_537x
+    bool
+    prompt "537x"
+
+config ARCH_m68k_5407
+    bool
+    prompt "5407"
+
+config ARCH_m68k_5470
+    bool
+    prompt "5470"
+
+config ARCH_m68k_5471
+    bool
+    prompt "5471"
+
+config ARCH_m68k_5472
+    bool
+    prompt "5472"
+
+config ARCH_m68k_5473
+    bool
+    prompt "5473"
+
+config ARCH_m68k_5474
+    bool
+    prompt "5474"
+
+config ARCH_m68k_5475
+    bool
+    prompt "5475"
+
+config ARCH_m68k_547x
+    bool
+    prompt "547x"
+
+config ARCH_m68k_5480
+    bool
+    prompt "5480"
+
+config ARCH_m68k_5481
+    bool
+    prompt "5481"
+
+config ARCH_m68k_5482
+    bool
+    prompt "5482"
+
+config ARCH_m68k_5483
+    bool
+    prompt "5483"
+
+config ARCH_m68k_5484
+    bool
+    prompt "5484"
+
+config ARCH_m68k_5485
+    bool
+    prompt "5485"
+endchoice
+
+########
+config ARCH_CPU
+    string
+    default "5475"   if ARCH_m68k_5475
+    default "5485"   if ARCH_m68k_5485
+    default "51" if ARCH_m68k_51
+    default "51ac" if ARCH_m68k_51ac
+    default "51cn" if ARCH_m68k_51cn
+    default "51em" if ARCH_m68k_51em
+    default "51qe" if ARCH_m68k_51qe
+    default "5202" if ARCH_m68k_5202
+    default "5204" if ARCH_m68k_5204
+    default "5206" if ARCH_m68k_5206
+    default "5206e" if ARCH_m68k_5206e
+    default "5207" if ARCH_m68k_5207
+    default "5208" if ARCH_m68k_5208
+    default "5210a" if ARCH_m68k_5210a
+    default "5211a" if ARCH_m68k_5211a
+    default "5211" if ARCH_m68k_5211
+    default "5212" if ARCH_m68k_5212
+    default "5213" if ARCH_m68k_5213
+    default "5214" if ARCH_m68k_5214
+    default "5216" if ARCH_m68k_5216
+    default "52230" if ARCH_m68k_52230
+    default "52231" if ARCH_m68k_52231
+    default "52232" if ARCH_m68k_52232
+    default "52233" if ARCH_m68k_52233
+    default "52234" if ARCH_m68k_52234
+    default "52235" if ARCH_m68k_52235
+    default "5224" if ARCH_m68k_5224
+    default "5225" if ARCH_m68k_5225
+    default "52252" if ARCH_m68k_52252
+    default "52254" if ARCH_m68k_52254
+    default "52255" if ARCH_m68k_52255
+    default "52256" if ARCH_m68k_52256
+    default "52258" if ARCH_m68k_52258
+    default "52259" if ARCH_m68k_52259
+    default "5232" if ARCH_m68k_5232
+    default "5233" if ARCH_m68k_5233
+    default "5234" if ARCH_m68k_5234
+    default "5235" if ARCH_m68k_5235
+    default "523x" if ARCH_m68k_523x
+    default "5249" if ARCH_m68k_5249
+    default "5250" if ARCH_m68k_5250
+    default "5270" if ARCH_m68k_5270
+    default "5271" if ARCH_m68k_5271
+    default "5272" if ARCH_m68k_5272
+    default "5274" if ARCH_m68k_5274
+    default "5275" if ARCH_m68k_5275
+    default "5280" if ARCH_m68k_5280
+    default "5281" if ARCH_m68k_5281
+    default "5282" if ARCH_m68k_5282
+    default "528x" if ARCH_m68k_528x
+    default "53011" if ARCH_m68k_53011
+    default "53012" if ARCH_m68k_53012
+    default "53013" if ARCH_m68k_53013
+    default "53014" if ARCH_m68k_53014
+    default "53015" if ARCH_m68k_53015
+    default "53016" if ARCH_m68k_53016
+    default "53017" if ARCH_m68k_53017
+    default "5307" if ARCH_m68k_5307
+    default "5327" if ARCH_m68k_5327
+    default "5328" if ARCH_m68k_5328
+    default "5329" if ARCH_m68k_5329
+    default "532x" if ARCH_m68k_532x
+    default "5372" if ARCH_m68k_5372
+    default "5373" if ARCH_m68k_5373
+    default "537x" if ARCH_m68k_537x
+    default "5407" if ARCH_m68k_5407
+    default "5470" if ARCH_m68k_5470
+    default "5471" if ARCH_m68k_5471
+    default "5472" if ARCH_m68k_5472
+    default "5473" if ARCH_m68k_5473
+    default "5474" if ARCH_m68k_5474
+    default "5475" if ARCH_m68k_5475
+    default "547x" if ARCH_m68k_547x
+    default "5480" if ARCH_m68k_5480
+    default "5481" if ARCH_m68k_5481
+    default "5482" if ARCH_m68k_5482
+    default "5483" if ARCH_m68k_5483
+    default "5484" if ARCH_m68k_5484
+    default "5485" if ARCH_m68k_5485

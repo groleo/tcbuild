@@ -1,0 +1,65 @@
+From c31a02d9e8f456f0adda35797a014f388391f41b Mon Sep 17 00:00:00 2001
+From: Bruce Schmid <duck@freescale.com>
+Date: Sat, 23 Aug 2008 14:04:24 -0600
+Subject: [PATCH] USB: change CONFIG_ options to include 54451
+
+LTIBName: m5445x-usb-config-54451
+Signed-off-by: Bruce Schmid <duck@freescale.com>
+---
+ drivers/usb/Kconfig      |    2 +-
+ drivers/usb/host/Kconfig |    8 ++++----
+ 2 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/usb/Kconfig b/drivers/usb/Kconfig
+index 3165903..2af2b52 100644
+--- a/drivers/usb/Kconfig
++++ b/drivers/usb/Kconfig
+@@ -55,7 +55,7 @@ config USB_ARCH_HAS_EHCI
+ 	default y if PPC_83xx
+ 	default y if SOC_AU1200
+ 	default y if ARCH_IXP4XX
+-	default y if M54455
++	default y if M5445X
+ 	default PCI
+ 
+ # ARM SA1111 chips have a non-PCI based "OHCI-compatible" USB host interface.
+diff --git a/drivers/usb/host/Kconfig b/drivers/usb/host/Kconfig
+index 8b67d85..ac66291 100644
+--- a/drivers/usb/host/Kconfig
++++ b/drivers/usb/host/Kconfig
+@@ -32,7 +32,7 @@ config USB_EHCI_HCD
+ config USB_EHCI_ROOT_HUB_TT
+ 	bool "Root Hub Transaction Translators (EXPERIMENTAL)"
+ 	depends on USB_EHCI_HCD && EXPERIMENTAL
+-	default y if M54455
++	default y if M5445X
+ 	---help---
+ 	  Some EHCI chips have vendor-specific extensions to integrate
+ 	  transaction translators, so that no OHCI or UHCI companion
+@@ -61,12 +61,12 @@ config USB_EHCI_TT_NEWSCHED
+ 
+ config USB_EHCI_BIG_ENDIAN_MMIO
+ 	bool
+-	depends on USB_EHCI_HCD && (PPC_CELLEB || PPC_PS3 || 440EPX || ARCH_IXP4XX || M54455)
++	depends on USB_EHCI_HCD && (PPC_CELLEB || PPC_PS3 || 440EPX || ARCH_IXP4XX || M5445X)
+ 	default y
+ 
+ config USB_EHCI_BIG_ENDIAN_DESC
+ 	bool
+-	depends on USB_EHCI_HCD && (440EPX || ARCH_IXP4XX || M54455)
++	depends on USB_EHCI_HCD && (440EPX || ARCH_IXP4XX || M5445X)
+ 	default y
+ 
+ config USB_EHCI_FSL
+@@ -263,7 +263,7 @@ config USB_R8A66597_HCD
+ 
+ choice
+ 	prompt "Select transceiver"
+-	depends on M54455
++	depends on M5445X
+ 	default USB_M5445X_ULPI 
+ 
+ config USB_M5445X_ULPI
+-- 
+1.6.0.1
+

@@ -1,0 +1,55 @@
+--- lsof_4.81_src/Configure	2008-10-21 19:21:45.000000000 +0300
++++ lsof_4.81_src/Configure	2009-05-07 13:25:55.651120860 +0300
+@@ -121,6 +121,9 @@
+ #			    be supplied externally
+ #	$LSOF_VSTR	    Unix dialect version as a string -- may be supplied
+ #			    externally
++#	$LSOF_USEIPV6	    (may be supplied externally)
++#	$LSOF_USELARGEFILE  (may be supplied externally)
++#	$LSOF_USERPC	    (may be supplied externally)
+ 
+ if test "X$AFS_VICE" = "X"	# {
+ then
+@@ -2542,7 +2545,13 @@
+ # Configure for Linux.
+ 
+   linux)
+-    LSOF_TSTBIGF="-D_FILE_OFFSET_BITS=64"
++    if test "X$LSOF_USELARGEFILE" = "X"	# {
++    then
++      LSOF_TSTBIGF=""
++    else
++      LSOF_TSTBIGF="-D_FILE_OFFSET_BITS=64"
++    fi # }
++
+     LSOF_TSTKMEM=0
+     if test "X$LSOF_CC" = "X"	# {
+     then
+@@ -2626,7 +2635,7 @@
+ 
+     # Test for IPv6 support.
+ 
+-    if test -r ${LSOF_INCLUDE}/netinet/ip6.h	# {
++    if test -r ${LSOF_INCLUDE}/netinet/ip6.h -a "X$LSOF_USEIPV6" !="X"	# {
+     then
+       LSOF_CFGF="$LSOF_CFGF -DHASIPv6"
+     fi	# }
+@@ -2652,7 +2661,17 @@
+       LSOF_CFGL="$LSOF_CFGL -lselinux"
+     fi	# }
+     LSOF_DIALECT_DIR="linux"
+-    LSOF_CFGF="$LSOF_CFGF -D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE"
++
++    if test "X$LSOF_USELARGEFILE" != "X"	# {
++    then
++      LSOF_CFGF="$LSOF_CFGF -D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE"
++    fi
++
++    if test -r ${LSOF_INCLUDE}/nfs/rpc.h -a "X$LSOF_USERPC" != "X" # {
++    then
++      LSOF_CFGF="$LSOF_CFGF -DHASRPC"
++    fi	# }
++    LSOF_DEBUG="-Os"
+     ;;
+ 
+ # Configure for NetBSD.

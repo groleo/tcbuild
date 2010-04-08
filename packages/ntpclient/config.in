@@ -1,0 +1,35 @@
+config NTPCLIENT
+    string
+
+choice
+    bool
+    prompt "Version"
+
+
+config NTPCLIENT_V_2007_365
+    bool
+    prompt "2007-365"
+
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+
+config NTPCLIENT_V_snapshot
+    bool
+    prompt "latest snapshot (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+config NTPCLIENT_V_specific_date
+    bool
+    prompt "<specific date> (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+endchoice
+
+config NTPCLIENT_VERSION
+    string
+    prompt "Enter date (YYYYMMDD)" if NTPCLIENT_V_specific_date
+    default "snapshot" if NTPCLIENT_V_snapshot
+    default "2007_365" if NTPCLIENT_V_2007_365
+
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!

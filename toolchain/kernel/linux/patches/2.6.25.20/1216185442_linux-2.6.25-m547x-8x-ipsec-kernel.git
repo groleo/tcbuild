@@ -1,0 +1,819 @@
+From f1e5b584cfd44f64e76ac48893859b4308dd1f3f Mon Sep 17 00:00:00 2001
+From: Kurt Mahan <kmahan@freescale.com>
+Date: Tue, 15 Jul 2008 23:17:22 -0600
+Subject: [PATCH] Add IPSEC into the kernel.
+
+LTIBName: m547x-8x-ipsec-kernel
+Signed-off-by: Kurt Mahan <kmahan@freescale.com>
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ include/openswan/ipsec_proto.h |    1 +
+ net/Kconfig                    |    4 +++
+ net/Makefile                   |    1 +
+ net/ipsec/ipcomp.c             |   22 ++++++++++----------
+ net/ipsec/ipsec_ah.c           |   17 ++++++++-------
+ net/ipsec/ipsec_esp.c          |   18 ++++++++--------
+ net/ipsec/ipsec_ipcomp.c       |    8 +++---
+ net/ipsec/ipsec_ipip.c         |    4 +-
+ net/ipsec/ipsec_ocf.c          |   22 ++++++++++----------
+ net/ipsec/ipsec_rcv.c          |   38 ++++++++++++++++++------------------
+ net/ipsec/ipsec_tunnel.c       |   42 ++++++++++++++++++++--------------------
+ net/ipsec/ipsec_xmit.c         |   18 ++++++++--------
+ net/ipsec/pfkey_v2.c           |   18 ++++++++--------
+ net/ipv4/af_inet.c             |   10 +++++++++
+ 14 files changed, 120 insertions(+), 103 deletions(-)
+
+diff --git a/include/openswan/ipsec_proto.h b/include/openswan/ipsec_proto.h
+index 58cfa1a..1a0b5a5 100644
+--- a/include/openswan/ipsec_proto.h
++++ b/include/openswan/ipsec_proto.h
+@@ -21,6 +21,7 @@
+ #ifndef _IPSEC_PROTO_H_
+ 
+ #include "ipsec_param.h"
++#include <net/ip.h>
+ 
+ /* 
+  * This file is a kernel only file that declares prototypes for
+diff --git a/net/Kconfig b/net/Kconfig
+index 6627c6a..86631ad 100644
+--- a/net/Kconfig
++++ b/net/Kconfig
+@@ -250,6 +250,10 @@ endmenu
+ source "net/rfkill/Kconfig"
+ source "net/9p/Kconfig"
+ 
++if INET
++source "net/ipsec/Kconfig"
++endif
++
+ endif   # if NET
+ endmenu # Networking
+ 
+diff --git a/net/Makefile b/net/Makefile
+index b7a1364..bc110cf 100644
+--- a/net/Makefile
++++ b/net/Makefile
+@@ -57,3 +57,4 @@ obj-$(CONFIG_NET_9P)		+= 9p/
+ ifeq ($(CONFIG_NET),y)
+ obj-$(CONFIG_SYSCTL)		+= sysctl_net.o
+ endif
++obj-$(CONFIG_KLIPS)             += ipsec/
+diff --git a/net/ipsec/ipcomp.c b/net/ipsec/ipcomp.c
+index a0422dd..4066f93 100644
+--- a/net/ipsec/ipcomp.c
++++ b/net/ipsec/ipcomp.c
+@@ -145,7 +145,7 @@ struct sk_buff *skb_compress(struct sk_buff *skb, struct ipsec_sa *ips, unsigned
+ 	}
+ 	
+ #ifdef NET_21
+-	iph = skb->nh.iph;
++	iph = ip_hdr(skb);
+ #else /* NET_21 */
+ 	iph = skb->ip_hdr;
+ #endif /* NET_21 */
+@@ -371,7 +371,7 @@ struct sk_buff *skb_decompress(struct sk_buff *skb, struct ipsec_sa *ips, unsign
+ 	}
+ 	
+ #ifdef NET_21
+-	oiph = skb->nh.iph;
++	oiph = ip_hdr(skb);
+ #else /* NET_21 */
+ 	oiph = skb->ip_hdr;
+ #endif /* NET_21 */
+@@ -490,7 +490,7 @@ struct sk_buff *skb_decompress(struct sk_buff *skb, struct ipsec_sa *ips, unsign
+ #endif /* CONFIG_KLIPS_DEBUG */
+ 
+ #ifdef NET_21
+-	iph = nskb->nh.iph;
++	iph = ip_hdr(nskb);
+ #else /* NET_21 */
+ 	iph = nskb->ip_hdr;
+ #endif /* NET_21 */
+@@ -597,7 +597,7 @@ struct sk_buff *skb_copy_ipcomp(struct sk_buff *skb, int data_growth, int gfp_ma
+          */
+ 	
+ #ifdef NET_21
+-	iph = skb->nh.iph;
++	iph = ip_hdr(skb);
+ #else /* NET_21 */
+ 	iph = skb->ip_hdr;
+ #endif /* NET_21 */
+@@ -629,16 +629,16 @@ struct sk_buff *skb_copy_ipcomp(struct sk_buff *skb, int data_growth, int gfp_ma
+ 	n->prev=NULL;
+         n->sk=NULL;
+         n->dev=skb->dev;
+-	if (skb->h.raw)
+-		n->h.raw=skb->h.raw+offset;
++	if (skb->transport_header)
++		n->transport_header=skb->transport_header+offset;
+ 	else
+-		n->h.raw=NULL;
++		n->transport_header=NULL;
+         n->protocol=skb->protocol;
+ #ifdef NET_21
+         n->csum = 0;
+         n->priority=skb->priority;
+         n->dst=dst_clone(skb->dst);
+-        n->nh.raw=skb->nh.raw+offset;
++        n->network_header=skb->network_header+offset;
+ #ifndef NETDEV_23
+         n->is_clone=0;
+ #endif /* NETDEV_23 */
+@@ -669,10 +669,10 @@ struct sk_buff *skb_copy_ipcomp(struct sk_buff *skb, int data_growth, int gfp_ma
+ 	n->users=0;
+ 	memcpy(n->proto_priv, skb->proto_priv, sizeof(skb->proto_priv));
+ #endif /* NET_21 */
+-	if (skb->mac.raw)
+-		n->mac.raw=skb->mac.raw+offset;
++	if (skb->mac_header)
++		n->mac_header=skb->mac_header+offset;
+ 	else
+-		n->mac.raw=NULL;
++		n->mac_header=NULL;
+ #ifndef NETDEV_23
+ 	n->used=skb->used;
+ #endif /* !NETDEV_23 */
+diff --git a/net/ipsec/ipsec_ah.c b/net/ipsec/ipsec_ah.c
+index 29e28c6..b17b730 100644
+--- a/net/ipsec/ipsec_ah.c
++++ b/net/ipsec/ipsec_ah.c
+@@ -77,7 +77,7 @@ ipsec_rcv_ah_checks(struct ipsec_rcv_state *irs,
+ 	ahminlen = irs->hard_header_len + sizeof(struct iphdr);
+ 
+ 	/* take care not to deref this pointer until we check the minlen though */
+-	irs->protostuff.ahstuff.ahp = (struct ahhdr *)skb->h.raw;
++	irs->protostuff.ahstuff.ahp = (struct ahhdr *)skb->transport_header;
+ 
+ 	if((skb->len < ahminlen+sizeof(struct ahhdr)) ||
+ 	   (skb->len < ahminlen+(irs->protostuff.ahstuff.ahp->ah_hl << 2))) {
+@@ -170,7 +170,7 @@ ipsec_rcv_ah_authcalc(struct ipsec_rcv_state *irs,
+ 
+ 	/* finally, do the packet contents themselves */
+ 	(*aa->update)((void*)&tctx,
+-		      (caddr_t)skb->h.raw + ahhlen,
++		      (caddr_t)skb->transport_header + ahhlen,
+ 		      skb->len - ahhlen);
+ 
+ 	(*aa->final)(irs->hash, (void *)&tctx);
+@@ -201,8 +201,9 @@ ipsec_rcv_ah_decap(struct ipsec_rcv_state *irs)
+ 	 * move the IP header forward by the size of the AH header, which
+ 	 * will remove the the AH header from the packet.
+ 	 */
+-	memmove((void *)(skb->nh.raw + ahhlen),
+-		(void *)(skb->nh.raw), irs->iphlen);
++	memmove((void *)(skb->network_header + ahhlen),
++		(void *)(skb->network_header), irs->iphlen);
++
+ 
+ 	ipsec_rcv_dmp("ah postmove", skb->data, skb->len);
+ 
+@@ -219,10 +220,10 @@ ipsec_rcv_ah_decap(struct ipsec_rcv_state *irs)
+ 	}
+ 	skb_pull(skb, ahhlen);
+ 
+-	skb->nh.raw = skb->nh.raw + ahhlen;
+-	irs->ipp = skb->nh.iph;
++	skb->network_header = skb->network_header + ahhlen;
++	irs->ipp = ip_hdr(skb);
+ 
+-	ipsec_rcv_dmp("ah postpull", (void *)skb->nh.iph, skb->len);
++	ipsec_rcv_dmp("ah postpull", (void *)ip_hdr(skb), skb->len);
+ 
+ 	return IPSEC_RCV_OK;
+ }
+@@ -315,7 +316,7 @@ ipsec_xmit_ah_setup(struct ipsec_xmit_state *ixs)
+     return IPSEC_XMIT_AH_BADALG;
+   }
+ #ifdef NET_21
+-  ixs->skb->h.raw = (unsigned char*)ahp;
++  ixs->skb->transport_header = (unsigned char*)ahp;
+ #endif /* NET_21 */
+ 
+   return IPSEC_XMIT_OK;
+diff --git a/net/ipsec/ipsec_esp.c b/net/ipsec/ipsec_esp.c
+index c405680..177359c 100644
+--- a/net/ipsec/ipsec_esp.c
++++ b/net/ipsec/ipsec_esp.c
+@@ -114,7 +114,7 @@ ipsec_rcv_esp_checks(struct ipsec_rcv_state *irs,
+ 		return IPSEC_RCV_BADLEN;
+ 	}
+ 
+-	irs->protostuff.espstuff.espp = (struct esphdr *)skb->h.raw;
++	irs->protostuff.espstuff.espp = (struct esphdr *)skb->transport_header;
+ 	irs->said.spi = irs->protostuff.espstuff.espp->esp_spi;
+ 
+ 	return IPSEC_RCV_OK;
+@@ -141,7 +141,7 @@ ipsec_rcv_esp_decrypt_setup(struct ipsec_rcv_state *irs,
+ 		    irs->sa_len ? irs->sa : " (error)");
+ 
+ 	*replay = ntohl(espp->esp_rpl);
+-	*authenticator = &(skb->h.raw[irs->ilen]);
++	*authenticator = &(skb->transport_header[irs->ilen]);
+ 
+ 	return IPSEC_RCV_OK;
+ }
+@@ -223,7 +223,7 @@ ipsec_rcv_esp_decrypt(struct ipsec_rcv_state *irs)
+ 
+ 	skb=irs->skb;
+ 
+-	idat = skb->h.raw;
++	idat = skb->transport_header;
+ 
+ 	/* encaplen is the distance between the end of the IP
+ 	 * header and the beginning of the ESP header.
+@@ -233,7 +233,7 @@ ipsec_rcv_esp_decrypt(struct ipsec_rcv_state *irs)
+ 	 * Note: UDP-encap code has already moved the
+ 	 *       skb->data forward to accomodate this.
+ 	 */
+-	encaplen = skb->h.raw - (skb->nh.raw + irs->iphlen);
++	encaplen = skb->transport_header - (skb->network_header + irs->iphlen);
+ 
+ 	ixt_e=ipsp->ips_alg_enc;
+ 	irs->esphlen = ESP_HEADER_LEN + ixt_e->ixt_common.ixt_support.ias_ivlen/8;
+@@ -278,7 +278,7 @@ ipsec_rcv_esp_post_decrypt(struct ipsec_rcv_state *irs)
+ 
+ 	skb = irs->skb;
+ 
+-	idat = skb->h.raw + irs->esphlen;
++	idat = skb->transport_header + irs->esphlen;
+ 
+ 	ESP_DMP("postdecrypt", idat, irs->ilen);
+ 
+@@ -341,7 +341,7 @@ ipsec_rcv_esp_post_decrypt(struct ipsec_rcv_state *irs)
+ 	 *
+ 	 */
+ 	memmove((void *)(idat - irs->iphlen),
+-		(void *)(skb->nh.raw), irs->iphlen);
++		(void *)(skb->network_header), irs->iphlen);
+ 
+ 	ESP_DMP("esp postmove", (idat - irs->iphlen),
+ 		irs->iphlen + irs->ilen);
+@@ -357,8 +357,8 @@ ipsec_rcv_esp_post_decrypt(struct ipsec_rcv_state *irs)
+ 		return IPSEC_RCV_ESP_DECAPFAIL;
+ 	}
+ 	skb_pull(skb, irs->esphlen);
+-	skb->nh.raw = idat - irs->iphlen;
+-	irs->ipp = skb->nh.iph;
++	skb->network_header = idat - irs->iphlen;
++	irs->ipp = ip_hdr(skb);
+ 
+ 	ESP_DMP("esp postpull", skb->data, skb->len);
+ 
+@@ -522,7 +522,7 @@ ipsec_xmit_esp_setup(struct ipsec_xmit_state *ixs)
+     return IPSEC_XMIT_AH_BADALG;
+   }
+ 
+-  ixs->skb->h.raw = (unsigned char*)espp;
++  ixs->skb->transport_header = (unsigned char*)espp;
+ 
+   return IPSEC_XMIT_OK;
+ }
+diff --git a/net/ipsec/ipsec_ipcomp.c b/net/ipsec/ipsec_ipcomp.c
+index 6d8d6f8..18c1f35 100644
+--- a/net/ipsec/ipsec_ipcomp.c
++++ b/net/ipsec/ipsec_ipcomp.c
+@@ -92,7 +92,7 @@ ipsec_rcv_ipcomp_checks(struct ipsec_rcv_state *irs,
+ 		return IPSEC_RCV_BADLEN;
+ 	}
+ 
+-	irs->protostuff.ipcompstuff.compp = (struct ipcomphdr *)skb->h.raw;
++	irs->protostuff.ipcompstuff.compp = (struct ipcomphdr *)skb->transport_header;
+ 	irs->said.spi = htonl((__u32)ntohs(irs->protostuff.ipcompstuff.compp->ipcomp_cpi));
+ 	return IPSEC_RCV_OK;
+ }
+@@ -106,7 +106,7 @@ ipsec_rcv_ipcomp_decomp(struct ipsec_rcv_state *irs)
+ 
+ 	skb=irs->skb;
+ 
+-	ipsec_xmit_dmp("ipcomp", skb->h.raw, skb->len);
++	ipsec_xmit_dmp("ipcomp", skb->transport_header, skb->len);
+ 
+ 	if(ipsp == NULL) {
+ 		return IPSEC_RCV_SAIDNOTFOUND;
+@@ -163,7 +163,7 @@ ipsec_rcv_ipcomp_decomp(struct ipsec_rcv_state *irs)
+ 	irs->skb = skb;
+ 	
+ #ifdef NET_21
+-	irs->ipp = skb->nh.iph;
++	irs->ipp = ip_hdr(skb);
+ #else /* NET_21 */
+ 	irs->ipp = skb->ip_hdr;
+ #endif /* NET_21 */
+@@ -196,7 +196,7 @@ ipsec_xmit_ipcomp_setup(struct ipsec_xmit_state *ixs)
+   ixs->skb = skb_compress(ixs->skb, ixs->ipsp, &flags);
+ 
+ #ifdef NET_21
+-  ixs->iph = ixs->skb->nh.iph;
++  ixs->iph = ip_hdr(ixs->skb);
+ #else /* NET_21 */
+   ixs->iph = ixs->skb->ip_hdr;
+ #endif /* NET_21 */
+diff --git a/net/ipsec/ipsec_ipip.c b/net/ipsec/ipsec_ipip.c
+index 2e90e90..dba19c4 100644
+--- a/net/ipsec/ipsec_ipip.c
++++ b/net/ipsec/ipsec_ipip.c
+@@ -73,7 +73,7 @@ ipsec_xmit_ipip_setup(struct ipsec_xmit_state *ixs)
+   switch(sysctl_ipsec_tos) {
+   case 0:
+ #ifdef NET_21
+-    ixs->iph->tos = ixs->skb->nh.iph->tos;
++    ixs->iph->tos = ip_hdr(ixs->skb)->tos;
+ #else /* NET_21 */
+     ixs->iph->tos = ixs->skb->ip_hdr->tos;
+ #endif /* NET_21 */
+@@ -97,7 +97,7 @@ ipsec_xmit_ipip_setup(struct ipsec_xmit_state *ixs)
+   ixs->newsrc = (__u32)ixs->iph->saddr;
+   
+ #ifdef NET_21
+-  ixs->skb->h.ipiph = ixs->skb->nh.iph;
++	ixs->skb->transport_header = (sk_buff_data_t)ip_hdr(ixs->skb);
+ #endif /* NET_21 */
+   return IPSEC_XMIT_OK;
+ }
+diff --git a/net/ipsec/ipsec_ocf.c b/net/ipsec/ipsec_ocf.c
+index 5e08a0d..8bcdb60 100644
+--- a/net/ipsec/ipsec_ocf.c
++++ b/net/ipsec/ipsec_ocf.c
+@@ -106,7 +106,7 @@ module_param(ocf_xmit_calls_failed, int, 0444);
+ 		schedule_work(&(wq)); \
+ 	})
+ #else
+-#define PROCESS_LATER(wq, sm, arg) \		
++#define PROCESS_LATER(wq, sm, arg) \
+ 	({ \
+ 		INIT_WORK(&(wq), (void (*)(void *))(sm), (void *)(arg)); \
+ 		schedule_work(&(wq)); \
+@@ -261,8 +261,8 @@ ipsec_ocf_ipcomp_copy_expand (struct ipsec_rcv_state *irs)
+ 
+         memcpy (nskb->head, irs->skb->head, skb_headroom(irs->skb));
+ 
+-        nskb->nh.raw = nskb->data + (irs->skb->nh.raw - irs->skb->data);
+-        nskb->h.raw  = nskb->data + (irs->skb->h.raw - irs->skb->data);
++        nskb->network_header = nskb->data + skb_network_offset(irs->skb);
++        nskb->transport_header  = nskb->data + (irs->skb->transport_header - irs->skb->data);
+ 
+         // update all irs pointers
+         ptr_delta = nskb->data - irs->skb->data;
+@@ -573,8 +573,8 @@ ipsec_ocf_rcv_cb(struct cryptop *crp)
+                 memmove (newiph, irs->ipp, irs->iphlen);
+                 irs->ipp = newiph;
+ 
+-                irs->skb->nh.raw += sizeof (struct ipcomphdr);
+-                irs->skb->h.raw += sizeof (struct ipcomphdr);
++                irs->skb->network_header += sizeof (struct ipcomphdr);
++                irs->skb->transport_header += sizeof (struct ipcomphdr);
+ 
+                 // adjust the ipp pointer to point to the header we decoded
+                 //irs->ipp = (void*)((char*)irs->ipp - irs->iphlen;
+@@ -591,7 +591,7 @@ ipsec_ocf_rcv_cb(struct cryptop *crp)
+                 safe_skb_put (irs->skb, decomp_len - orig_len);
+ 
+                 // set the new header in the skb
+-                irs->skb->nh.iph = irs->ipp;
++                irs->skb->network_header = (sk_buff_data_t)irs->ipp;
+ 
+                 // relese the backup copy
+                 if (irs->pre_ipcomp_skb) {
+@@ -740,7 +740,7 @@ ipsec_ocf_rcv(struct ipsec_rcv_state *irs)
+ 
+ 		irs->esphlen     = ESP_HEADER_LEN + ipsp->ips_iv_size;
+ 		irs->ilen       -= irs->esphlen;
+-		crde->crd_skip   = (irs->skb->h.raw - irs->skb->data) + irs->esphlen;
++		crde->crd_skip   = (irs->skb->transport_header - irs->skb->data) + irs->esphlen;
+ 		crde->crd_len    = irs->ilen;
+ 		crde->crd_inject = crde->crd_skip - ipsp->ips_iv_size;
+ 		crde->crd_klen   = ipsp->ips_key_bits_e;
+@@ -871,8 +871,8 @@ ipsec_ocf_xmit_cb(struct cryptop *crp)
+ 			ipsec_skb_gc_enqueue(ixs->skb);
+ 
+                         ixs->skb = ixs->pre_ipcomp_skb;
+-                        ixs->skb->nh.raw  += ptr_delta;
+-                        ixs->skb->h.raw   += ptr_delta;
++                        ixs->skb->network_header  += ptr_delta;
++                        ixs->skb->transport_header   += ptr_delta;
+                         ixs->pre_ipcomp_skb = NULL;
+ 
+                         // this means we don't compress
+@@ -921,8 +921,8 @@ ipsec_ocf_xmit_cb(struct cryptop *crp)
+                 memmove (newiph, ixs->iph, ixs->iphlen);
+                 ixs->iph = newiph;
+ 
+-                ixs->skb->nh.raw -= sizeof (struct ipcomphdr);
+-                ixs->skb->h.raw -= sizeof (struct ipcomphdr);
++                ixs->skb->network_header -= sizeof (struct ipcomphdr);
++                ixs->skb->transport_header -= sizeof (struct ipcomphdr);
+ 
+                 // now we can fill in the ipcomp header
+                 cmph->ipcomp_nh = ixs->next_header;
+diff --git a/net/ipsec/ipsec_rcv.c b/net/ipsec/ipsec_rcv.c
+index f1380f8..3e22c23 100644
+--- a/net/ipsec/ipsec_rcv.c
++++ b/net/ipsec/ipsec_rcv.c
+@@ -516,7 +516,7 @@ ipsec_rcv_init(struct ipsec_rcv_state *irs)
+ 	/* dev->hard_header_len is unreliable and should not be used */
+ 	/* klips26_rcv_encap will have already set hard_header_len for us */
+ 	if (irs->hard_header_len == 0) {
+-		irs->hard_header_len = skb->mac.raw ? (skb->nh.raw - skb->mac.raw) : 0;
++	  irs->hard_header_len = skb->mac_header ? (skb->network_header - skb->mac_header) : 0;
+ 		if((irs->hard_header_len < 0) || (irs->hard_header_len > skb_headroom(skb)))
+ 			irs->hard_header_len = 0;
+ 	}
+@@ -541,7 +541,7 @@ ipsec_rcv_init(struct ipsec_rcv_state *irs)
+         }
+ #endif /* IP_FRAGMENT_LINEARIZE */
+ 
+-	ipp = skb->nh.iph;
++	ipp = ip_hdr(skb);
+ 
+ #if defined(CONFIG_IPSEC_NAT_TRAVERSAL) && !defined(NET_26)
+ 	if (irs->natt_len) {
+@@ -1078,7 +1078,7 @@ ipsec_rcv_auth_init(struct ipsec_rcv_state *irs)
+ 	}
+ 
+ 	/* ilen counts number of bytes in ESP portion */
+-	irs->ilen = ((irs->skb->data + irs->skb->len) - irs->skb->h.raw) - irs->authlen;
++	irs->ilen = ((irs->skb->data + irs->skb->len) - irs->skb->transport_header) - irs->authlen;
+ 	if(irs->ilen <= 0) {
+ 	  KLIPS_PRINT(debug_rcv,
+ 		      "klips_debug:ipsec_rcv: "
+@@ -1256,9 +1256,9 @@ ipsec_rcv_decap_cont(struct ipsec_rcv_state *irs)
+ 	 */
+ 	skb = irs->skb;
+ 	irs->len = skb->len;
+-	ipp = irs->ipp = skb->nh.iph;
++	ipp = irs->ipp = ip_hdr(skb);
+ 	irs->iphlen = ipp->ihl<<2;
+-	skb->h.raw = skb->nh.raw + irs->iphlen;
++	skb->transport_header = skb->network_header + irs->iphlen;
+ 
+ 	/* zero any options that there might be */
+ 	memset(&(IPCB(skb)->opt), 0, sizeof(struct ip_options));
+@@ -1276,7 +1276,7 @@ ipsec_rcv_decap_cont(struct ipsec_rcv_state *irs)
+ 	ipp->protocol = irs->next_header;
+ 
+ 	ipp->check = 0;	/* NOTE: this will be included in checksum */
+-	ipp->check = ip_fast_csum((unsigned char *)skb->nh.iph, irs->iphlen >> 2);
++	ipp->check = ip_fast_csum((unsigned char *)ip_hdr(skb), irs->iphlen >> 2);
+ 
+ 	KLIPS_PRINT(debug_rcv & DB_RX_PKTRX,
+ 		    "klips_debug:ipsec_rcv: "
+@@ -1566,14 +1566,14 @@ ipsec_rcv_cleanup(struct ipsec_rcv_state *irs)
+ 			 * options, but also by any UDP/ESP encap there might
+ 			 * have been, and this deals with all cases.
+ 			 */
+-			skb_pull(skb, (skb->h.raw - skb->nh.raw));
++			skb_pull(skb, skb_network_header_len(skb));
+ 			
+ 			/* new L3 header is where L4 payload was */
+-			skb->nh.raw = skb->h.raw;
++			skb->network_header = skb->transport_header;
+ 			
+ 			/* now setup new L4 payload location */
+-			ipp = (struct iphdr *)skb->nh.raw;
+-			skb->h.raw = skb->nh.raw + (ipp->ihl << 2);
++			ipp = (struct iphdr *)skb->network_header;
++			skb->transport_header = skb->network_header + (ipp->ihl << 2);
+ 			
+ 			
+ 			/* remove any saved options that we might have,
+@@ -1657,12 +1657,12 @@ ipsec_rcv_cleanup(struct ipsec_rcv_state *irs)
+ 
+ 	skb->pkt_type = PACKET_HOST;
+ 	if(irs->hard_header_len &&
+-	   (skb->mac.raw != (skb->nh.raw - irs->hard_header_len)) &&
++	   (skb->mac_header != (skb->network_header - irs->hard_header_len)) &&
+ 	   (irs->hard_header_len <= skb_headroom(skb))) {
+ 		/* copy back original MAC header */
+-		memmove(skb->nh.raw - irs->hard_header_len,
+-			skb->mac.raw, irs->hard_header_len);
+-		skb->mac.raw = skb->nh.raw - irs->hard_header_len;
++		memmove(skb->network_header - irs->hard_header_len,
++			skb->mac_header, irs->hard_header_len);
++		skb->mac_header = skb->network_header - irs->hard_header_len;
+ 	}
+ 	return IPSEC_RCV_OK;
+ }
+@@ -1720,11 +1720,11 @@ ipsec_rcv_complete(struct ipsec_rcv_state *irs)
+ 	 * pointers wind up a different for 2.6 vs 2.4, so we just fudge it here.
+ 	 */
+ #ifdef NET_26
+-	irs->skb->data = skb_push(irs->skb, irs->skb->h.raw - irs->skb->nh.raw);
++	irs->skb->data = skb_push(irs->skb, irs->skb->transport_header - irs->skb->network_header);
+ #else
+-	irs->skb->data = irs->skb->nh.raw;
++	irs->skb->data = irs->skb->network_header;
+ 	{
+-	  struct iphdr *iph = irs->skb->nh.iph;
++	  struct iphdr *iph = ip_hdr(irs->skb);
+ 	  int len = ntohs(iph->tot_len);
+ 	  irs->skb->len  = len;
+ 	}
+@@ -2072,7 +2072,7 @@ error_alloc:
+ // this handles creating and managing state for recv path
+ 
+ static spinlock_t irs_cache_lock = SPIN_LOCK_UNLOCKED;
+-static kmem_cache_t *irs_cache_allocator = NULL;
++static struct kmem_cache *irs_cache_allocator = NULL;
+ 
+ int
+ ipsec_rcv_state_cache_init (void)
+@@ -2084,7 +2084,7 @@ ipsec_rcv_state_cache_init (void)
+ 
+         irs_cache_allocator = kmem_cache_create ("ipsec_irs",
+                 sizeof (struct ipsec_rcv_state), 0,
+-                0, NULL, NULL);
++                0, NULL);
+         if (! irs_cache_allocator)
+                 return -ENOMEM;
+ 
+diff --git a/net/ipsec/ipsec_tunnel.c b/net/ipsec/ipsec_tunnel.c
+index 96e5e40..c62ae69 100644
+--- a/net/ipsec/ipsec_tunnel.c
++++ b/net/ipsec/ipsec_tunnel.c
+@@ -602,10 +602,10 @@ ipsec_tunnel_send(struct ipsec_xmit_state*ixs)
+ 	ixs->skb->dev = ixs->physdev;
+ 	memset (&fl, 0x0, sizeof (struct flowi));
+  	fl.oif = ixs->physdev->iflink;
+- 	fl.nl_u.ip4_u.daddr = ixs->skb->nh.iph->daddr;
+- 	fl.nl_u.ip4_u.saddr = ixs->pass ? 0 : ixs->skb->nh.iph->saddr;
+- 	fl.nl_u.ip4_u.tos = RT_TOS(ixs->skb->nh.iph->tos);
+- 	fl.proto = ixs->skb->nh.iph->protocol;
++ 	fl.nl_u.ip4_u.daddr = ip_hdr(ixs->skb)->daddr;
++ 	fl.nl_u.ip4_u.saddr = ixs->pass ? 0 : ip_hdr(ixs->skb)->saddr;
++ 	fl.nl_u.ip4_u.tos = RT_TOS(ip_hdr(ixs->skb)->tos);
++ 	fl.proto = ip_hdr(ixs->skb)->protocol;
+  	if ((ixs->error = ip_route_output_key(&ixs->route, &fl))) {
+ 		ixs->stats->tx_errors++;
+ 		KLIPS_PRINT(debug_tunnel & DB_TN_XMIT,
+@@ -628,16 +628,16 @@ ipsec_tunnel_send(struct ipsec_xmit_state*ixs)
+ 	dst_release(ixs->skb->dst);
+ 	ixs->skb->dst = &ixs->route->u.dst;
+ 	ixs->stats->tx_bytes += ixs->skb->len;
+-	if(ixs->skb->len < ixs->skb->nh.raw - ixs->skb->data) {
++	if(ixs->skb->len < skb_network_offset(ixs->skb)) {
+ 		ixs->stats->tx_errors++;
+ 		printk(KERN_WARNING
+ 		       "klips_error:ipsec_xmit_send: "
+ 		       "tried to __skb_pull nh-data=%ld, %d available.  This should never happen, please report.\n",
+-		       (unsigned long)(ixs->skb->nh.raw - ixs->skb->data),
++		       (unsigned long)(skb_network_offset(ixs->skb)),
+ 		       ixs->skb->len);
+ 		return IPSEC_XMIT_PUSHPULLERR;
+ 	}
+-	__skb_pull(ixs->skb, ixs->skb->nh.raw - ixs->skb->data);
++	__skb_pull(ixs->skb, skb_network_offset(ixs->skb));
+ #ifdef SKB_RESET_NFCT
+ 	if(!ixs->pass) {
+ 	  nf_conntrack_put(ixs->skb->nfct);
+@@ -651,7 +651,7 @@ ipsec_tunnel_send(struct ipsec_xmit_state*ixs)
+ 		    "klips_debug:ipsec_xmit_send: "
+ 		    "...done, calling ip_send() on device:%s\n",
+ 		    ixs->skb->dev ? ixs->skb->dev->name : "NULL");
+-	KLIPS_IP_PRINT(debug_tunnel & DB_TN_XMIT, ixs->skb->nh.iph);
++	KLIPS_IP_PRINT(debug_tunnel & DB_TN_XMIT, ip_hdr(ixs->skb));
+ 	{
+ 		int err;
+ 
+@@ -951,8 +951,8 @@ ipsec_tunnel_hard_header(struct sk_buff *skb, struct net_device *dev,
+ #ifdef NET_21
+ 			KLIPS_PRINTMORE(debug_tunnel & DB_TN_REVEC,
+ 					"ip=%08x->%08x\n",
+-					(__u32)ntohl(skb->nh.iph->saddr),
+-					(__u32)ntohl(skb->nh.iph->daddr) );
++					(__u32)ntohl(ip_hdr(skb)->saddr),
++					(__u32)ntohl(ip_hdr(skb)->daddr) );
+ #else /* NET_21 */
+ 			KLIPS_PRINTMORE(debug_tunnel & DB_TN_REVEC,
+ 					"ip=%08x->%08x\n",
+@@ -977,8 +977,8 @@ ipsec_tunnel_hard_header(struct sk_buff *skb, struct net_device *dev,
+ #ifdef NET_21
+ 		KLIPS_PRINTMORE(debug_tunnel & DB_TN_REVEC,
+ 			    "ip=%08x->%08x\n",
+-			    (__u32)ntohl(skb->nh.iph->saddr),
+-			    (__u32)ntohl(skb->nh.iph->daddr) );
++				(__u32)ntohl(ip_hdr(skb)->saddr),
++				(__u32)ntohl(ip_hdr(skb)->daddr) );
+ #else /* NET_21 */
+ 		KLIPS_PRINTMORE(debug_tunnel & DB_TN_REVEC,
+ 			    "ip=%08x->%08x\n",
+@@ -1044,8 +1044,8 @@ ipsec_tunnel_rebuild_header(void *buff, struct net_device *dev,
+ #ifdef NET_21
+ 		KLIPS_PRINT(debug_tunnel & DB_TN_REVEC,
+ 			    "ip=%08x->%08x\n",
+-			    (__u32)ntohl(skb->nh.iph->saddr),
+-			    (__u32)ntohl(skb->nh.iph->daddr) );
++			    (__u32)ntohl(ip_hdr(skb)->saddr),
++			    (__u32)ntohl(ip_hdr(skb)->daddr) );
+ #else /* NET_21 */
+ 		KLIPS_PRINT(debug_tunnel & DB_TN_REVEC,
+ 			    "ip=%08x->%08x\n",
+@@ -1063,8 +1063,8 @@ ipsec_tunnel_rebuild_header(void *buff, struct net_device *dev,
+ #ifdef NET_21
+ 	KLIPS_PRINT(debug_tunnel & DB_TN_REVEC,
+ 		    "ip=%08x->%08x\n",
+-		    (__u32)ntohl(skb->nh.iph->saddr),
+-		    (__u32)ntohl(skb->nh.iph->daddr) );
++		    (__u32)ntohl(ip_hdr(skb)->saddr),
++		    (__u32)ntohl(ip_hdr(skb)->daddr) );
+ #else /* NET_21 */
+ 	KLIPS_PRINT(debug_tunnel & DB_TN_REVEC,
+ 		    "ip=%08x->%08x\n",
+@@ -1517,7 +1517,7 @@ ipsec_tunnel_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
+ 		if (colon) *colon = 0;
+ 		them = ipsec_dev_get(realphysname);
+ #else /* CONFIG_IP_ALIAS */
+-		them = ipsec_dev_get(cf->cf_name);
++		them = ipsec_dev_get(&init_net, cf->cf_name);
+ #endif /* CONFIG_IP_ALIAS */
+ 
+ 		if (them == NULL) {
+@@ -1769,7 +1769,7 @@ ipsec_tunnel_init(struct net_device *dev)
+ 	dev->set_multicast_list = NULL;
+ 	dev->do_ioctl		= ipsec_tunnel_ioctl;
+ 	dev->hard_header	= NULL;
+-	dev->rebuild_header 	= NULL;
++	dev->rebuild_header     = NULL;
+ 	dev->set_mac_address 	= NULL;
+ #ifndef NET_21
+ 	dev->header_cache_bind 	= NULL;
+@@ -1858,7 +1858,7 @@ ipsec_tunnel_init_devices(void)
+ 		memset((caddr_t)dev_ipsec->name, 0, IFNAMSIZ);
+ 		strncpy(dev_ipsec->name, name, IFNAMSIZ);
+ #endif /* NETDEV_23 */
+-		dev_ipsec->next = NULL;
++		dev_ipsec->dev_list.next = NULL;
+ 		dev_ipsec->init = &ipsec_tunnel_probe;
+ 		KLIPS_PRINT(debug_tunnel & DB_TN_INIT,
+ 			    "klips_debug:ipsec_tunnel_init_devices: "
+@@ -1922,7 +1922,7 @@ ipsec_tunnel_cleanup_devices(void)
+ // this handles creating and managing state for xmit path
+ 
+ static spinlock_t ixs_cache_lock = SPIN_LOCK_UNLOCKED;
+-static kmem_cache_t *ixs_cache_allocator = NULL;
++static struct kmem_cache *ixs_cache_allocator = NULL;
+ 
+ int
+ ipsec_xmit_state_cache_init (void)
+@@ -1934,7 +1934,7 @@ ipsec_xmit_state_cache_init (void)
+ 
+         ixs_cache_allocator = kmem_cache_create ("ipsec_ixs",
+                 sizeof (struct ipsec_xmit_state), 0,
+-                0, NULL, NULL);
++                0, NULL);
+         if (! ixs_cache_allocator)
+                 return -ENOMEM;
+ 
+diff --git a/net/ipsec/ipsec_xmit.c b/net/ipsec/ipsec_xmit.c
+index 849efac..b567bed 100644
+--- a/net/ipsec/ipsec_xmit.c
++++ b/net/ipsec/ipsec_xmit.c
+@@ -493,7 +493,7 @@ ipsec_xmit_sanity_check_skb(struct ipsec_xmit_state *ixs)
+ 		}
+ 	}
+ 
+-	ixs->iph = ixs->skb->nh.iph;
++	ixs->iph = ip_hdr(ixs->skb);
+ 
+ 	/* sanity check for IP version as we can't handle IPv6 right now */
+ 	if (ixs->iph->version != 4) {
+@@ -688,7 +688,7 @@ ipsec_xmit_encap_init(struct ipsec_xmit_state *ixs)
+ 	ixs->iph = (struct iphdr *)ixs->dat;
+ 	ixs->iph->tot_len = htons(ixs->skb->len);
+ 
+-        ixs->skb->nh.iph = ixs->iph;
++        ixs->skb->network_header = (sk_buff_data_t)ixs->iph;
+ 
+ 	return IPSEC_XMIT_OK;
+ }
+@@ -741,7 +741,7 @@ ipsec_xmit_esp(struct ipsec_xmit_state *ixs)
+ 
+ 	ixs->espp = (struct esphdr *)(ixs->dat + ixs->iphlen);
+ #ifdef NET_21
+-	ixs->skb->h.raw = (unsigned char*)ixs->espp;
++	ixs->skb->transport_header = (unsigned char*)ixs->espp;
+ #endif /* NET_21 */
+ 	ixs->espp->esp_spi = ixs->ipsp->ips_said.spi;
+ 	ixs->espp->esp_rpl = htonl(++(ixs->ipsp->ips_replaywin_lastseq));
+@@ -900,7 +900,7 @@ ipsec_xmit_ah(struct ipsec_xmit_state *ixs)
+ 
+ 	ahp = (struct ahhdr *)(ixs->dat + ixs->iphlen);
+ #ifdef NET_21
+-	ixs->skb->h.raw = (unsigned char*)ahp;
++	ixs->skb->transport_header = (unsigned char*)ahp;
+ #endif /* NET_21 */
+ 	ahp->ah_spi = ixs->ipsp->ips_said.spi;
+ 	ahp->ah_rpl = htonl(++(ixs->ipsp->ips_replaywin_lastseq));
+@@ -989,7 +989,7 @@ ipsec_xmit_ipip(struct ipsec_xmit_state *ixs)
+ 	switch(sysctl_ipsec_tos) {
+ 	case 0:
+ #ifdef NET_21
+-		ixs->iph->tos = ixs->skb->nh.iph->tos;
++		ixs->iph->tos = ip_hdr(ixs->skb)->tos;
+ #else /* NET_21 */
+ 		ixs->iph->tos = ixs->skb->ip_hdr->tos;
+ #endif /* NET_21 */
+@@ -1013,7 +1013,7 @@ ipsec_xmit_ipip(struct ipsec_xmit_state *ixs)
+ 	ixs->newsrc = (__u32)ixs->iph->saddr;
+ 	
+ #ifdef NET_21
+-	ixs->skb->h.ipiph = ixs->skb->nh.iph;
++	ixs->skb->transport_header = (sk_buff_data_t)ip_hdr(ixs->skb);
+ #endif /* NET_21 */
+ 	return IPSEC_XMIT_OK;
+ }
+@@ -1044,7 +1044,7 @@ ipsec_xmit_ipcomp(struct ipsec_xmit_state *ixs)
+ 	ixs->skb = skb_compress(ixs->skb, ixs->ipsp, &flags);
+ 
+ #ifdef NET_21
+-	ixs->iph = ixs->skb->nh.iph;
++	ixs->iph = ip_hdr(ixs->skb);
+ #else /* NET_21 */
+ 	ixs->iph = ixs->skb->ip_hdr;
+ #endif /* NET_21 */
+@@ -1089,9 +1089,9 @@ enum ipsec_xmit_value
+ ipsec_xmit_cont(struct ipsec_xmit_state *ixs)
+ {
+ #ifdef NET_21
+-	ixs->skb->nh.raw = ixs->skb->data;
++	ixs->skb->network_header = ixs->skb->data;
+ #else /* NET_21 */
+-	ixs->skb->ip_hdr = ixs->skb->h.iph = (struct iphdr *) ixs->skb->data;
++	ixs->skb->network_header = (struct iphdr *) ixs->skb->data;
+ #endif /* NET_21 */
+ 	ixs->iph->check = 0;
+ 	ixs->iph->check = ip_fast_csum((unsigned char *)ixs->iph, ixs->iph->ihl);
+diff --git a/net/ipsec/pfkey_v2.c b/net/ipsec/pfkey_v2.c
+index 015d210..55f9831 100644
+--- a/net/ipsec/pfkey_v2.c
++++ b/net/ipsec/pfkey_v2.c
+@@ -501,9 +501,9 @@ pfkey_destroy_socket(struct sock *sk)
+ 			} else {
+ 				printk(" dev:NULL");
+ 			}
+-			printk(" h:0p%p", skb->h.raw);
+-			printk(" nh:0p%p", skb->nh.raw);
+-			printk(" mac:0p%p", skb->mac.raw);
++			printk(" h:0p%p", skb->transport_header);
++			printk(" nh:0p%p", skb->network_header);
++			printk(" mac:0p%p", skb->mac_header);
+ 			printk(" dst:0p%p", skb->dst);
+ 			if(sysctl_ipsec_debug_verbose) {
+ 				int i;
+@@ -616,8 +616,8 @@ pfkey_upmsg(struct socket *sock, struct sadb_msg *pfkey_msg)
+ 		ipsec_kfree_skb(skb);
+ 		return -ENOBUFS;
+ 	}
+-	skb->h.raw = skb_put(skb, pfkey_msg->sadb_msg_len * IPSEC_PFKEYv2_ALIGN);
+-	memcpy(skb->h.raw, pfkey_msg, pfkey_msg->sadb_msg_len * IPSEC_PFKEYv2_ALIGN);
++	skb->transport_header = skb_put(skb, pfkey_msg->sadb_msg_len * IPSEC_PFKEYv2_ALIGN);
++	memcpy(skb->transport_header, pfkey_msg, pfkey_msg->sadb_msg_len * IPSEC_PFKEYv2_ALIGN);
+ 
+ 	if((error = sock_queue_rcv_skb(sk, skb)) < 0) {
+ 		skb->sk=NULL;
+@@ -1102,8 +1102,8 @@ pfkey_recvmsg(struct socket *sock
+ 
+ 	skb_copy_datagram_iovec(skb, 0, msg->msg_iov, size);
+ #ifdef HAVE_TSTAMP
+-	sk->sk_stamp.tv_sec  = skb->tstamp.off_sec;
+-	sk->sk_stamp.tv_usec = skb->tstamp.off_usec;
++	sk->sk_stamp  = skb->tstamp;
++	//sk->sk_stamp.tv_usec = skb->tstamp.off_usec;
+ #else
+         sk->sk_stamp=skb->stamp;
+ #endif
+@@ -1177,8 +1177,8 @@ pfkey_get_info(char *buffer, char **start, off_t offset, int length
+ #endif					
+ 					sk->sk_protocol,
+ 					sk->sk_sndbuf,
+-					(unsigned int)sk->sk_stamp.tv_sec,
+-					(unsigned int)sk->sk_stamp.tv_usec,
++					(unsigned int)sk->sk_stamp.tv.sec,
++					(unsigned int)sk->sk_stamp.tv.nsec,
+ 					sk->sk_socket->flags,
+ 					sk->sk_socket->type,
+ 					sk->sk_socket->state);
+diff --git a/net/ipv4/af_inet.c b/net/ipv4/af_inet.c
+index 0d10950..b982ac7 100644
+--- a/net/ipv4/af_inet.c
++++ b/net/ipv4/af_inet.c
+@@ -1437,6 +1437,16 @@ static int __init inet_init(void)
+ #if defined(CONFIG_IP_MROUTE)
+ 	ip_mr_init();
+ #endif
++#if defined(CONFIG_KLIPS)
++	{
++		extern int ipsec_klips_init(void);
++		/*
++		* Initialize AF_INET ESP and AH protocol support including
++		* e-routing and SA tables
++		*/
++		ipsec_klips_init();
++	}
++#endif /* CONFIG_KLIPS */
+ 	/*
+ 	 *	Initialise per-cpu ipv4 mibs
+ 	 */
+-- 
+1.5.6
+

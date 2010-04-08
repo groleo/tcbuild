@@ -1,0 +1,31 @@
+# PPL options
+
+config PPL
+    string
+    default "ppl" if CC_GCC_4_4_or_later
+
+choice
+    bool
+    prompt "PPL version"
+
+config PPL_V_0_10_2
+    bool
+    prompt "0.10.2"
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+endchoice
+
+
+config PPL_VERSION
+    string
+    default "0.10.2" if PPL_V_0_10_2
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!
+
+config PPL_CHECK
+    bool
+    prompt "Check PPL"
+    default y
+    help
+      It is highly recommended that 'make check' is run against the newly built
+      PPL library.

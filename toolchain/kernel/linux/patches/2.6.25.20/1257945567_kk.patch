@@ -1,0 +1,14 @@
+diff -ruN linux-2.6.25.20/include/asm-m68k/div64.h linux-2.6.25.20.working/include/asm-m68k/div64.h
+--- linux-2.6.25.20/include/asm-m68k/div64.h	2009-11-11 14:38:58.957775030 +0200
++++ linux-2.6.25.20.working/include/asm-m68k/div64.h	2009-11-09 16:25:37.548809726 +0200
+@@ -26,8 +26,9 @@
+ 	__rem;							\
+ })
+ #else
+-#  include <asm-generic/div64.h>
++#include <asm-generic/div64.h>
+ #endif
+ 
+ extern uint64_t div64_64(uint64_t dividend, uint64_t divisor);
++
+ #endif /* _M68K_DIV64_H */

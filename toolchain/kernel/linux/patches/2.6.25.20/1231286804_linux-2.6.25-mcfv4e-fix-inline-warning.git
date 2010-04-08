@@ -1,0 +1,29 @@
+From 30eb8df1c25536d5dc0b3ca6546601399d670311 Mon Sep 17 00:00:00 2001
+From: Kurt Mahan <kmahan@freescale.com>
+Date: Tue, 6 Jan 2009 17:06:44 -0700
+Subject: [PATCH] coldfire: Fix inline warning for new toolchain.
+
+The new toolchain issues warnings when mixing static inline
+and extern inline functions.
+
+Signed-off-by: Kurt Mahan <kmahan@freescale.com>
+---
+ include/asm-m68k/cf_pgtable.h |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/include/asm-m68k/cf_pgtable.h b/include/asm-m68k/cf_pgtable.h
+index c76ab16..8004220 100644
+--- a/include/asm-m68k/cf_pgtable.h
++++ b/include/asm-m68k/cf_pgtable.h
+@@ -177,7 +177,7 @@ extern inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
+ 
+ #define pmd_set(pmdp, ptep) do {} while (0)
+ 
+-extern inline void pgd_set(pgd_t *pgdp, pmd_t *pmdp)
++static inline void pgd_set(pgd_t *pgdp, pmd_t *pmdp)
+ {
+ 	pgd_val(*pgdp) = virt_to_phys(pmdp);
+ }
+-- 
+1.6.0.1
+

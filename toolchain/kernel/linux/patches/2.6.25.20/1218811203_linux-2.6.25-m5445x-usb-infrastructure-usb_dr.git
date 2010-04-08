@@ -1,0 +1,404 @@
+From 32e752fca741baed4cffec54848cb886880e0d88 Mon Sep 17 00:00:00 2001
+From: Bruce Schmid <duck@freescale.com>
+Date: Fri, 15 Aug 2008 08:40:03 -0600
+Subject: [PATCH] USB infrastructure.  Switch to using usb_dr.c
+
+LTIBName: m5445x-usb-infrastructure-usb_dr
+Signed-off-by: Bruce Schmid <duck@freescale.com>
+---
+ arch/m68k/coldfire/usb/otg_cmn.c    |  106 -----------------------------------
+ arch/m68k/coldfire/usb/otg_device.c |   89 -----------------------------
+ arch/m68k/coldfire/usb/otg_host.c   |   68 ----------------------
+ arch/m68k/coldfire/usb/otg_otg.c    |   96 -------------------------------
+ 4 files changed, 0 insertions(+), 359 deletions(-)
+ delete mode 100644 arch/m68k/coldfire/usb/otg_cmn.c
+ delete mode 100644 arch/m68k/coldfire/usb/otg_device.c
+ delete mode 100644 arch/m68k/coldfire/usb/otg_host.c
+ delete mode 100644 arch/m68k/coldfire/usb/otg_otg.c
+
+diff --git a/arch/m68k/coldfire/usb/otg_cmn.c b/arch/m68k/coldfire/usb/otg_cmn.c
+deleted file mode 100644
+index e1975fa..0000000
+--- a/arch/m68k/coldfire/usb/otg_cmn.c
++++ /dev/null
+@@ -1,106 +0,0 @@
+-/*
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
+- */
+-
+-/*
+- * The code contained herein is licensed under the GNU General Public
+- * License. You may obtain a copy of the GNU General Public License
+- * Version 2 or later at the following locations:
+- *
+- * http://www.opensource.org/licenses/gpl-license.html
+- * http://www.gnu.org/copyleft/gpl.html
+- */
+-
+-#include <linux/module.h>
+-#include <linux/kernel.h>
+-#include <linux/types.h>
+-#include <linux/err.h>
+-#include <linux/errno.h>
+-#include <linux/init.h>
+-#include <linux/io.h>
+-#include <linux/irq.h>
+-#include <linux/platform_device.h>
+-#include <linux/delay.h>
+-#include <linux/fsl_devices.h>
+-#include <linux/usb/fsl_xcvr.h>
+-
+-#include <asm/system.h>
+-#include <asm/coldfire.h>
+-
+-extern void fsl_usb_enable_clk(void);
+-extern void fsl_usb_disable_clk(void);
+-extern int fsl_usb_mem_init(struct platform_device *pdev);
+-
+-extern struct fsl_xcvr_ops *xc_ops[];
+-
+-static int otg_used;
+-
+-int usbotg_init(struct platform_device *pdev)
+-{
+-	struct fsl_usb2_platform_data *pdata;
+-	struct fsl_xcvr_ops *xops = xc_ops[USB_CTRLR_OTG];
+-	int rc;
+-
+-	pdata = (struct fsl_usb2_platform_data *)pdev->dev.platform_data;
+-
+-	pr_debug("%s: pdev=0x%p  pdata=0x%p\n", __FUNCTION__, pdev, pdata);
+-
+-	if (!xops) {
+-		printk(KERN_ERR "OTG transceiver ops missing\n");
+-		return -EINVAL;
+-	}
+-	pdata->xcvr_ops = xops;
+-	pdata->xcvr_type = xops->xcvr_type;
+-
+-	if (!otg_used) {
+-		/* request_mem_region and ioremap registers */
+-		rc = fsl_usb_mem_init(pdev);
+-		if (rc)
+-			return rc;
+-
+-		fsl_usb_enable_clk();
+-
+-		if (xops->init)
+-			xops->init(pdev);
+-	}
+-
+-	otg_used++;
+-	pr_debug("%s: success\n", __FUNCTION__);
+-	return 0;
+-}
+-
+-void usbotg_uninit(struct platform_device *pdev)
+-{
+-	struct fsl_usb2_platform_data *pdata;
+-	pdata = (struct fsl_usb2_platform_data *)pdev->dev.platform_data;
+-
+-	pr_debug("%s\n", __FUNCTION__);
+-
+-	otg_used--;
+-	if (!otg_used) {
+-		if (pdata->xcvr_ops && pdata->xcvr_ops->uninit)
+-			pdata->xcvr_ops->uninit(pdev);
+-
+-		iounmap(pdata->regs);
+-		release_mem_region(pdata->r_start, pdata->r_len);
+-
+-		pdata->regs = NULL;
+-		pdata->r_start = pdata->r_len = 0;
+-
+-		fsl_usb_disable_clk();
+-	}
+-}
+-
+-struct fsl_usb2_platform_data mxc_otg_config = {
+-	.name            = "OTG",
+-	.platform_init   = usbotg_init,
+-	.platform_uninit = usbotg_uninit,
+-	.es              = 1,
+-	.big_endian_mmio = 1,
+-	.big_endian_desc = 1,
+-	.le_setup_buf    = 1,
+-	.does_otg        = 1,
+-	.power_budget    = 500,		/* 500 mA max power */
+-	.max_ep_nr       = 4,		/* DDD read from a register ? */
+-	.phy_mode	 = FSL_USB2_PHY_ULPI, /* DDD redundant with xcvr_type */
+-};
+diff --git a/arch/m68k/coldfire/usb/otg_device.c b/arch/m68k/coldfire/usb/otg_device.c
+deleted file mode 100644
+index 3795f93..0000000
+--- a/arch/m68k/coldfire/usb/otg_device.c
++++ /dev/null
+@@ -1,89 +0,0 @@
+-/*
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
+- */
+-
+-/*
+- * The code contained herein is licensed under the GNU General Public
+- * License. You may obtain a copy of the GNU General Public License
+- * Version 2 or later at the following locations:
+- *
+- * http://www.opensource.org/licenses/gpl-license.html
+- * http://www.gnu.org/copyleft/gpl.html
+- */
+-
+-#include <linux/module.h>
+-#include <linux/kernel.h>
+-#include <linux/types.h>
+-#include <linux/errno.h>
+-#include <linux/init.h>
+-#include <linux/io.h>
+-#include <linux/irq.h>
+-#include <linux/err.h>
+-#include <linux/platform_device.h>
+-#include <linux/usb/otg.h>
+-#include <linux/delay.h>
+-#include <linux/fsl_devices.h>
+-#include <linux/usb/fsl_xcvr.h>
+-
+-#include <asm/system.h>
+-#include <asm/coldfire.h>
+-
+-#define USB_OTGREGS_BASE MCF_REG32(0xFC0B0000)
+-#define INT_USB		(64 + 64 + 47)	/* INTC1:47 16.2.9.1 */
+-#define INT_UOCSR	(64 + 64 + 53)	/* INTC1:53 16.2.9.1 */
+-
+-extern int usbotg_init(struct platform_device *pdev);
+-extern void usbotg_uninit(struct fsl_usb2_platform_data *pdata);
+-extern struct fsl_usb2_platform_data mxc_otg_config;
+-
+-struct platform_device otg_udc_device;
+-
+-/*!
+- * OTG Gadget device
+- */
+-
+-static void usb_release(struct device *dev)
+-{
+-	/* normally not freed */
+-}
+-
+-static u64 udc_dmamask = ~(u32) 0;
+-static struct resource otg_udc_resources[] = {
+-	[0] = {
+-		.start = (u32) (&USB_OTGREGS_BASE),
+-		.end   = (u32) (&USB_OTGREGS_BASE + 0x1ff),
+-		.flags = IORESOURCE_MEM,
+-	},
+-	[1] = {
+-		.start = INT_USB,
+-		.flags = IORESOURCE_IRQ,
+-	},
+-};
+-
+-
+-struct platform_device otg_udc_device = {
+-	.name = "fsl-usb2-udc",
+-	.id   = -1,
+-	.dev  = {
+-		.release           = usb_release,
+-		.dma_mask          = &udc_dmamask,
+-		.coherent_dma_mask = 0xffffffff,
+-		.platform_data     = &mxc_otg_config,
+-		},
+-	.resource = otg_udc_resources,
+-	.num_resources = ARRAY_SIZE(otg_udc_resources),
+-};
+-
+-static int __init udc_init(void)
+-{
+-	int rc __attribute((unused));
+-
+-	rc = platform_device_register(&otg_udc_device);
+-	if (rc)
+-		printk(KERN_ERR "usb: can't register OTG Gadget, rc=%d\n", rc);
+-	else
+-		printk(KERN_INFO "usb: OTG Gadget registered\n");
+-	return rc;
+-}
+-
+-subsys_initcall(udc_init);
+diff --git a/arch/m68k/coldfire/usb/otg_host.c b/arch/m68k/coldfire/usb/otg_host.c
+deleted file mode 100644
+index 506a3fa..0000000
+--- a/arch/m68k/coldfire/usb/otg_host.c
++++ /dev/null
+@@ -1,68 +0,0 @@
+-/*
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
+- */
+-
+-/*
+- * The code contained herein is licensed under the GNU General Public
+- * License. You may obtain a copy of the GNU General Public License
+- * Version 2 or later at the following locations:
+- *
+- * http://www.opensource.org/licenses/gpl-license.html
+- * http://www.gnu.org/copyleft/gpl.html
+- */
+-
+-#include <linux/module.h>
+-#include <linux/kernel.h>
+-#include <linux/types.h>
+-#include <linux/errno.h>
+-#include <linux/init.h>
+-#include <linux/io.h>
+-#include <linux/irq.h>
+-#include <linux/err.h>
+-#include <linux/platform_device.h>
+-#include <linux/delay.h>
+-#include <linux/fsl_devices.h>
+-#include <linux/usb/fsl_xcvr.h>
+-
+-#include <asm/system.h>
+-#include <asm/mcfsim.h>
+-
+-#define USB_OTGREGS_BASE MCF_REG32(0xFC0B0000)
+-#define INT_USB		(64 + 64 + 47)	/* INTC1:47 16.2.9.1 */
+-#define INT_UOCSR	(64 + 64 + 53)	/* INTC1:53 16.2.9.1 */
+-
+-struct platform_device *otg_host_device;
+-
+-extern struct platform_device *host_pdev_register(struct resource *res,
+-						  int n_res,
+-						  struct fsl_usb2_platform_data
+-						  *config);
+-
+-extern int usbotg_init(struct platform_device *pdev);
+-extern void usbotg_uninit(struct fsl_usb2_platform_data *pdata);
+-extern struct fsl_usb2_platform_data mxc_otg_config;
+-
+-/*!
+- * OTG host config
+- */
+-static struct resource otg_host_resources[] = {
+-	[0] = {
+-		.start = (u32) (&USB_OTGREGS_BASE),
+-		.end   = (u32) (&USB_OTGREGS_BASE + 0x1ff),
+-		.flags = IORESOURCE_MEM,
+-	},
+-	[1] = {
+-		.start = INT_USB,
+-		.flags = IORESOURCE_IRQ,
+-	},
+-};
+-
+-static int __init otg_host_init(void)
+-{
+-	otg_host_device = host_pdev_register(otg_host_resources,
+-					     ARRAY_SIZE(otg_host_resources),
+-					     &mxc_otg_config);
+-	return 0;
+-}
+-
+-subsys_initcall(otg_host_init);
+diff --git a/arch/m68k/coldfire/usb/otg_otg.c b/arch/m68k/coldfire/usb/otg_otg.c
+deleted file mode 100644
+index b1ca8bb..0000000
+--- a/arch/m68k/coldfire/usb/otg_otg.c
++++ /dev/null
+@@ -1,96 +0,0 @@
+-/*
+- * Copyright 2005-2007 Freescale Semiconductor, Inc. All Rights Reserved.
+- */
+-
+-/*
+- * The code contained herein is licensed under the GNU General Public
+- * License. You may obtain a copy of the GNU General Public License
+- * Version 2 or later at the following locations:
+- *
+- * http://www.opensource.org/licenses/gpl-license.html
+- * http://www.gnu.org/copyleft/gpl.html
+- */
+-
+-/*
+- * platform_device registration for ULPI OTG device
+- */
+-
+-#include <linux/module.h>
+-#include <linux/kernel.h>
+-#include <linux/types.h>
+-#include <linux/errno.h>
+-#include <linux/init.h>
+-#include <linux/err.h>
+-#include <linux/platform_device.h>
+-#include <linux/fsl_devices.h>
+-
+-#include <asm/mcfsim.h>
+-
+-#define USB_OTGREGS_BASE MCF_REG32(0xFC0B0000)
+-#define INT_USB		(64 + 64 + 47)	/* INTC1:47 16.2.9.1 */
+-#define INT_UOCSR	(64 + 64 + 53)	/* INTC1:53 16.2.9.1 */
+-
+-extern int usbotg_init(struct platform_device *pdev);
+-extern void usbotg_uninit(struct fsl_usb2_platform_data *pdata);
+-extern struct fsl_usb2_platform_data mxc_otg_config;
+-
+-static void otg_otg_release(struct device *dev)
+-{
+-	/* normally not freed */
+-}
+-
+-/* *INDENT-OFF* */
+-static struct resource otg_otg_resources[] = {
+-	[0] = {
+-		.start = (u32) (&USB_OTGREGS_BASE),
+-		.end   = (u32) (&USB_OTGREGS_BASE + 0x1ff),
+-		.flags = IORESOURCE_MEM,
+-	},
+-	[1] = {
+-		.start = INT_USB,
+-		.flags = IORESOURCE_IRQ,
+-	},
+-};
+-
+-/*!
+- * OTG device
+- */
+-static u64 otg_otg_dmamask = ~(u32) 0;
+-static struct platform_device otg_otg_device = {
+-	.name = "fsl-usb2-otg",
+-	.id   = -1,
+-	.dev  = {
+-		.release           = otg_otg_release,
+-		.dma_mask          = &otg_otg_dmamask,
+-		.coherent_dma_mask = 0xffffffff,
+-		.platform_data     = &mxc_otg_config,
+-	},
+-	.resource = otg_otg_resources,
+-	.num_resources = ARRAY_SIZE(otg_otg_resources),
+-};
+-/* *INDENT-ON* */
+-
+-static int __init mx31_otg_otg_init(void)
+-{
+-	int rc = 0;
+-
+-	pr_debug("register OTG otg res=0x%p, size=%d\n",
+-		 otg_otg_device.resource, otg_otg_device.num_resources);
+-
+-	rc = platform_device_register(&otg_otg_device);
+-	if (rc) {
+-		pr_debug("can't register ULPI OTG dvc, %d\n", rc);
+-	} else {
+-		printk(KERN_INFO "usb: OTG ULPI transceiver registered\n");
+-		pr_debug("otg_otg_device=0x%p  resources=0x%p.\n",
+-			 &otg_otg_device, otg_otg_device.resource);
+-	}
+-
+-	return rc;
+-}
+-
+-subsys_initcall(mx31_otg_otg_init);
+-
+-MODULE_AUTHOR("Freescale Semiconductor, Inc.");
+-MODULE_DESCRIPTION("ULPI OTG device registration");
+-MODULE_LICENSE("GPL");
+-- 
+1.6.0.1
+

@@ -1,0 +1,1614 @@
+From e75151a9370c13f699be67ea53a6c1b374840c84 Mon Sep 17 00:00:00 2001
+From: Kurt Mahan <kmahan@freescale.com>
+Date: Tue, 15 Jul 2008 23:21:40 -0600
+Subject: [PATCH] OCF/Talitos Framework.
+
+Talitos pieces written by Freescale.
+
+All other pieces from Open Source projects.
+
+LTIBName: m547x-8x-ocf-talitos
+Signed-off-by: Kurt Mahan <kmahan@freescale.com>
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ arch/s390/crypto/aes_s390.c      |    2 +-
+ arch/x86/crypto/aes_glue.c       |    2 +-
+ crypto/Kconfig                   |    2 +-
+ crypto/Makefile                  |    2 +-
+ crypto/aes_generic.c             |    2 +-
+ crypto/des_generic.c             |    2 +-
+ crypto/ocf/crypto.c              |    9 +-
+ crypto/ocf/ocfnull/ocfnull.c     |    2 +-
+ crypto/ocf/random.c              |    2 +-
+ crypto/ocf/talitos/talitos.c     |  143 ++++++++++++++++++++++++--
+ crypto/ocf/talitos/talitos_dev.h |    9 ++-
+ drivers/char/random.c            |   61 +++++++++++
+ drivers/crypto/geode-aes.c       |    2 +-
+ drivers/crypto/hifn_795x.c       |    2 +-
+ drivers/crypto/padlock-aes.c     |    2 +-
+ include/asm-m68k/m5485sec.h      |  173 ++++++++++++++++++++++++++++++
+ include/crypto/aes.h             |   21 ----
+ include/crypto/aes_generic.h     |   34 ++++++
+ include/crypto/des.h             |   11 --
+ include/crypto/des_generic.h     |   19 ++++
+ include/linux/miscdevice.h       |    1 +
+ include/linux/random.h           |    5 +-
+ net/ipsec/ipsec_proc.c           |   33 ++++++-
+ net/ipsec/ipsec_rcv.c            |   36 ++++++-
+ net/ipsec/ipsec_tunnel.c         |   38 +++++++-
+ net/ipsec/pfkey_v2.c             |  214 ++++++++++++++++++++++++++++++++++++--
+ net/ipsec/pfkey_v2_parser.c      |   12 ++
+ 27 files changed, 768 insertions(+), 73 deletions(-)
+ create mode 100644 include/asm-m68k/m5485sec.h
+ create mode 100644 include/crypto/aes_generic.h
+ create mode 100644 include/crypto/des_generic.h
+
+diff --git a/arch/s390/crypto/aes_s390.c b/arch/s390/crypto/aes_s390.c
+index a3f67f8..2d441fa 100644
+--- a/arch/s390/crypto/aes_s390.c
++++ b/arch/s390/crypto/aes_s390.c
+@@ -17,7 +17,7 @@
+  *
+  */
+ 
+-#include <crypto/aes.h>
++#include <crypto/aes_generic.h>
+ #include <crypto/algapi.h>
+ #include <linux/err.h>
+ #include <linux/module.h>
+diff --git a/arch/x86/crypto/aes_glue.c b/arch/x86/crypto/aes_glue.c
+index 71f4578..e2491b3 100644
+--- a/arch/x86/crypto/aes_glue.c
++++ b/arch/x86/crypto/aes_glue.c
+@@ -3,7 +3,7 @@
+  *
+  */
+ 
+-#include <crypto/aes.h>
++#include <crypto/aes_generic.h>
+ 
+ asmlinkage void aes_enc_blk(struct crypto_tfm *tfm, u8 *out, const u8 *in);
+ asmlinkage void aes_dec_blk(struct crypto_tfm *tfm, u8 *out, const u8 *in);
+diff --git a/crypto/Kconfig b/crypto/Kconfig
+index 69f1be6..eca65c3 100644
+--- a/crypto/Kconfig
++++ b/crypto/Kconfig
+@@ -589,7 +589,7 @@ config CRYPTO_LZO
+ 	select LZO_DECOMPRESS
+ 	help
+ 	  This is the LZO algorithm.
+-
++source "crypto/ocf/Kconfig"
+ source "drivers/crypto/Kconfig"
+ 
+ endif	# if CRYPTO
+diff --git a/crypto/Makefile b/crypto/Makefile
+index 7cf3625..22292d1 100644
+--- a/crypto/Makefile
++++ b/crypto/Makefile
+@@ -64,7 +64,7 @@ obj-$(CONFIG_CRYPTO_AUTHENC) += authenc.o
+ obj-$(CONFIG_CRYPTO_LZO) += lzo.o
+ 
+ obj-$(CONFIG_CRYPTO_TEST) += tcrypt.o
+-
++obj-$(CONFIG_OCF_OCF) += ocf/
+ #
+ # generic algorithms and the async_tx api
+ #
+diff --git a/crypto/aes_generic.c b/crypto/aes_generic.c
+index cf30af7..e57ce2a 100644
+--- a/crypto/aes_generic.c
++++ b/crypto/aes_generic.c
+@@ -47,7 +47,7 @@
+  * ---------------------------------------------------------------------------
+  */
+ 
+-#include <crypto/aes.h>
++#include <crypto/aes_generic.h>
+ #include <linux/module.h>
+ #include <linux/init.h>
+ #include <linux/types.h>
+diff --git a/crypto/des_generic.c b/crypto/des_generic.c
+index 355ecb7..d84c79c 100644
+--- a/crypto/des_generic.c
++++ b/crypto/des_generic.c
+@@ -20,7 +20,7 @@
+ #include <linux/crypto.h>
+ #include <linux/types.h>
+ 
+-#include <crypto/des.h>
++#include <crypto/des_generic.h>
+ 
+ #define ROL(x, r) ((x) = rol32((x), (r)))
+ #define ROR(x, r) ((x) = ror32((x), (r)))
+diff --git a/crypto/ocf/crypto.c b/crypto/ocf/crypto.c
+index 6106d02..5e1a63b 100644
+--- a/crypto/ocf/crypto.c
++++ b/crypto/ocf/crypto.c
+@@ -35,6 +35,7 @@ __FBSDID("$FreeBSD: src/sys/opencrypto/crypto.c,v 1.16 2005/01/07 02:29:16 imp E
+ #include <linux/init.h>
+ #include <linux/list.h>
+ #include <linux/slab.h>
++//#include <linux/slub_def.h>
+ #include <linux/wait.h>
+ #include <linux/sched.h>
+ #include <linux/spinlock.h>
+@@ -128,8 +129,8 @@ static spinlock_t crypto_ret_q_lock;
+ 				spin_unlock_irqrestore(&crypto_ret_q_lock, r_flags); \
+ 			 })
+ 
+-static kmem_cache_t *cryptop_zone;
+-static kmem_cache_t *cryptodesc_zone;
++static struct kmem_cache *cryptop_zone;
++static struct kmem_cache *cryptodesc_zone;
+ 
+ static int debug = 0;
+ module_param(debug, int, 0644);
+@@ -1901,9 +1902,9 @@ crypto_init(void)
+ 	spin_lock_init(&crypto_ret_q_lock);
+ 
+ 	cryptop_zone = kmem_cache_create("cryptop", sizeof(struct cryptop),
+-				       0, SLAB_HWCACHE_ALIGN, NULL, NULL);
++				       0, SLAB_HWCACHE_ALIGN, NULL);
+ 	cryptodesc_zone = kmem_cache_create("cryptodesc", sizeof(struct cryptodesc),
+-				       0, SLAB_HWCACHE_ALIGN, NULL, NULL);
++				       0, SLAB_HWCACHE_ALIGN, NULL);
+ 	if (cryptodesc_zone == NULL || cryptop_zone == NULL) {
+ 		printk("crypto: crypto_init cannot setup crypto zones\n");
+ 		error = ENOMEM;
+diff --git a/crypto/ocf/ocfnull/ocfnull.c b/crypto/ocf/ocfnull/ocfnull.c
+index 3412624..a3d8a36 100644
+--- a/crypto/ocf/ocfnull/ocfnull.c
++++ b/crypto/ocf/ocfnull/ocfnull.c
+@@ -58,7 +58,7 @@ static int null_newsession(void *, u_int32_t *, struct cryptoini *);
+ static int null_freesession(void *, u_int64_t);
+ 
+ static int debug = 0;
+-MODULE_PARM(debug, "i");
++module_param(debug, int, 0644);
+ MODULE_PARM_DESC(debug, "Enable debug");
+ 
+ /*
+diff --git a/crypto/ocf/random.c b/crypto/ocf/random.c
+index a9ecb81..e807051 100644
+--- a/crypto/ocf/random.c
++++ b/crypto/ocf/random.c
+@@ -55,7 +55,7 @@
+ #ifdef FIPS_TEST_RNG
+ #include "rndtest.h"
+ #endif
+-
++#define HAS_RANDOM_INPUT_WAIT
+ #ifndef HAS_RANDOM_INPUT_WAIT
+ #error "Please do not enable OCF_RANDOMHARVEST unless you have applied patches"
+ #endif
+diff --git a/crypto/ocf/talitos/talitos.c b/crypto/ocf/talitos/talitos.c
+index 9d64f2e..062ca21 100644
+--- a/crypto/ocf/talitos/talitos.c
++++ b/crypto/ocf/talitos/talitos.c
+@@ -112,6 +112,10 @@
+ #endif
+ #include <linux/module.h>
+ #include <openswan.h>
++#include <net/ip.h>		/* struct iphdr */
++#include <linux/tcp.h>         /* struct tcphdr */
++#include <linux/udp.h>         /* struct udphdr */
++#include <net/icmp.h>		/* icmp_send() */
+ #include <linux/types.h>
+ #include <linux/init.h>
+ #include <linux/interrupt.h>
+@@ -161,6 +165,8 @@ static void talitos_reset_device_master(struct talitos_softc *sc);
+ static void talitos_reset_device(struct talitos_softc *sc);
+ static void talitos_errorprocessing(struct talitos_softc *sc,
+ 						unsigned long chnum);
++static void talitos_print_ip (struct iphdr *ip);
++static void talitos_print_desc(struct talitos_desc *td);
+ static int talitos_probe(struct platform_device *pdev);
+ static int talitos_remove(struct platform_device *pdev);
+ 
+@@ -190,6 +196,8 @@ static int debug;
+ module_param(debug, int, 0644);
+ MODULE_PARM_DESC(debug, "Enable debug");
+ 
++#define	DPRINTF(a...)	if (debug) { printk(DRV_NAME ": " a); }
++
+ static inline void talitos_write(volatile unsigned *addr, u32 val)
+ {
+ 	out_be32(addr, val);
+@@ -208,6 +216,15 @@ static void dump_talitos_status(struct talitos_softc *sc)
+ 	unsigned int v_hi;
+ 	unsigned int *ptr;
+ 	unsigned int i;
++
++	v = talitos_read(sc->sc_base_addr + TALITOS_MDEU_ISR);
++	v_hi = talitos_read(sc->sc_base_addr + TALITOS_MDEU_ISR_HI);
++	printk(KERN_INFO DRV_NAME ": MDEU_ISR     0x%08x_%08x\n", v, v_hi);
++
++	v = talitos_read(sc->sc_base_addr + TALITOS_MDEU_ICR);
++	v_hi = talitos_read(sc->sc_base_addr + TALITOS_MDEU_ICR_HI);
++	printk(KERN_INFO DRV_NAME ": MDEU_ICR     0x%08x_%08x\n", v, v_hi);
++
+ 	v = talitos_read(sc->sc_base_addr + TALITOS_MCR);
+ 	v_hi = talitos_read(sc->sc_base_addr + TALITOS_MCR_HI);
+ 	printk(KERN_INFO DRV_NAME ": MCR          0x%08x_%08x\n", v, v_hi);
+@@ -411,12 +428,11 @@ talitos_newsession(void *arg, u_int32_t *sidp, struct cryptoini *cri)
+ 		}
+ 	}
+ 	if (sc->sc_sessions == NULL) {
+-		sc->sc_sessions = (struct talitos_session *)
+-			kmalloc(sizeof(struct talitos_session), GFP_ATOMIC);
+ 		ses = (struct talitos_session *)
+ 			kmalloc(sizeof(struct talitos_session), GFP_ATOMIC);
+ 		if (ses == NULL)
+ 			return ENOMEM;
++		sc->sc_sessions = ses;
+ 		memset(ses, 0, sizeof(struct talitos_session));
+ 		sesn = 0;
+ 		sc->sc_nsessions = 1;
+@@ -546,6 +562,8 @@ talitos_process(void *arg, struct cryptop *crp, int hint)
+ 	unsigned long r_flags;
+ 	int status;
+ 	int rc;
++	u32 addr;
++	u32 *p;
+ 
+ 	DPRINTF("%s()\n", __FUNCTION__);
+ 
+@@ -704,6 +722,7 @@ talitos_process(void *arg, struct cryptop *crp, int hint)
+ 			err = EINVAL;
+ 			goto errout;
+ 		}
++		goto hmac_process;
+ 	} else {
+ 		if (sc->sc_desc_types & TALITOS_HAS_DT_IPSEC_ESP)
+ 			td->hdr |= TD_TYPE_IPSEC_ESP;
+@@ -938,7 +957,32 @@ talitos_process(void *arg, struct cryptop *crp, int hint)
+ 		if (enccrd->crd_flags & CRD_F_KEY_EXPLICIT)
+ 			printk(DRV_NAME ": CRD_F_KEY_EXPLICIT unimplemented\n");
+ 	}
++
++hmac_process:
+ 	if (!enccrd && maccrd) {
++		hmac_key = 2;
++		hmac_data = 3;
++		//cipher_iv_out = 6;
++		cipher_iv_out = 5;
++		if (crp->crp_flags & CRYPTO_F_SKBUF) {
++			/* using SKB buffers */
++			struct sk_buff *skb = (struct sk_buff *)crp->crp_buf;
++			if (skb_shinfo(skb)->nr_frags) {
++				printk(DRV_NAME ": skb frags unimplemented\n");
++				err = EINVAL;
++				goto errout;
++			}
++
++			td->ptr[hmac_data].ptr = dma_map_single(NULL, skb->data,
++					skb->len, DMA_TO_DEVICE);
++			td->ptr[hmac_data].len = skb->len;
++
++			td->ptr[cipher_iv_out].ptr = dma_map_single(NULL, skb->data,
++						skb->len, DMA_TO_DEVICE);
++			td->ptr[cipher_iv_out].ptr += maccrd->crd_inject;
++			td->ptr[cipher_iv_out].len = 12;
++		}
++
+ 		/* single MD5 or SHA */
+ 		td->hdr |= TALITOS_SEL0_MDEU
+ 				|  TALITOS_MODE0_MDEU_INIT
+@@ -948,19 +992,25 @@ talitos_process(void *arg, struct cryptop *crp, int hint)
+ 			td->hdr |= TALITOS_MODE0_MDEU_MD5;
+ 			DPRINTF("MD5  ses %d ch %d len %d\n",
+ 				(u32)TALITOS_SESSION(crp->crp_sid),
+-				chsel, td->ptr[in_fifo].len);
++				chsel, td->ptr[hmac_data].len);
+ 			break;
+ 		case	CRYPTO_MD5_HMAC:
+ 			td->hdr |= TALITOS_MODE0_MDEU_MD5_HMAC;
++			DPRINTF("MD5_HMAC  ses %d ch %d len %d\n",
++				(u32)TALITOS_SESSION(crp->crp_sid),
++				chsel, td->ptr[hmac_data].len);
+ 			break;
+ 		case	CRYPTO_SHA1:
+ 			td->hdr |= TALITOS_MODE0_MDEU_SHA1;
+ 			DPRINTF("SHA1 ses %d ch %d len %d\n",
+ 				(u32)TALITOS_SESSION(crp->crp_sid),
+-				chsel, td->ptr[in_fifo].len);
++				chsel, td->ptr[hmac_data].len);
+ 			break;
+ 		case	CRYPTO_SHA1_HMAC:
+ 			td->hdr |= TALITOS_MODE0_MDEU_SHA1_HMAC;
++			DPRINTF("SHA1_HMAC  ses %d ch %d len %d\n",
++				(u32)TALITOS_SESSION(crp->crp_sid),
++				chsel, td->ptr[hmac_data].len);
+ 			break;
+ 		default:
+ 			/* We cannot order the SEC as requested */
+@@ -976,9 +1026,9 @@ talitos_process(void *arg, struct cryptop *crp, int hint)
+ 		if ((maccrd->crd_alg == CRYPTO_MD5_HMAC) ||
+ 		   (maccrd->crd_alg == CRYPTO_SHA1_HMAC)) {
+ 			td->ptr[hmac_key].ptr = dma_map_single(NULL,
+-				ses->ses_hmac, ses->ses_hmac_len,
++				ses->ses_key, ses->ses_klen,
+ 				DMA_TO_DEVICE);
+-			td->ptr[hmac_key].len = ses->ses_hmac_len;
++			td->ptr[hmac_key].len = ses->ses_klen;
+ 		}
+ 	} else {
+ 		/* using process key (session data has duplicate) */
+@@ -1000,10 +1050,83 @@ errout:
+ 	if (err != ERESTART) {
+ 		crp->crp_etype = err;
+ 		crypto_done(crp);
+-	}
++	} else
++		sc->sc_needwakeup |= CRYPTO_SYMQ;
+ 	return err;
+ }
+ 
++static void
++talitos_print_ip(struct iphdr *ip)
++{
++#define TALITOS_ADDRTOA_BUF 16
++	char buf[TALITOS_ADDRTOA_BUF];
++	printk("%s: ", __FUNCTION__); 
++	printk(" ihl:%d", ip->ihl << 2);
++	printk(" ver:%d", ip->version);
++	printk(" tos:%d", ip->tos);
++	printk(" tlen:%d", ntohs(ip->tot_len));
++	printk(" id:%d", ntohs(ip->id));
++	printk(" %s%s%sfrag_off:%d",
++               ip->frag_off & __constant_htons(IP_CE) ? "CE " : "",
++               ip->frag_off & __constant_htons(IP_DF) ? "DF " : "",
++               ip->frag_off & __constant_htons(IP_MF) ? "MF " : "",
++               (ntohs(ip->frag_off) & IP_OFFSET) << 3);
++	printk(" ttl:%d", ip->ttl);
++	printk(" proto:%d", ip->protocol);
++	printk(" chk:%d", ntohs(ip->check));
++
++	addrtoa(*((struct in_addr*)(&ip->saddr)), 0, buf, sizeof(buf));
++	printk(" saddr:%s", buf);
++	if(ip->protocol == IPPROTO_UDP)
++		printk(":%d",
++		       ntohs(((struct udphdr*)((caddr_t)ip + (ip->ihl << 2)))->source));
++	if(ip->protocol == IPPROTO_TCP)
++		printk(":%d",
++		       ntohs(((struct tcphdr*)((caddr_t)ip + (ip->ihl << 2)))->source));
++	addrtoa(*((struct in_addr*)(&ip->daddr)), 0, buf, sizeof(buf));
++	printk(" daddr:%s", buf);
++	if(ip->protocol == IPPROTO_UDP)
++		printk(":%d",
++		       ntohs(((struct udphdr*)((caddr_t)ip + (ip->ihl << 2)))->dest));
++	if(ip->protocol == IPPROTO_TCP)
++		printk(":%d",
++		       ntohs(((struct tcphdr*)((caddr_t)ip + (ip->ihl << 2)))->dest));
++	if(ip->protocol == IPPROTO_ICMP)
++		printk(" type:code=%d:%d",
++		       ((struct icmphdr*)((caddr_t)ip + (ip->ihl << 2)))->type,
++		       ((struct icmphdr*)((caddr_t)ip + (ip->ihl << 2)))->code);
++	printk("\n");
++
++}
++
++static void talitos_print_desc(struct talitos_desc *td)
++{
++	u32 *p;
++	printk("hdr = 0x%08x\n", td->hdr);
++
++	printk("0: ptr = 0x%08x\n", td->ptr[0].ptr);
++	printk("0: len = %d\n", td->ptr[0].len);
++
++	printk("1: ptr = 0x%08x\n", td->ptr[1].ptr);
++	printk("1: len = %d\n", td->ptr[1].len);
++
++	printk("2: ptr = 0x%08x\n", td->ptr[2].ptr);
++	printk("2: len = %d\n", td->ptr[2].len);
++
++	printk("3: ptr = 0x%08x\n", td->ptr[3].ptr);
++	printk("3: len = %d\n", td->ptr[3].len);
++
++	printk("4: ptr = 0x%08x\n", td->ptr[4].ptr);
++	printk("4: len = %d\n", td->ptr[4].len);
++
++	printk("5: ptr = 0x%08x\n", td->ptr[5].ptr);
++	printk("5: len = %d\n", td->ptr[5].len);
++
++	printk("6: ptr = 0x%08x\n", td->ptr[6].ptr);
++	printk("6: len = %d\n", td->ptr[6].len);
++}
++
++
+ #ifdef TALITOS_TASKLET
+ 
+ /*
+@@ -1450,6 +1573,12 @@ static int talitos_probe(struct platform_device *pdev)
+ 			sc->sc_chfifo_len * sizeof(struct desc_cryptop_pair));
+ 	}
+ 
++#ifdef TALITOS_TASKLET
++	for (i = 0; i < sc->sc_num_channels; i++)
++		for (j = 0; j < sc->sc_chfifo_len; j++)
++			INIT_LIST_HEAD(&sc->sc_chnfifo[i][j].desc_list);
++#endif /* TALITOS_TASKLET */
++
+ 	/* reset and initialize the SEC h/w device */
+ 	talitos_reset_device(sc);
+ 	talitos_init_device(sc);
+diff --git a/crypto/ocf/talitos/talitos_dev.h b/crypto/ocf/talitos/talitos_dev.h
+index c977625..cb28387 100644
+--- a/crypto/ocf/talitos/talitos_dev.h
++++ b/crypto/ocf/talitos/talitos_dev.h
+@@ -138,7 +138,7 @@
+ #define TALITOS_ID		0x1020
+ #define TALITOS_ID_HI		0x1024
+ #define TALITOS_MCR		0x1030		/* master control register */
+-#define TALITOS_MCR_HI		0x1038		/* master control register */
++#define TALITOS_MCR_HI		0x1034		/* master control register */
+ #define TALITOS_MCR_SWR		0x1
+ #define TALITOS_IMR		0x1008		/* interrupt mask register */
+ #define TALITOS_IMR_ALL		0x00010fff	/* enable all interrupts mask */
+@@ -152,6 +152,12 @@
+ #define TALITOS_ISR_HI		0x1014		/* interrupt status register */
+ #define TALITOS_ICR		0x1018		/* interrupt clear register */
+ #define TALITOS_ICR_HI		0x101C		/* interrupt clear register */
++#define TALITOS_MDEU_ISR	0x6030		/* mdeu interrupt status register */
++#define TALITOS_MDEU_ISR_HI	0x6034		/* mdeu interrupt status register */
++
++#define TALITOS_MDEU_ICR	0x6038		/* mdeu interrupt status register */
++#define TALITOS_MDEU_ICR_HI	0x603c		/* mdeu interrupt control register */
++
+ 
+ /* channel register address stride */
+ #define TALITOS_CH_OFFSET	0x100
+@@ -276,4 +282,3 @@ struct talitos_desc {
+ 
+ #define TALITOS_HDR_DONE_BITS	0xff000000
+ 
+-#define	DPRINTF(a...)	if (debug) { printk(DRV_NAME ": " a); }
+diff --git a/drivers/char/random.c b/drivers/char/random.c
+index f43c89f..1176414 100644
+--- a/drivers/char/random.c
++++ b/drivers/char/random.c
+@@ -129,6 +129,9 @@
+  *                                unsigned int value);
+  * 	void add_interrupt_randomness(int irq);
+  *
++ *	void random_input_words(__u32 *buf, size_t wordcount, int ent_count)
++ *	int random_input_wait(void);
++ *
+  * add_input_randomness() uses the input layer interrupt timing, as well as
+  * the event type information from the hardware.
+  *
+@@ -140,6 +143,13 @@
+  * a better measure, since the timing of the disk interrupts are more
+  * unpredictable.
+  *
++ * random_input_words() just provides a raw block of entropy to the input
++ * pool, such as from a hardware entropy generator.
++ *
++ * random_input_wait() suspends the caller until such time as the
++ * entropy pool falls below the write threshold, and returns a count of how
++ * much entropy (in bits) is needed to sustain the pool.
++ *
+  * All of these routines try to estimate how many bits of randomness a
+  * particular randomness source.  They do this by keeping track of the
+  * first and second order deltas of the event timings.
+@@ -668,7 +678,58 @@ void add_disk_randomness(struct gendisk *disk)
+ 			     0x100 + MKDEV(disk->major, disk->first_minor));
+ }
+ #endif
++/*
++ *  random_input_words - add bulk entropy to pool
++ *
++ *  @buf: buffer to add
++ *  @wordcount: number of __u32 words to add
++ *  @ent_count: total amount of entropy (in bits) to credit
++ *  
++ *  this provides bulk input of entropy to the input pool
++ *
++ */
++void random_input_words(__u32 *buf, size_t wordcount, int ent_count)
++{
++        add_entropy_words(&input_pool, buf, wordcount);
++
++        credit_entropy_store(&input_pool, ent_count);
++
++        DEBUG_ENT("crediting %d bits from OCF => %d\n",
++                  ent_count, input_pool.entropy_count);
++        /*
++	* Wake up waiting processes if we have enough
++	* entropy.
++	*/
++        if (input_pool.entropy_count >= random_read_wakeup_thresh)
++                wake_up_interruptible(&random_read_wait);
++}
++EXPORT_SYMBOL(random_input_words);
++/*
++ *  random_input_wait - wait until random needs entropy
++ *
++ *  this function sleeps until the /dev/random subsystem actually
++ *  needs more entropy, and then return the amount of entropy
++ *  that it would be nice to have added to the system.
++ */
++int random_input_wait(void)
++{
++        int count;
++
++        wait_event_interruptible(random_write_wait,
++                         input_pool.entropy_count < random_write_wakeup_thresh);
+ 
++        count = random_write_wakeup_thresh - input_pool.entropy_count;
++
++        /* likely we got woken up due to a signal */
++        if (count < 0) count = random_read_wakeup_thresh;
++
++        DEBUG_ENT("requesting %d bits from input_wait()er %d<%d\n",
++                  count,
++                  input_pool.entropy_count, random_write_wakeup_thresh);
++
++        return count;
++}
++EXPORT_SYMBOL(random_input_wait);
+ #define EXTRACT_SIZE 10
+ 
+ /*********************************************************************
+diff --git a/drivers/crypto/geode-aes.c b/drivers/crypto/geode-aes.c
+index 4801162..deace6e 100644
+--- a/drivers/crypto/geode-aes.c
++++ b/drivers/crypto/geode-aes.c
+@@ -13,7 +13,7 @@
+ #include <linux/crypto.h>
+ #include <linux/spinlock.h>
+ #include <crypto/algapi.h>
+-#include <crypto/aes.h>
++#include <crypto/aes_generic.h>
+ 
+ #include <asm/io.h>
+ #include <asm/delay.h>
+diff --git a/drivers/crypto/hifn_795x.c b/drivers/crypto/hifn_795x.c
+index 81f3f95..a072189 100644
+--- a/drivers/crypto/hifn_795x.c
++++ b/drivers/crypto/hifn_795x.c
+@@ -35,7 +35,7 @@
+ #include <linux/ktime.h>
+ 
+ #include <crypto/algapi.h>
+-#include <crypto/des.h>
++#include <crypto/des_generic.h>
+ 
+ #include <asm/kmap_types.h>
+ 
+diff --git a/drivers/crypto/padlock-aes.c b/drivers/crypto/padlock-aes.c
+index 2f3ad3f..10577d9 100644
+--- a/drivers/crypto/padlock-aes.c
++++ b/drivers/crypto/padlock-aes.c
+@@ -44,7 +44,7 @@
+  */
+ 
+ #include <crypto/algapi.h>
+-#include <crypto/aes.h>
++#include <crypto/aes_generic.h>
+ #include <linux/module.h>
+ #include <linux/init.h>
+ #include <linux/types.h>
+diff --git a/include/asm-m68k/m5485sec.h b/include/asm-m68k/m5485sec.h
+new file mode 100644
+index 0000000..bae3b54
+--- /dev/null
++++ b/include/asm-m68k/m5485sec.h
+@@ -0,0 +1,173 @@
++#ifndef M5485SEC_H
++#define M5484SEC_H
++
++#define   SEC_EUACR_U                   MCF_REG32(0x21000)
++#define   SEC_EUACR_L                   MCF_REG32(0x21004)
++#define   SEC_EUASR_U                   MCF_REG32(0x21028)
++#define   SEC_EUASR_L                   MCF_REG32(0x2102C)
++#define   SEC_SMCR                      MCF_REG32(0x21030)
++#define   SEC_SISR_U                    MCF_REG32(0x21010)
++#define   SEC_SISR_L                    MCF_REG32(0x21014)
++#define   SEC_SICR_U                    MCF_REG32(0x21018)
++#define   SEC_SICR_L                    MCF_REG32(0x2101C)
++#define   SEC_SIMR_U                    MCF_REG32(0x21008)
++#define   SEC_SIMR_L                    MCF_REG32(0x2100C)
++#define   SEC_SID                       MCF_REG32(0x21020)
++
++#define   SEC_SMCR_RESET                0x01000000
++#define   SEC_SIMR_MASK_U               0x00000000
++#define   SEC_SIMR_MASK_L               0x03333340
++
++#define   SEC_CC0_FR                    MCF_REG32(0x2204C)
++#define   SEC_CC0_CR                    MCF_REG32(0x2200C)
++#define   SEC_CC0_CDPR                  MCF_REG32(0x22044)
++#define   SEC_CC0_PSR_U                 MCF_REG32(0x22010)
++#define   SEC_CC0_PSR_L                 MCF_REG32(0x22014)
++#define   SEC_CC1_FR                    MCF_REG32(0x2304C)
++#define   SEC_CC1_CR                    MCF_REG32(0x2300C)
++#define   SEC_CC1_CDPR                  MCF_REG32(0x23044)
++#define   SEC_CC1_PSR_U                 MCF_REG32(0x23010)
++#define   SEC_CC1_PSR_L                 MCF_REG32(0x23014)
++
++#define   SEC_CC_CR_RESET               0x00000001
++#define   SEC_CC_CR_CONFIGURATION       0x0000001E
++#define   SEC_CC_PSR_U_ERR_CH0          0x20000000
++#define   SEC_CC_PSR_U_ERR_CH1          0x80000000
++#define   SEC_CC_PSR_U_DN_CH0           0x10000000
++#define   SEC_CC_PSR_U_DN_CH1           0x40000000
++
++#define   SEC_DEU_DRCR                  MCF_REG32(0x2A018)
++#define   SEC_DEU_DSR                   MCF_REG32(0x2A028)
++#define   SEC_DEU_DISR                  MCF_REG32(0x2A030)
++#define   SEC_DEU_DIMR                  MCF_REG32(0x2A038)
++
++#define   SEC_DEU_DRCR_RESET            0x01000000
++#define   SEC_DEU_DSR_RD                0x01000000
++#define   SEC_DEU_DIMR_MASK             0xF63F0000
++
++#define   SEC_AFEU_AFRCR                MCF_REG32(0x28018)
++#define   SEC_AFEU_AFSR                 MCF_REG32(0x28028)
++#define   SEC_AFEU_AFISR                MCF_REG32(0x28030)
++#define   SEC_AFEU_AFIMR                MCF_REG32(0x28038)
++
++#define   SEC_AFEU_AFRCR_RESET          0x01000000
++#define   SEC_AFEU_AFSR_RD              0x01000000
++#define   SEC_AFEU_AFIMR_MASK           0xF61F0000
++
++
++#define   SEC_MDEU_MDRCR                MCF_REG32(0x2C018)
++#define   SEC_MDEU_MDSR                 MCF_REG32(0x2C028)
++#define   SEC_MDEU_MDISR                MCF_REG32(0x2C030)
++#define   SEC_MDEU_MDIMR                MCF_REG32(0x2C038)
++
++#define   SEC_MDEU_MDRCR_RESET          0x01000000
++#define   SEC_MDEU_MDSR_RD              0x01000000
++#define   SEC_MDEU_MDIMR_MASK           0xC41F0000
++
++
++#define   SEC_RNG_RNGRCR                MCF_REG32(0x2E018)
++#define   SEC_RNG_RNGSR                 MCF_REG32(0x2E028)
++#define   SEC_RNG_RNGISR                MCF_REG32(0x2E030)
++#define   SEC_RNG_RNGIMR                MCF_REG32(0x2E038)
++
++#define   SEC_RNG_RNGRCR_RESET          0x01000000
++#define   SEC_RNG_RNGSR_RD              0x01000000
++#define   SEC_RNG_RNGIMR_MASK           0xC2100000
++
++#define   SEC_AESU_AESRCR               MCF_REG32(0x32018)
++#define   SEC_AESU_AESSR                MCF_REG32(0x32028)
++#define   SEC_AESU_AESISR               MCF_REG32(0x32030)
++#define   SEC_AESU_AESIMR               MCF_REG32(0x32038)
++
++#define   SEC_AESU_AESRCR_RESET         0x01000000
++#define   SEC_AESU_AESSR_RD             0x01000000
++#define   SEC_AESU_AESIMR_MASK          0xF61F0000
++
++
++#define   SEC_DESC_NUM                  20
++#define   SEC_CHANNEL_NUMBER            2
++#define   SEC_MAX_BUF_SIZE              32*1024
++#define   SEC_INIT_TIMEOUT              1*HZ
++#define   SEC_INTERRUPT                 37
++
++/* Header descriptor values*/
++#define   SEC_ALG_ENCR_DES_ECB_SINGLE   0x20100010
++#define   SEC_ALG_DECR_DES_ECB_SINGLE   0x20000010
++#define   SEC_ALG_ENCR_DES_ECB_TRIPLE   0x20300010
++#define   SEC_ALG_DECR_DES_ECB_TRIPLE   0x20200010
++#define   SEC_ALG_ENCR_DES_CBC_SINGLE   0x20500010
++#define   SEC_ALG_DECR_DES_CBC_SINGLE   0x20400010
++#define   SEC_ALG_ENCR_DES_CBC_TRIPLE   0x20700010
++#define   SEC_ALG_DECR_DES_CBC_TRIPLE   0x20600010
++
++#define   SEC_ALG_MDEU_SHA256           0x30500010
++#define   SEC_ALG_MDEU_MD5              0x30600010
++#define   SEC_ALG_MDEU_SHA              0x30400010
++#define   SEC_ALG_MDEU_SHA256_HMAC      0x31D00010
++#define   SEC_ALG_MDEU_MD5_HMAC         0x31E00010
++#define   SEC_ALG_MDEU_SHA_HMAC         0x31C00010
++
++#define   SEC_ALG_RNG                   0x40000010
++
++
++#define   SEC_ALG_AFEU_KEY              0x10200050
++#define   SEC_ALG_AFEU_CONTEXT          0x10700050
++
++#define   SEC_ALG_ENCR_AESU_CBC         0x60300010
++#define   SEC_ALG_DECR_AESU_CBC         0x60200010
++#define   SEC_ALG_ENCR_AESU_ECB         0x60100010
++#define   SEC_ALG_DECR_AESU_ECB         0x60000010
++#define   SEC_ALG_AESU_CTR              0x60600010
++
++
++
++#define   SEC_DESCHEAD_ERROR            0xFE000000
++#define   SEC_DESCHEAD_COMPLETED        0xFF000000
++
++#define SEC_DEVICE_NAME                 "cfsec"
++
++/*!!! This number must be changed*/
++#define SEC_MAJOR                       130
++
++#define SEC_DEV_BUF                         1024
++#define SEC_DEV_KEY_LEN                     64
++#define SEC_DEV_VECTOR_LEN                  259
++
++#define SEC_AES_BLCK_LEN                   16
++#define SEC_DES_BLCK_LEN                   8
++
++
++/* Descriptor structure of SEC*/
++struct sec_descriptor {
++	volatile unsigned long secdesc_header;
++	unsigned long secdesc_len1;
++	void *secdesc_ptr1;
++	unsigned long secdesc_iv_in_len;
++	void *secdesc_iv_in_ptr;
++	unsigned long secdesc_key_len;
++	void *secdesc_key_ptr;
++	unsigned long secdesc_data_in_len;
++	void *secdesc_data_in_ptr;
++	unsigned long secdesc_data_out_len;
++	void *secdesc_data_out_ptr;
++	unsigned long secdesc_iv_out_len;
++	void *secdesc_iv_out_ptr;
++	unsigned long secdesc_len7;
++	void *secdesc_ptr7;
++	void *secdesc_ptrnext;
++};
++
++struct sec_device_data {
++	unsigned char secdev_inbuf[SEC_DEV_BUF];
++	unsigned char secdev_outbuf[SEC_DEV_BUF];
++	unsigned char secdev_key[SEC_DEV_KEY_LEN];
++	unsigned char secdev_iv[SEC_DEV_VECTOR_LEN];
++	unsigned char secdev_ov[SEC_DEV_VECTOR_LEN];
++	struct sec_descriptor *secdev_desc;
++};
++
++struct sec_descriptor *sec_desc_alloc(void);
++inline void sec_desc_free(struct sec_descriptor *desc);
++int sec_execute(int channel, struct sec_descriptor *desc, int timeout);
++int sec_nonblock_execute(struct sec_descriptor *desc);
++#endif
+diff --git a/include/crypto/aes.h b/include/crypto/aes.h
+index 5e5296b..828dd88 100644
+--- a/include/crypto/aes.h
++++ b/include/crypto/aes.h
+@@ -5,29 +5,8 @@
+ #ifndef _CRYPTO_AES_H
+ #define _CRYPTO_AES_H
+ 
+-#include <linux/types.h>
+-#include <linux/crypto.h>
+ #ifdef CONFIG_OCF_OCF
+ #include "ocf_aes.h"
+ #endif
+-#define AES_MIN_KEY_SIZE	16
+-#define AES_MAX_KEY_SIZE	32
+-#define AES_KEYSIZE_128		16
+-#define AES_KEYSIZE_192		24
+-#define AES_KEYSIZE_256		32
+-#define AES_BLOCK_SIZE		16
+ 
+-struct crypto_aes_ctx {
+-	u32 key_length;
+-	u32 key_enc[60];
+-	u32 key_dec[60];
+-};
+-
+-extern u32 crypto_ft_tab[4][256];
+-extern u32 crypto_fl_tab[4][256];
+-extern u32 crypto_it_tab[4][256];
+-extern u32 crypto_il_tab[4][256];
+-
+-int crypto_aes_set_key(struct crypto_tfm *tfm, const u8 *in_key,
+-		unsigned int key_len);
+ #endif
+diff --git a/include/crypto/aes_generic.h b/include/crypto/aes_generic.h
+new file mode 100644
+index 0000000..1c2b1a1
+--- /dev/null
++++ b/include/crypto/aes_generic.h
+@@ -0,0 +1,34 @@
++/*
++ * Common values for AES algorithms
++ */
++
++#ifndef _CRYPTO_AES_GENERIC_H
++#define _CRYPTO_AES_GENERIC_H
++
++#include <linux/types.h>
++#include <linux/crypto.h>
++
++#define AES_MIN_KEY_SIZE	16
++#define AES_MAX_KEY_SIZE	32
++#define AES_KEYSIZE_128		16
++#define AES_KEYSIZE_192		24
++#define AES_KEYSIZE_256		32
++#define AES_BLOCK_SIZE		16
++
++struct crypto_aes_ctx {
++	u32 key_length;
++	u32 key_enc[60];
++	u32 key_dec[60];
++#ifdef CONFIG_COLDFIRE_SEC
++	unsigned char key[AES_MAX_KEY_SIZE];
++#endif /* CONFIG_COLDFIRE_SEC */
++};
++
++extern u32 crypto_ft_tab[4][256];
++extern u32 crypto_fl_tab[4][256];
++extern u32 crypto_it_tab[4][256];
++extern u32 crypto_il_tab[4][256];
++
++int crypto_aes_set_key(struct crypto_tfm *tfm, const u8 *in_key,
++		unsigned int key_len);
++#endif
+diff --git a/include/crypto/des.h b/include/crypto/des.h
+index 8bbb377..d9275fb 100644
+--- a/include/crypto/des.h
++++ b/include/crypto/des.h
+@@ -7,15 +7,4 @@
+ #ifdef CONFIG_OCF_OCF
+ #include "ocf_des.h"
+ #endif
+-#define DES_KEY_SIZE		8
+-#define DES_EXPKEY_WORDS	32
+-#define DES_BLOCK_SIZE		8
+-
+-#define DES3_EDE_KEY_SIZE	(3 * DES_KEY_SIZE)
+-#define DES3_EDE_EXPKEY_WORDS	(3 * DES_EXPKEY_WORDS)
+-#define DES3_EDE_BLOCK_SIZE	DES_BLOCK_SIZE
+-
+-
+-extern unsigned long des_ekey(u32 *pe, const u8 *k);
+-
+ #endif /* __CRYPTO_DES_H */
+diff --git a/include/crypto/des_generic.h b/include/crypto/des_generic.h
+new file mode 100644
+index 0000000..9199431
+--- /dev/null
++++ b/include/crypto/des_generic.h
+@@ -0,0 +1,19 @@
++/* 
++ * DES & Triple DES EDE Cipher Algorithms.
++ */
++
++#ifndef __CRYPTO_DES_GENERIC_H
++#define __CRYPTO_DES_GENERIC_H
++
++#define DES_KEY_SIZE		8
++#define DES_EXPKEY_WORDS	32
++#define DES_BLOCK_SIZE		8
++
++#define DES3_EDE_KEY_SIZE	(3 * DES_KEY_SIZE)
++#define DES3_EDE_EXPKEY_WORDS	(3 * DES_EXPKEY_WORDS)
++#define DES3_EDE_BLOCK_SIZE	DES_BLOCK_SIZE
++
++
++extern unsigned long des_ekey(u32 *pe, const u8 *k);
++
++#endif /* __CRYPTO_DES_GENERIC_H */
+diff --git a/include/linux/miscdevice.h b/include/linux/miscdevice.h
+index 24b30b9..41ed095 100644
+--- a/include/linux/miscdevice.h
++++ b/include/linux/miscdevice.h
+@@ -12,6 +12,7 @@
+ #define APOLLO_MOUSE_MINOR 7
+ #define PC110PAD_MINOR 9
+ /*#define ADB_MOUSE_MINOR 10	FIXME OBSOLETE */
++#define CRYPTODEV_MINOR          70     /* OCF async crypto */
+ #define WATCHDOG_MINOR		130	/* Watchdog timer     */
+ #define TEMP_MINOR		131	/* Temperature Sensor */
+ #define RTC_MINOR 135
+diff --git a/include/linux/random.h b/include/linux/random.h
+index 36f125c..b1d9f4a 100644
+--- a/include/linux/random.h
++++ b/include/linux/random.h
+@@ -47,7 +47,10 @@ extern void rand_initialize_irq(int irq);
+ extern void add_input_randomness(unsigned int type, unsigned int code,
+ 				 unsigned int value);
+ extern void add_interrupt_randomness(int irq);
+-
++#ifdef CONFIG_OCF_OCF
++extern void random_input_words(__u32 *buf, size_t wordcount, int ent_count);
++extern int random_input_wait(void);
++#endif
+ extern void get_random_bytes(void *buf, int nbytes);
+ void generate_random_uuid(unsigned char uuid_out[16]);
+ 
+diff --git a/net/ipsec/ipsec_proc.c b/net/ipsec/ipsec_proc.c
+index da96436..14ade9b 100644
+--- a/net/ipsec/ipsec_proc.c
++++ b/net/ipsec/ipsec_proc.c
+@@ -587,7 +587,11 @@ ipsec_tncfg_get_info(char *buffer,
+ 
+ 	for(i = 0; i < IPSEC_NUM_IF; i++) {
+ 		ipsec_snprintf(name, (ssize_t) sizeof(name), IPSEC_DEV_FORMAT, i);
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
++		dev = __ipsec_dev_get(&init_net,name);
++#else
+ 		dev = __ipsec_dev_get(name);
++#endif
+ 		if(dev) {
+ 			priv = (struct ipsecpriv *)(dev->priv);
+ 			len += ipsec_snprintf(buffer+len, length-len, "%s",
+@@ -971,8 +975,11 @@ ipsec_proc_init()
+ 	/* zero these out before we initialize /proc/net/ipsec/birth/stuff */
+ 	memset(&ipsec_ipv4_birth_packet, 0, sizeof(struct ipsec_birth_reply));
+ 	memset(&ipsec_ipv6_birth_packet, 0, sizeof(struct ipsec_birth_reply));
+-
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
++	proc_net_ipsec_dir = proc_mkdir("ipsec", init_net.proc_net);
++#else
+ 	proc_net_ipsec_dir = proc_mkdir("ipsec", proc_net);
++#endif
+ 	if(proc_net_ipsec_dir == NULL) {
+ 		/* no point in continuing */
+ 		return 1;
+@@ -1005,12 +1012,21 @@ ipsec_proc_init()
+ 	}
+ 	
+ 	/* now create some symlinks to provide compatibility */
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
++	proc_symlink("ipsec_eroute", init_net.proc_net, "ipsec/eroute/all");
++	proc_symlink("ipsec_spi",    init_net.proc_net, "ipsec/spi/all");
++	proc_symlink("ipsec_spigrp", init_net.proc_net, "ipsec/spigrp/all");
++	proc_symlink("ipsec_tncfg",  init_net.proc_net, "ipsec/tncfg");
++	proc_symlink("ipsec_version",init_net.proc_net, "ipsec/version");
++	proc_symlink("ipsec_klipsdebug",init_net.proc_net,"ipsec/klipsdebug");
++#else
+ 	proc_symlink("ipsec_eroute", proc_net, "ipsec/eroute/all");
+ 	proc_symlink("ipsec_spi",    proc_net, "ipsec/spi/all");
+ 	proc_symlink("ipsec_spigrp", proc_net, "ipsec/spigrp/all");
+ 	proc_symlink("ipsec_tncfg",  proc_net, "ipsec/tncfg");
+ 	proc_symlink("ipsec_version",proc_net, "ipsec/version");
+-	proc_symlink("ipsec_klipsdebug",proc_net,"ipsec/klipsdebug");
++	proc_symlink("ipsec_klipsdebug",proc_net,"ipsec/klipsdebug")
++#endif
+ 
+ #endif /* !PROC_FS_2325 */
+ 
+@@ -1065,7 +1081,17 @@ ipsec_proc_cleanup()
+ 		} while(it >= proc_items);
+ 	}
+ 
+-
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
++#ifdef CONFIG_KLIPS_DEBUG
++        remove_proc_entry("ipsec_klipsdebug", init_net.proc_net);
++#endif /* CONFIG_KLIPS_DEBUG */
++        remove_proc_entry("ipsec_eroute",     init_net.proc_net);
++        remove_proc_entry("ipsec_spi",        init_net.proc_net);
++        remove_proc_entry("ipsec_spigrp",     init_net.proc_net);
++        remove_proc_entry("ipsec_tncfg",      init_net.proc_net);
++        remove_proc_entry("ipsec_version",    init_net.proc_net);
++        remove_proc_entry("ipsec",            init_net.proc_net);
++#else
+ #ifdef CONFIG_KLIPS_DEBUG
+ 	remove_proc_entry("ipsec_klipsdebug", proc_net);
+ #endif /* CONFIG_KLIPS_DEBUG */
+@@ -1075,6 +1101,7 @@ ipsec_proc_cleanup()
+ 	remove_proc_entry("ipsec_tncfg",      proc_net);
+ 	remove_proc_entry("ipsec_version",    proc_net);
+ 	remove_proc_entry("ipsec",            proc_net);
++#endif
+ #endif /* 2.4 kernel */
+ }
+ 
+diff --git a/net/ipsec/ipsec_rcv.c b/net/ipsec/ipsec_rcv.c
+index 3e22c23..f5558bd 100644
+--- a/net/ipsec/ipsec_rcv.c
++++ b/net/ipsec/ipsec_rcv.c
+@@ -652,7 +652,11 @@ ipsec_rcv_init(struct ipsec_rcv_state *irs)
+ 					    "Info -- pkt already proc'ed a group of ipsec headers, processing next group of ipsec headers.\n");
+ 				break;
+ 			}
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
++			if((ipsecdev = __ipsec_dev_get(&init_net, name)) == NULL) {
++#else
+ 			if((ipsecdev = __ipsec_dev_get(name)) == NULL) {
++#endif
+ 				KLIPS_PRINT(debug_rcv,
+ 					    "klips_error:ipsec_rcv: "
+ 					    "device %s does not exist\n",
+@@ -1745,6 +1749,7 @@ ipsec_rcv_complete(struct ipsec_rcv_state *irs)
+ 		    "klips_debug:ipsec_rcv: "
+ 		    "netif_rx() called.\n");
+ 	netif_rx(irs->skb);
++//	netif_receive_skb(irs->skb);
+ 	irs->skb=NULL;
+ 
+ 	return IPSEC_RCV_OK;
+@@ -1783,7 +1788,14 @@ ipsec_rsm(struct ipsec_rcv_state *irs)
+ 	/*
+ 	 * make sure nothing is removed from underneath us
+ 	 */
+-	spin_lock_bh(&tdb_lock);
++//#ifdef CONFIG_SMP
++	if(irs->state == IPSEC_RSM_INIT)
++//#endif
++	{
++	KLIPS_PRINT(debug_rcv,
++		    "klips_debug:ipsec_rsm lock tdb_lock\n");
++		spin_lock_bh(&tdb_lock);
++	}
+ 
+ 	KLIPS_PRINT(debug_rcv, "klips_debug:ipsec_rsm(%p)\n",irs);
+ 
+@@ -1835,9 +1847,14 @@ ipsec_rsm(struct ipsec_rcv_state *irs)
+ 			KLIPS_PRINT(debug_rcv,
+ 				    "klips_debug:ipsec_rsm: (%p) processing suspended at state=%u\n", irs, irs->state);
+ 
+-			spin_unlock_bh(&tdb_lock);
++//#ifdef CONFIG_SMP
++//	if(irs->state != IPSEC_RSM_DONE)
++//#endif
++//			spin_unlock_bh(&tdb_lock);
+ 
+ 			rsm_exit2++;
++			KLIPS_PRINT(debug_rcv,
++				    "klips_debug:ipsec_rsm: processing suspended at state=%u return\n", irs->state);
+ 			return;
+ 		} else {
+ 			/* bad result, force state change to done */
+@@ -1851,7 +1868,14 @@ ipsec_rsm(struct ipsec_rcv_state *irs)
+ 	/*
+ 	 * all done with anything needing locks
+ 	 */
+-	spin_unlock_bh(&tdb_lock);
++//#ifdef CONFIG_SMP
++	if(irs->state == IPSEC_RSM_DONE)
++//#endif
++	{
++	KLIPS_PRINT(debug_rcv,
++		    "klips_debug:ipsec_rsm unlock tdb_lock\n");
++		spin_unlock_bh(&tdb_lock);
++	}
+ 
+ 	if (irs->skb) {
+ 		ipsec_kfree_skb(irs->skb);
+@@ -1963,6 +1987,8 @@ ipsec_rcv(struct sk_buff *skb
+ 	ipsec_rsm(irs);
+ #endif
+ 
++	KLIPS_PRINT(debug_rcv,
++		    "klips_debug:ipsec_rcv: return\n");
+   	return(0);
+ 
+ error_alloc:
+@@ -2043,10 +2069,14 @@ int klips26_rcv_encap(struct sk_buff *skb, __u16 encap_type)
+ 	 */
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,20)
+ 	ipsec_rsm(&irs->workq);
++	KLIPS_PRINT(debug_rcv,
++		    "klips_debug:klips26_rcv_encap: return\n");
+ #else
+ 	ipsec_rsm(irs);
+ #endif
+ 
++	KLIPS_PRINT(debug_rcv,
++		    "klips_debug:klips26_rcv_encap: return\n");
+ 	/* empty any saved SKBs */
+ 	ipsec_skb_gc_flush();
+ 
+diff --git a/net/ipsec/ipsec_tunnel.c b/net/ipsec/ipsec_tunnel.c
+index c62ae69..84f8564 100644
+--- a/net/ipsec/ipsec_tunnel.c
++++ b/net/ipsec/ipsec_tunnel.c
+@@ -65,6 +65,7 @@ char ipsec_tunnel_c_version[] = "RCSID $Id: ipsec_tunnel.c,v 1.234 2005/11/11 04
+ #ifdef NETDEV_23
+ # include <linux/netfilter_ipv4.h>
+ #endif /* NETDEV_23 */
++#define NF_IP_LOCAL_OUT               3
+ 
+ #include <linux/if_arp.h>
+ #include <net/arp.h>
+@@ -159,9 +160,13 @@ ipsec_tunnel_close(struct net_device *dev)
+ static inline int ipsec_tunnel_xmit2(struct sk_buff *skb)
+ {
+ 	sendip_called++;
++	KLIPS_PRINT(debug_tunnel ,
++		    "klips_debug:ipsec_tunnel_xmit2: %d\n",__LINE__);
+ 	if(atomic_read(&skb->users) > 1) {
+ 		printk("tunnel_xmit2: users=%u\n", atomic_read(&skb->users));
+ 	}
++	KLIPS_PRINT(debug_tunnel ,
++		    "klips_debug:ipsec_tunnel_xmit2: %d\n",__LINE__);
+ 	return dst_output(skb);
+ }
+ 
+@@ -358,8 +363,11 @@ ipsec_tunnel_SAlookup(struct ipsec_xmit_state *ixs)
+ 	 * cheat for now...are we udp/500? If so, let it through
+ 	 * without interference since it is most likely an IKE packet.
+ 	 */
+-
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
++	if (ip_chk_addr(&init_net, (unsigned long)ixs->iph->saddr) == IS_MYADDR
++#else
+ 	if (ip_chk_addr((unsigned long)ixs->iph->saddr) == IS_MYADDR
++#endif
+ 	    && (ixs->eroute==NULL
+ 		|| ixs->iph->daddr == ixs->eroute->er_said.dst.u.v4.sin_addr.s_addr
+ 		|| INADDR_ANY == ixs->eroute->er_said.dst.u.v4.sin_addr.s_addr)
+@@ -391,7 +399,11 @@ ipsec_tunnel_SAlookup(struct ipsec_xmit_state *ixs)
+ 	 *
+ 	 */
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
++	if (ip_chk_addr(&init_net, (unsigned long)ixs->iph->saddr) == IS_MYADDR
++#else
+ 	if (ip_chk_addr((unsigned long)ixs->iph->saddr) == IS_MYADDR
++#endif
+ 	    && (ixs->eroute==NULL
+ 		|| ixs->iph->daddr == ixs->eroute->er_said.dst.u.v4.sin_addr.s_addr
+ 		|| INADDR_ANY == ixs->eroute->er_said.dst.u.v4.sin_addr.s_addr)
+@@ -606,7 +618,11 @@ ipsec_tunnel_send(struct ipsec_xmit_state*ixs)
+  	fl.nl_u.ip4_u.saddr = ixs->pass ? 0 : ip_hdr(ixs->skb)->saddr;
+  	fl.nl_u.ip4_u.tos = RT_TOS(ip_hdr(ixs->skb)->tos);
+  	fl.proto = ip_hdr(ixs->skb)->protocol;
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
++ 	if ((ixs->error = ip_route_output_key(&init_net, &ixs->route, &fl))) {
++#else
+  	if ((ixs->error = ip_route_output_key(&ixs->route, &fl))) {
++#endif
+ 		ixs->stats->tx_errors++;
+ 		KLIPS_PRINT(debug_tunnel & DB_TN_XMIT,
+ 			    "klips_debug:ipsec_xmit_send: "
+@@ -669,6 +685,8 @@ ipsec_tunnel_send(struct ipsec_xmit_state*ixs)
+ 			return IPSEC_XMIT_IPSENDFAILURE;
+ 		}
+ 	}
++	KLIPS_PRINT(debug_tunnel ,
++		    "klips_debug:ipsec_xmit_send: %d\n",__LINE__);
+ 	ixs->stats->tx_packets++;
+ 
+ 	ixs->skb = NULL;
+@@ -852,11 +870,15 @@ ipsec_tunnel_start_xmit(struct sk_buff *skb, struct net_device *dev)
+ 
+ 	ixs->xsm_complete = ipsec_tunnel_xsm_complete;
+ 
++	KLIPS_PRINT(debug_tunnel ,
++		    "klips_debug:ipsec_tunnel_start_xmit: %d\n",__LINE__);
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,20)
+ 	ipsec_xsm(&ixs->workq);
+ #else
+ 	ipsec_xsm(ixs);
+ #endif
++	KLIPS_PRINT(debug_tunnel ,
++		    "klips_debug:ipsec_tunnel_start_xmit: %d\n",__LINE__);
+ 	return 0;
+ 
+ cleanup:
+@@ -873,6 +895,7 @@ ipsec_tunnel_get_stats(struct net_device *dev)
+ 	return &(((struct ipsecpriv *)(dev->priv))->mystats);
+ }
+ 
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24)
+ /*
+  * Revectored calls.
+  * For each of these calls, a field exists in our private structure.
+@@ -1082,6 +1105,7 @@ ipsec_tunnel_rebuild_header(void *buff, struct net_device *dev,
+ 	skb->dev = tmp;
+ 	return ret;
+ }
++#endif
+ 
+ DEBUG_NO_STATIC int
+ ipsec_tunnel_set_mac_address(struct net_device *dev, void *addr)
+@@ -1293,6 +1317,7 @@ ipsec_tunnel_attach(struct net_device *dev, struct net_device *physdev)
+ 	prv->hard_start_xmit = physdev->hard_start_xmit;
+ 	prv->get_stats = physdev->get_stats;
+ 
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24)
+ 	if (physdev->hard_header) {
+ 		prv->hard_header = physdev->hard_header;
+ 		dev->hard_header = ipsec_tunnel_hard_header;
+@@ -1304,6 +1329,7 @@ ipsec_tunnel_attach(struct net_device *dev, struct net_device *physdev)
+ 		dev->rebuild_header = ipsec_tunnel_rebuild_header;
+ 	} else
+ 		dev->rebuild_header = NULL;
++#endif /* KERNEL_VERSION */
+ 	
+ 	if (physdev->set_mac_address) {
+ 		prv->set_mac_address = physdev->set_mac_address;
+@@ -1319,11 +1345,13 @@ ipsec_tunnel_attach(struct net_device *dev, struct net_device *physdev)
+ 		dev->header_cache_bind = NULL;
+ #endif /* !NET_21 */
+ 
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24)
+ 	if (physdev->header_cache_update) {
+ 		prv->header_cache_update = physdev->header_cache_update;
+ 		dev->header_cache_update = ipsec_tunnel_cache_update;
+ 	} else
+ 		dev->header_cache_update = NULL;
++#endif /* KERNEL_VERSION */
+ 
+ 	dev->hard_header_len = physdev->hard_header_len;
+ 
+@@ -1515,7 +1543,11 @@ ipsec_tunnel_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
+ 		realphysname[IFNAMSIZ-1] = 0;
+ 		colon = strchr(realphysname, ':');
+ 		if (colon) *colon = 0;
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
++		them = ipsec_dev_get(&init_net, realphysname);
++#else
+ 		them = ipsec_dev_get(realphysname);
++#endif
+ #else /* CONFIG_IP_ALIAS */
+ 		them = ipsec_dev_get(&init_net, cf->cf_name);
+ #endif /* CONFIG_IP_ALIAS */
+@@ -1768,13 +1800,17 @@ ipsec_tunnel_init(struct net_device *dev)
+ 
+ 	dev->set_multicast_list = NULL;
+ 	dev->do_ioctl		= ipsec_tunnel_ioctl;
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24)
+ 	dev->hard_header	= NULL;
+ 	dev->rebuild_header     = NULL;
++#endif
+ 	dev->set_mac_address 	= NULL;
+ #ifndef NET_21
+ 	dev->header_cache_bind 	= NULL;
+ #endif /* !NET_21 */
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24)
+ 	dev->header_cache_update= NULL;
++#endif
+ 
+ #ifdef NET_21
+ /*	prv->neigh_setup        = NULL; */
+diff --git a/net/ipsec/pfkey_v2.c b/net/ipsec/pfkey_v2.c
+index 55f9831..68dec34 100644
+--- a/net/ipsec/pfkey_v2.c
++++ b/net/ipsec/pfkey_v2.c
+@@ -99,13 +99,14 @@ struct supported_list *pfkey_supported_list[SADB_SATYPE_MAX+1];
+ struct socket_list *pfkey_open_sockets = NULL;
+ struct socket_list *pfkey_registered_sockets[SADB_SATYPE_MAX+1];
+ 
+-int pfkey_msg_interp(struct sock *, struct sadb_msg *, struct sadb_msg **);
+ 
+-DEBUG_NO_STATIC int pfkey_create(struct socket *sock, int protocol);
+-DEBUG_NO_STATIC int pfkey_shutdown(struct socket *sock, int mode);
+-DEBUG_NO_STATIC int pfkey_release(struct socket *sock);
++int pfkey_msg_interp(struct sock *, struct sadb_msg *, struct sadb_msg **);
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
++DEBUG_NO_STATIC int pfkey_create(struct net *net, struct socket *sock, int protocol);
++#else
+ DEBUG_NO_STATIC int pfkey_create(struct socket *sock, int protocol);
++#endif
+ DEBUG_NO_STATIC int pfkey_shutdown(struct socket *sock, int mode);
+ DEBUG_NO_STATIC int pfkey_release(struct socket *sock);
+ 
+@@ -119,13 +120,24 @@ DEBUG_NO_STATIC int pfkey_recvmsg(struct socket *sock, struct msghdr *msg, int s
+ #endif
+ 
+ struct net_proto_family pfkey_family_ops = {
++#ifdef NETDEV_23
++	.family = PF_KEY,
++	.create = pfkey_create,
++#ifdef NET_26
++	.owner  = THIS_MODULE,
++#endif
++#else
+ 	PF_KEY,
+ 	pfkey_create
++#endif /*NETDEV_23*/
+ };
+ 
+ struct proto_ops SOCKOPS_WRAPPED(pfkey_ops) = {
+ #ifdef NETDEV_23
+ 	family:		PF_KEY,
++#ifdef NET_26
++	owner:          THIS_MODULE,
++#endif
+ 	release:	pfkey_release,
+ 	bind:		sock_no_bind,
+ 	connect:	sock_no_connect,
+@@ -641,8 +653,13 @@ static struct proto key_proto = {
+ };
+ #endif
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
++DEBUG_NO_STATIC int
++pfkey_create(struct net *net, struct socket *sock, int protocol)
++#else
+ DEBUG_NO_STATIC int
+ pfkey_create(struct socket *sock, int protocol)
++#endif
+ {
+ 	struct sock *sk;
+ 
+@@ -653,7 +670,8 @@ pfkey_create(struct socket *sock, int protocol)
+ 		return -EINVAL;
+ 	}
+ 
+-	KLIPS_PRINT(debug_pfkey,
++	//KLIPS_PRINT(debug_pfkey,
++	printk(
+ 		    "klips_debug:pfkey_create: "
+ 		    "sock=0p%p type:%d state:%d flags:%ld protocol:%d\n",
+ 		    sock,
+@@ -662,7 +680,8 @@ pfkey_create(struct socket *sock, int protocol)
+ 		    sock->flags, protocol);
+ 
+ 	if(sock->type != SOCK_RAW) {
+-		KLIPS_PRINT(debug_pfkey,
++//		KLIPS_PRINT(debug_pfkey,
++		printk(
+ 			    "klips_debug:pfkey_create: "
+ 			    "only SOCK_RAW supported.\n");
+ 		return -ESOCKTNOSUPPORT;
+@@ -688,7 +707,11 @@ pfkey_create(struct socket *sock, int protocol)
+ 
+ #ifdef NET_26
+ #ifdef NET_26_12_SKALLOC
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
++	sk=(struct sock *)sk_alloc(net, PF_KEY, GFP_KERNEL, &key_proto);
++#else
+ 	sk=(struct sock *)sk_alloc(PF_KEY, GFP_KERNEL, &key_proto, 1);
++#endif
+ #else
+ 	sk=(struct sock *)sk_alloc(PF_KEY, GFP_KERNEL, 1, NULL);
+ #endif
+@@ -1101,9 +1124,11 @@ pfkey_recvmsg(struct socket *sock
+ 	}
+ 
+ 	skb_copy_datagram_iovec(skb, 0, msg->msg_iov, size);
+-#ifdef HAVE_TSTAMP
+-	sk->sk_stamp  = skb->tstamp;
+-	//sk->sk_stamp.tv_usec = skb->tstamp.off_usec;
++#ifdef HAVE_KERNEL_TSTAMP
++	sk->sk_stamp = skb->tstamp;
++#elif defined(HAVE_TSTAMP)
++//	sk->sk_stamp.tv_sec  = skb->tstamp.off_sec;
++//	sk->sk_stamp.tv_usec = skb->tstamp.off_usec;
+ #else
+         sk->sk_stamp=skb->stamp;
+ #endif
+@@ -1116,6 +1141,7 @@ pfkey_recvmsg(struct socket *sock
+ #ifndef PROC_FS_2325
+ DEBUG_NO_STATIC
+ #endif /* PROC_FS_2325 */
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24)
+ int
+ pfkey_get_info(char *buffer, char **start, off_t offset, int length
+ #ifndef  PROC_NO_DUMMY
+@@ -1344,6 +1370,164 @@ struct proc_dir_entry proc_net_pfkey_registered =
+ 	pfkey_registered_get_info
+ };
+ #endif /* !PROC_FS_2325 */
++#else /*KERNE VERSION*/
++static int pfkey_info_show(struct seq_file *m, void *v)
++{
++#ifdef NET_26
++	struct hlist_node *node;
++#endif
++	struct sock *sk;
++	
++#ifdef CONFIG_KLIPS_DEBUG
++	if(!sysctl_ipsec_debug_verbose) {
++#endif /* CONFIG_KLIPS_DEBUG */
++	seq_printf(m, 
++		      "    sock   pid   socket     next     prev e n p sndbf    Flags     Type St\n");
++#ifdef CONFIG_KLIPS_DEBUG
++	} else {
++	seq_printf(m,
++		      "    sock   pid d    sleep   socket     next     prev e r z n p sndbf    stamp    Flags     Type St\n");
++	}
++#endif /* CONFIG_KLIPS_DEBUG */
++
++	sk_for_each(sk, node, &pfkey_sock_list) {
++
++#ifdef CONFIG_KLIPS_DEBUG
++		if(!sysctl_ipsec_debug_verbose) {
++#endif /* CONFIG_KLIPS_DEBUG */
++		  seq_printf(m,
++					"%8p %5d %8p %d %d %5d %08lX %8X %2X\n",
++					sk,
++					key_pid(sk),
++					sk->sk_socket,
++					sk->sk_err,
++					sk->sk_protocol,
++					sk->sk_sndbuf,
++					sk->sk_socket->flags,
++					sk->sk_socket->type,
++					sk->sk_socket->state);
++#ifdef CONFIG_KLIPS_DEBUG
++		} else {
++		  seq_printf(m,
++					"%8p %5d %d %8p %8p %d %d %d %d %5d %d.%06d %08lX %8X %2X\n",
++					sk,
++					key_pid(sk),
++					sock_flag(sk, SOCK_DEAD),
++					sk->sk_sleep,
++					sk->sk_socket,
++					sk->sk_err,
++					sk->sk_reuse,
++#ifdef HAVE_SOCK_ZAPPED
++					sock_flag(sk, SOCK_ZAPPED),
++#else
++					sk->sk_zapped,
++#endif					
++					sk->sk_protocol,
++					sk->sk_sndbuf,
++					(unsigned int)sk->sk_stamp.tv.sec,
++					(unsigned int)sk->sk_stamp.tv.nsec,
++					sk->sk_socket->flags,
++					sk->sk_socket->type,
++					sk->sk_socket->state);
++		}
++#endif /* CONFIG_KLIPS_DEBUG */
++	}
++	return 0;
++}
++
++static int pfkey_info_open(struct inode *inode, struct file *file)
++{
++	return single_open(file, pfkey_info_show, NULL);
++}
++
++static const struct file_operations pfkey_proc_info = {
++	.open		= pfkey_info_open,
++	.read		= seq_read,
++	.llseek		= seq_lseek,
++	.release	= single_release,
++	.owner		= THIS_MODULE,
++};
++
++static int pfkey_supported_show(struct seq_file *m, void *v)
++{
++	int satype;
++	struct supported_list *ps;
++	
++	seq_printf(m,
++		      "satype exttype alg_id ivlen minbits maxbits name\n");
++	
++	for(satype = SADB_SATYPE_UNSPEC; satype <= SADB_SATYPE_MAX; satype++) {
++		ps = pfkey_supported_list[satype];
++		while(ps) {
++			struct ipsec_alg_supported *alg = ps->supportedp;
++			unsigned char *n = alg->ias_name;
++			if(n == NULL) n = "unknown";
++
++			seq_printf(m,
++					      "    %2d      %2d     %2d   %3d     %3d     %3d %20s\n",
++					      satype,
++					      alg->ias_exttype,
++					      alg->ias_id,
++					      alg->ias_ivlen,
++					      alg->ias_keyminbits,
++					      alg->ias_keymaxbits,
++					      n);
++			
++			ps = ps->next;
++		}
++	}
++	return 0;
++}
++
++static int pfkey_supported_open(struct inode *inode, struct file *file)
++{
++	return single_open(file, pfkey_supported_show, NULL);
++}
++
++static const struct file_operations pfkey_proc_supported_info = {
++	.open		= pfkey_supported_open,
++	.read		= seq_read,
++	.llseek		= seq_lseek,
++	.release	= single_release,
++	.owner		= THIS_MODULE,
++};
++
++static int pfkey_registered_show(struct seq_file *m, void *v)
++{
++	int satype;
++	struct socket_list *pfkey_sockets;
++	
++	seq_printf(m,
++		      "satype   socket   pid       sk\n");
++	
++	for(satype = SADB_SATYPE_UNSPEC; satype <= SADB_SATYPE_MAX; satype++) {
++		pfkey_sockets = pfkey_registered_sockets[satype];
++		while(pfkey_sockets) {
++			seq_printf(m,
++				     "    %2d %8p %5d %8p\n",
++				     satype,
++				     pfkey_sockets->socketp,
++				     key_pid(pfkey_sockets->socketp->sk),
++				     pfkey_sockets->socketp->sk);
++			pfkey_sockets = pfkey_sockets->next;
++		}
++	}
++	return 0;
++}
++
++static int pfkey_registered_open(struct inode *inode, struct file *file)
++{
++	return single_open(file, pfkey_registered_show, NULL);
++}
++
++static const struct file_operations pfkey_proc_registered_info = {
++	.open		= pfkey_registered_open,
++	.read		= seq_read,
++	.llseek		= seq_lseek,
++	.release	= single_release,
++	.owner		= THIS_MODULE,
++};
++#endif /*KERNE VERSION*/
+ #endif /* CONFIG_PROC_FS */
+ 
+ DEBUG_NO_STATIC int
+@@ -1483,9 +1667,15 @@ pfkey_init(void)
+ 	error |= proc_register_dynamic(&proc_net, &proc_net_pfkey_registered);
+ #    endif /* PROC_FS_21 */
+ #  else /* !PROC_FS_2325 */
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
++	proc_create("pf_key", 0, init_net.proc_net, &pfkey_proc_info);
++	proc_create("pf_key_supported", 0, init_net.proc_net, &pfkey_proc_supported_info);
++	proc_create("pf_key_registered", 0, init_net.proc_net, &pfkey_proc_registered_info);
++#  else /* KERNEL_VERSION */
+ 	proc_net_create ("pf_key", 0, pfkey_get_info);
+ 	proc_net_create ("pf_key_supported", 0, pfkey_supported_get_info);
+ 	proc_net_create ("pf_key_registered", 0, pfkey_registered_get_info);
++#endif
+ #  endif /* !PROC_FS_2325 */
+ #endif /* CONFIG_PROC_FS */
+ 
+@@ -1520,9 +1710,15 @@ pfkey_cleanup(void)
+ 		printk("klips_debug:pfkey_cleanup: "
+ 		       "cannot unregister /proc/net/pf_key_registered\n");
+ #  else /* !PROC_FS_2325 */
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
++	proc_net_remove (&init_net, "pf_key");
++	proc_net_remove (&init_net, "pf_key_supported");
++	proc_net_remove (&init_net, "pf_key_registered");
++#else
+ 	proc_net_remove ("pf_key");
+ 	proc_net_remove ("pf_key_supported");
+ 	proc_net_remove ("pf_key_registered");
++#endif
+ #  endif /* !PROC_FS_2325 */
+ #endif /* CONFIG_PROC_FS */
+ 
+diff --git a/net/ipsec/pfkey_v2_parser.c b/net/ipsec/pfkey_v2_parser.c
+index a0b874b..f051941 100644
+--- a/net/ipsec/pfkey_v2_parser.c
++++ b/net/ipsec/pfkey_v2_parser.c
+@@ -301,7 +301,11 @@ pfkey_getspi_parse(struct sock *sk, struct sadb_ext **extensions, struct pfkey_e
+ 		SENDERR(EEXIST);
+ 	}
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
++	if(ip_chk_addr(&init_net, (unsigned long)extr->ips->ips_said.dst.u.v4.sin_addr.s_addr) == IS_MYADDR) {
++#else
+ 	if(ip_chk_addr((unsigned long)extr->ips->ips_said.dst.u.v4.sin_addr.s_addr) == IS_MYADDR) {
++#endif
+ 		extr->ips->ips_flags |= EMT_INBOUND;
+ 	}
+ 	
+@@ -450,7 +454,11 @@ pfkey_update_parse(struct sock *sk, struct sadb_ext **extensions, struct pfkey_e
+ 		SENDERR(ENOENT);
+ 	}
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
++	if(ip_chk_addr(&init_net, (unsigned long)extr->ips->ips_said.dst.u.v4.sin_addr.s_addr) == IS_MYADDR) {
++#else
+ 	if(ip_chk_addr((unsigned long)extr->ips->ips_said.dst.u.v4.sin_addr.s_addr) == IS_MYADDR) {
++#endif
+ 		extr->ips->ips_flags |= EMT_INBOUND;
+ 	}
+ 
+@@ -719,7 +727,11 @@ pfkey_add_parse(struct sock *sk, struct sadb_ext **extensions, struct pfkey_extr
+ 		SENDERR(EEXIST);
+ 	}
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
++	if(ip_chk_addr(&init_net, (unsigned long)extr->ips->ips_said.dst.u.v4.sin_addr.s_addr) == IS_MYADDR) {
++#else
+ 	if(ip_chk_addr((unsigned long)extr->ips->ips_said.dst.u.v4.sin_addr.s_addr) == IS_MYADDR) {
++#endif
+ 		extr->ips->ips_flags |= EMT_INBOUND;
+ 	}
+ 
+-- 
+1.5.6
+

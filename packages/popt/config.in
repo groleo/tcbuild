@@ -1,0 +1,35 @@
+config POPT
+    string
+
+choice
+    bool
+    prompt "Version"
+
+
+config POPT_V_1_14
+    bool
+    prompt "1.14"
+
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+
+config POPT_V_snapshot
+    bool
+    prompt "latest snapshot (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+config POPT_V_specific_date
+    bool
+    prompt "<specific date> (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+endchoice
+
+config POPT_VERSION
+    string
+    prompt "Enter date (YYYYMMDD)" if POPT_V_specific_date
+    default "snapshot" if POPT_V_snapshot
+    default "1.14" if POPT_V_1_14
+
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!

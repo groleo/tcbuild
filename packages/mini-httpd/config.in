@@ -1,0 +1,35 @@
+config MINIHTTPD
+    string
+
+choice
+    bool
+    prompt "Version"
+
+
+config MINIHTTPD_V_1_19
+    bool
+    prompt "1.19"
+
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+
+config MINIHTTPD_V_snapshot
+    bool
+    prompt "latest snapshot (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+config MINIHTTPD_V_specific_date
+    bool
+    prompt "<specific date> (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+endchoice
+
+config MINIHTTPD_VERSION
+    string
+    prompt "Enter date (YYYYMMDD)" if MINIHTTPD_V_specific_date
+    default "snapshot" if MINIHTTPD_V_snapshot
+    default "1.19" if MINIHTTPD_V_1_19
+
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!

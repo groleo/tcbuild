@@ -1,0 +1,11 @@
+--- a/include/linux/swap.h	2009-04-27 18:36:55.105371629 +0300
++++ b/include/linux/swap.h	2009-04-27 18:37:00.472936271 +0300
+@@ -7,7 +7,7 @@
+ #include <linux/list.h>
+ #include <linux/memcontrol.h>
+ #include <linux/sched.h>
+-
++#include <linux/pagemap.h>
+ #include <asm/atomic.h>
+ #include <asm/page.h>
+ 

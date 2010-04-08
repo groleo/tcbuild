@@ -1,0 +1,35 @@
+config DROPBEAR
+    string
+
+choice
+    bool
+    prompt "Version"
+
+
+config DROPBEAR_V_0_52
+    bool
+    prompt "0.52"
+
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+
+config DROPBEAR_V_snapshot
+    bool
+    prompt "latest snapshot (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+config DROPBEAR_V_specific_date
+    bool
+    prompt "<specific date> (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+endchoice
+
+config DROPBEAR_VERSION
+    string
+    prompt "Enter date (YYYYMMDD)" if DROPBEAR_V_specific_date
+    default "snapshot" if DROPBEAR_V_snapshot
+    default "0.52" if DROPBEAR_V_0_52
+
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!

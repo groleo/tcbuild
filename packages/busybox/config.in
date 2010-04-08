@@ -1,0 +1,127 @@
+# busybox options
+config BUSYBOX
+    string
+
+choice
+    bool
+    prompt "Version"
+
+
+config BUSYBOX_V_1_13_3
+    bool
+    prompt "1.13.3"
+
+config BUSYBOX_V_1_13_4
+    bool
+    prompt "1.13.4"
+
+config BUSYBOX_V_1_14_0
+    bool
+    prompt "1.14.0"
+
+config BUSYBOX_V_1_14_1
+    bool
+    prompt "1.14.1"
+
+config BUSYBOX_V_1_14_2
+    bool
+    prompt "1.14.2"
+
+config BUSYBOX_V_1_14_3
+    bool
+    prompt "1.14.3"
+
+
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+
+config BUSYBOX_V_snapshot
+    bool
+    prompt "latest snapshot (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+config BUSYBOX_V_specific_date
+    bool
+    prompt "<specific date> (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+endchoice
+
+config BUSYBOX_VERSION
+    string
+    prompt "Enter date (YYYYMMDD)" if BUSYBOX_V_specific_date
+    default "snapshot" if BUSYBOX_V_snapshot
+    default "1.13.3" if BUSYBOX_V_1_13_3
+    default "1.13.4" if BUSYBOX_V_1_13_4
+    default "1.14.0" if BUSYBOX_V_1_14_0
+    default "1.14.1" if BUSYBOX_V_1_14_1
+    default "1.14.2" if BUSYBOX_V_1_14_2
+
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!
+
+
+choice
+    bool
+    prompt "Busybox verbosity:"
+    default BUSYBOX_VERBOSITY_0
+
+config BUSYBOX_VERBOSITY_0
+    bool
+    prompt "Simplified"
+    help
+      Print simplified command lines.
+
+config BUSYBOX_VERBOSITY_1
+    bool
+    prompt "Full commands"
+    help
+      Print full command lines.
+
+endchoice
+
+config BUSYBOX_VERBOSITY
+    string
+    default ""      if BUSYBOX_VERBOSITY_0
+    default "V=1"   if BUSYBOX_VERBOSITY_1
+
+choice
+    bool
+    prompt "Debug level"
+    default BUSYBOX_DEBUG_LEVEL_0
+
+config BUSYBOX_DEBUG_LEVEL_0
+    bool
+    prompt "none"
+
+config BUSYBOX_DEBUG_LEVEL_1
+    bool
+    prompt "minimal"
+
+config BUSYBOX_DEBUG_LEVEL_2
+    bool
+    prompt "all"
+
+endchoice
+
+config BUSYBOX_DEBUG_LEVEL
+    int
+    default 0 if BUSYBOX_DEBUG_LEVEL_0
+    default 1 if BUSYBOX_DEBUG_LEVEL_1
+    default 2 if BUSYBOX_DEBUG_LEVEL_2
+
+config BUSYBOX_CONFIG_FILE
+    string
+    prompt "Configuration file"
+    default "${CT_PKG_DIR}/busybox/${CT_ARCH}/busybox.config"
+    help
+      Path to the configuration file.
+      Default is "${CT_PKG_DIR}/busybox/${CT_ARCH}/busybox.config"
+      You _must_ provide one (for now).
+
+config BUSYBOX_RUN_CONFIG
+    bool
+    prompt "Configuration file"
+    default n
+    help
+       Run make menuconfig for busybox.

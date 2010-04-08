@@ -1,0 +1,33 @@
+From 9532c872c79100d0be2b9644005f165ed7c9c705 Mon Sep 17 00:00:00 2001
+From: Kurt Mahan <kmahan@freescale.com>
+Date: Thu, 8 Jan 2009 15:20:36 -0700
+Subject: [PATCH] Fix USBCV Halt Endpoint test failure.
+
+Without this patch, the correct reply to an endpoint GetStatus
+is written to 'req', but doesn't make it out to the USB bus
+since the buffer hasn't been flushed.  This would cause the
+USBCV Halt Endpoint test to fail.
+
+Signed-off-by: Bruce Schmid <duck@freescale.com>
+---
+ drivers/usb/gadget/fsl_usb2_udc.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/usb/gadget/fsl_usb2_udc.c b/drivers/usb/gadget/fsl_usb2_udc.c
+index e8f2fd6..cff7392 100644
+--- a/drivers/usb/gadget/fsl_usb2_udc.c
++++ b/drivers/usb/gadget/fsl_usb2_udc.c
+@@ -1344,6 +1344,10 @@ static void ch9getstatus(struct fsl_udc *udc, u8 request_type, u16 value,
+ 	req = udc->status_req;
+ 	/* Fill in the reqest structure */
+ 	*((u16 *) req->req.buf) = cpu_to_le16(tmp);
++
++	/* flush cache for the req buffer */
++	flush_dcache_range((u32)req->req.buf, (u32)req->req.buf + 8);
++
+ 	req->ep = ep;
+ 	req->req.length = 2;
+ 	req->req.status = -EINPROGRESS;
+-- 
+1.6.0.1
+

@@ -1,0 +1,5621 @@
+From 741bb3f4a7d598119d75fd9f642c363d32c400d3 Mon Sep 17 00:00:00 2001
+From: Kurt Mahan <kmahan@freescale.com>
+Date: Tue, 15 Jul 2008 23:24:16 -0600
+Subject: [PATCH] More talitos changes.
+
+LTIBName: m547x-8x-ocf-talitos-kernel
+Signed-off-by: Kurt Mahan <kmahan@freescale.com>
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ crypto/ocf/Kconfig                 |    7 +-
+ crypto/ocf/Makefile                |    1 +
+ crypto/ocf/sectest/Kconfig         |   13 +
+ crypto/ocf/sectest/Makefile        |   17 +
+ crypto/ocf/sectest/ocf_aes.c       |  378 ++++++++
+ crypto/ocf/sectest/ocf_arc4.c      |  467 ++++++++++
+ crypto/ocf/sectest/ocf_des.c       |  792 ++++++++++++++++
+ crypto/ocf/talitos/Kconfig         |   21 +
+ crypto/ocf/talitos/Makefile        |    3 +-
+ crypto/ocf/talitos/gtimer/Makefile |   13 +
+ crypto/ocf/talitos/gtimer/gtimer.c |  296 ++++++
+ crypto/ocf/talitos/gtimer/gtimer.h |   47 +
+ crypto/ocf/talitos/ktimer/Makefile |   10 +
+ crypto/ocf/talitos/ktimer/ktimer.c |  312 +++++++
+ crypto/ocf/talitos/talitos.c       | 1810 ++++++++++++++++++++++++------------
+ crypto/ocf/talitos/talitos_dev.h   |  281 +++++--
+ crypto/ocf/talitos/talitos_soft.h  |   21 +-
+ include/opencrypto/crypto.h        |    3 +
+ 18 files changed, 3805 insertions(+), 687 deletions(-)
+ create mode 100644 crypto/ocf/sectest/Kconfig
+ create mode 100644 crypto/ocf/sectest/Makefile
+ create mode 100644 crypto/ocf/sectest/ocf_aes.c
+ create mode 100644 crypto/ocf/sectest/ocf_arc4.c
+ create mode 100644 crypto/ocf/sectest/ocf_des.c
+ create mode 100644 crypto/ocf/talitos/Kconfig
+ create mode 100644 crypto/ocf/talitos/gtimer/Makefile
+ create mode 100644 crypto/ocf/talitos/gtimer/gtimer.c
+ create mode 100644 crypto/ocf/talitos/gtimer/gtimer.h
+ create mode 100644 crypto/ocf/talitos/ktimer/Makefile
+ create mode 100644 crypto/ocf/talitos/ktimer/ktimer.c
+
+diff --git a/crypto/ocf/Kconfig b/crypto/ocf/Kconfig
+index d0326ab..1868e6e 100644
+--- a/crypto/ocf/Kconfig
++++ b/crypto/ocf/Kconfig
+@@ -84,11 +84,8 @@ config OCF_HIFNHIPP
+ 	  OCF driver for various HIFN based crypto accelerators (HIPP)
+ 	  (7855)
+ 
+-config OCF_TALITOS
+-	tristate "talitos (HW crypto engine)"
+-	depends on OCF_OCF
+-	help
+-	  OCF driver for Freescale's security engine (SEC/talitos).
++source "crypto/ocf/talitos/Kconfig"
++source "crypto/ocf/sectest/Kconfig"
+ 
+ config OCF_BENCH
+ 	tristate "ocf-bench (HW crypto in-kernel benchmark)"
+diff --git a/crypto/ocf/Makefile b/crypto/ocf/Makefile
+index 4dd2bd1..f67d403 100644
+--- a/crypto/ocf/Makefile
++++ b/crypto/ocf/Makefile
+@@ -17,6 +17,7 @@ obj-$(CONFIG_OCF_SAFE)       += $(obj-base)safe/
+ obj-$(CONFIG_OCF_HIFN)       += $(obj-base)hifn/
+ obj-$(CONFIG_OCF_IXP4XX)     += $(obj-base)ixp4xx/
+ obj-$(CONFIG_OCF_TALITOS)    += $(obj-base)talitos/
++obj-$(CONFIG_SEC_TEST)       += $(obj-base)sectest/
+ obj-$(CONFIG_OCF_OCFNULL)    += $(obj-base)ocfnull/
+ 
+ obj-$(CONFIG_OCF_BENCH)      += $(obj-base)ocf-bench.o
+diff --git a/crypto/ocf/sectest/Kconfig b/crypto/ocf/sectest/Kconfig
+new file mode 100644
+index 0000000..ea0aab7
+--- /dev/null
++++ b/crypto/ocf/sectest/Kconfig
+@@ -0,0 +1,13 @@
++#
++# SEC driver testing configuration
++#
++
++menu "SEC Test Options"
++#	depends on MPC836x_MDS
++	depends on OCF_TALITOS
++config SEC_TEST
++	tristate "SEC1.x and SEC2.x testing support"
++#	depends on 83xx
++	depends on OCF_TALITOS
++	default M
++endmenu
+diff --git a/crypto/ocf/sectest/Makefile b/crypto/ocf/sectest/Makefile
+new file mode 100644
+index 0000000..f289223
+--- /dev/null
++++ b/crypto/ocf/sectest/Makefile
+@@ -0,0 +1,17 @@
++# Copyright (C) 2007 Freescale Semiconductor, Inc. All rights reserved.
++#
++# Author:Roy Zang <tie-fei.zang@freescale.com>, July, 2007
++#
++# Description:
++# 2.6 Makefile for sec device driver test
++#
++# This is free software; you can redistribute it and/or modify
++# it under the terms of  the GNU General  Public License as published by
++# the Free Software Foundation;  either version 2 of the  License, or
++# (at your option) any later version.
++#
++
++EXTRA_CFLAGS += -Icrypto/ocf
++
++obj-$(CONFIG_SEC_TEST) += ocf_des.o ocf_aes.o ocf_arc4.o
++sec2drvTest-objs := ocf_des.o
+diff --git a/crypto/ocf/sectest/ocf_aes.c b/crypto/ocf/sectest/ocf_aes.c
+new file mode 100644
+index 0000000..bfd36b1
+--- /dev/null
++++ b/crypto/ocf/sectest/ocf_aes.c
+@@ -0,0 +1,378 @@
++/*
++ * Copyright (C) 2007 Freescale Semiconductor, Inc. All rights reserved.
++ *
++ * Author: Daniela Sirocchi <r52684@freescale.com>
++ * Maintainer: Olivia Yin <r63875@@freescale.com> for MPC83xxE family
++ *
++ * Description:
++ * ocftest.c - DES known-answer test for SEC2 device driver
++ *
++ * Changelog:
++ *
++ * July, 2007, Roy Zang <tie-fei.zang@freescale.com>
++ * 	- Change For MPC8544DS board SEC driver test
++ *
++ * This is free software; you can redistribute it and/or modify
++ * it under the terms of  the GNU General  Public License as published by
++ * the Free Software Foundation;  either version 2 of the  License, or
++ * (at your option) any later version.
++ *
++ */
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/uio.h>
++#include <linux/types.h>
++#include <linux/time.h>
++#include <linux/delay.h>
++#include <linux/list.h>
++#include <linux/sched.h>
++#include <linux/unistd.h>
++#include <linux/module.h>
++#include <linux/wait.h>
++#include <linux/fs.h>
++#include <linux/dcache.h>
++#include <linux/file.h>
++#include <linux/version.h>
++#include <asm/uaccess.h>
++#if 0
++#include <crypto/cryptodev.h>
++#endif
++#if 1
++#include <opencrypto/crypto.h>
++#include <opencrypto/cryptodev.h>
++#endif
++
++#define AES_KEYSIZE     (24)//16 24 32
++#define AES_CTXSIZE     (8)
++#define AES_MAXTESTSIZE (1024)
++
++static const unsigned char aesData1[] = "Single block msg";
++static const unsigned char result1[] = { 
++	0xe3, 0x53, 0x77, 0x9c, 0x10, 0x79, 0xae, 0xb8,
++	0x27, 0x08, 0x94, 0x2d, 0xbe, 0x77, 0x18, 0x1a 
++};
++
++static const unsigned char aesData2[] = {
++	0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
++	0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
++	0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
++	0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f
++};
++
++static const unsigned char result2[] = { 
++	0xd2, 0x96, 0xcd, 0x94, 0xc2, 0xcc, 0xcf, 0x8a,
++	0x3a, 0x86, 0x30, 0x28, 0xb5, 0xe1, 0xdc, 0x0a,
++	0x75, 0x86, 0x60, 0x2d, 0x25, 0x3c, 0xff, 0xf9,
++	0x1b, 0x82, 0x66, 0xbe, 0xa6, 0xd6, 0x1a, 0xb1 
++};
++
++static const unsigned char aesKey1[] = {
++	0x06, 0xa9, 0x21, 0x40, 0x36, 0xb8, 0xa1, 0x5b,
++       	0x51, 0x2e, 0x03, 0xd5, 0x34, 0x12, 0x00, 0x06 
++};
++
++static const unsigned char aesKey2[] = {
++	0xc2, 0x86, 0x69, 0x6d, 0x88, 0x7c, 0x9a, 0xa0,
++	0x61, 0x1b, 0xbb, 0x3e, 0x20, 0x25, 0xa4, 0x5a 
++};
++static const unsigned char iv_in1[] = { 
++	0x3d, 0xaf, 0xba, 0x42, 0x9d, 0x9e, 0xb4, 0x30,
++        0xb4, 0x22, 0xda, 0x80, 0x2c, 0x9f, 0xac, 0x41 
++};
++
++static const unsigned char iv_in2[] = { 
++	0x56, 0x2e, 0x17, 0x99, 0x6d, 0x09, 0x3d, 0x28,
++        0xdd, 0xb3, 0xba, 0x69, 0x5a, 0x2e, 0x6f, 0x58 
++};
++
++static int cryptotest_cb(void *op)
++{
++	struct cryptop *crp = (struct cryptop *) op;
++
++	printk("%s()\n", __FUNCTION__);
++	if (crp->crp_etype == EAGAIN) {
++		crp->crp_flags &= ~CRYPTO_F_DONE;
++#ifdef NOTYET
++		/*
++		 * DAVIDM I am fairly sure that we should turn this into a batch
++		 * request to stop bad karma/lockup, revisit
++		 */
++		crp->crp_flags |= CRYPTO_F_BATCH;
++#endif
++		return crypto_dispatch(crp);
++	}
++
++	wake_up_interruptible(&crp->crp_waitq);
++
++	return 0;
++}
++
++int testAes(int len, int b)
++{
++	int status=0;
++	int keybytes;
++	int ivbytes = 16;
++	struct cryptoini cri;
++	struct cryptop *crp;
++	struct cryptodesc *crd=NULL;
++	u_int64_t sid;
++	int i;
++	unsigned char *aesDecResult;
++	unsigned char *aesEncResult;
++	unsigned char *aes_key;
++
++	if (len > 1024)
++	{
++		printk("%s: test data size limit is %d\n", __FUNCTION__, AES_MAXTESTSIZE);
++		return -1;
++	}
++
++	aesDecResult = kmalloc(len, GFP_KERNEL);
++	aesEncResult = kmalloc(len, GFP_KERNEL);
++	memset(&cri, 0, sizeof(cri));
++	printk("%s: aesDecResult %x,aesEncResult %x\n", __FUNCTION__, aesDecResult, aesEncResult);
++	if (b == 0) {
++		printk("\n*** Test AES CBC *** %d size\n", len);
++		keybytes = 16;
++		cri.cri_alg = CRYPTO_AES_CBC;
++	}else {
++		printk("\n*** Test AES ECB *** %d size\n", len);
++		keybytes = 16;
++		cri.cri_alg = CRYPTO_AES_CBC;
++	}
++
++/*************************************************************/
++	/* Encrypto */
++	aes_key = kmalloc(keybytes, GFP_KERNEL);
++	if(len == 16) {
++		memcpy(aes_key, aesKey1, keybytes);
++		memcpy(aesEncResult, aesData1, len);
++	}
++	else if (len == 32) {
++		memcpy(aes_key, aesKey2, keybytes);
++                memcpy(aesEncResult, aesData2, len);
++	}
++	else {
++		printk("The test do not support the len \n");
++	}
++	cri.cri_klen= keybytes*8;
++	cri.cri_key = (caddr_t)aes_key;
++	if(len == 16) {
++		memcpy(cri.cri_iv, iv_in1, ivbytes);
++	}
++	else if(len == 32) {
++        	memcpy(cri.cri_iv, iv_in2, ivbytes);
++	}
++        else {
++                printk("The test do not support the len \n");
++        }
++
++	status = crypto_newsession(&sid, &cri, CRYPTO_ANYHARDWARE);
++	if (status) {
++		printk("%s - newsession %d\n", __FUNCTION__, status);
++		return -1;
++	}
++
++	crp = crypto_getreq(1);
++
++	if (crp == NULL) {
++		printk("%s: ENOMEM\n", __FUNCTION__);
++		status = ENOMEM;
++		return status;
++	}
++
++	crd = crp->crp_desc;
++	crd->crd_alg = cri.cri_alg;
++	crd->crd_key = cri.cri_key;
++	crd->crd_klen = cri.cri_klen;
++	crd->crd_len = len;
++	crd->crd_skip = 0;
++	memcpy(crd->crd_iv, cri.cri_iv, ivbytes);
++	crd->crd_flags |= CRD_F_ENCRYPT | CRD_F_IV_EXPLICIT | CRD_F_IV_PRESENT;
++
++	crp->crp_buf = (caddr_t)aesEncResult;
++	crp->crp_sid = sid;
++	crp->crp_ilen = len;
++	crp->crp_flags = CRYPTO_F_CBIMM;
++	crp->crp_callback = (int (*) (struct cryptop *)) cryptotest_cb;
++	status = crypto_dispatch(crp);
++	if (status == 0) {
++		printk("%s 1 about to WAIT\n", __FUNCTION__);
++		//
++		// we really need to wait for driver to complete to maintain
++		// state,  luckily interrupts will be remembered
++		//
++		do {
++			status = wait_event_interruptible(crp->crp_waitq,
++					((crp->crp_flags & CRYPTO_F_DONE) != 0));
++			//
++			// we can't break out of this loop or we will leave behind
++			// a huge mess,  however,  staying here means if your driver
++			// is broken user applications can hang and not be killed.
++			// The solution,  fix your driver :-)
++			//
++			// XXX - MCR says BS, processes should always be killable.
++			//
++			if (status) {
++				schedule();
++				status = 0;
++			}
++		} while ((crp->crp_flags & CRYPTO_F_DONE) == 0);
++		printk("%s 1 finished WAITING status=%d\n", __FUNCTION__, status);
++	}
++
++	if (crp->crp_etype != 0) {
++		status = crp->crp_etype;
++		printk("%s error in crp processing %x\n", __FUNCTION__,status);
++		return -1;
++	}
++
++	/*----------------------------------------------------------------------*/
++        if(len == 16) {
++                if ((memcmp(result1, aesEncResult, len)) == 0) {
++                        printk("*** Test AES CBC Enc Passed ***\n");
++                        status = 0;
++                } else {
++                        printk("*** Test AES CBC Enc Failed ***\n");
++                        status = -1;
++                }
++        }
++        else if(len == 32) {
++                if ((memcmp(result2, aesEncResult, len)) == 0) {
++                        printk("*** Test AES CBC Enc Passed ***\n");
++                        status = 0;
++                } else {
++                        printk("*** Test AES CBC Enc Failed ***\n");
++                        status = -1;
++                }
++        }
++        else {
++                printk("The test case do not support the Len\n");
++        }
++
++	/* Decrypto */
++	memcpy(aesDecResult, aesEncResult, len);
++	memcpy(crd->crd_iv, cri.cri_iv, ivbytes);
++	crp->crp_buf = (caddr_t)aesDecResult;
++	crd->crd_flags &= ~CRD_F_ENCRYPT;
++	crd->crd_flags |= CRD_F_IV_EXPLICIT | CRD_F_IV_PRESENT;
++	crp->crp_flags = CRYPTO_F_CBIMM;
++	status = crypto_dispatch(crp);
++	if (status == 0) {
++		printk("%s 2 about to WAIT\n", __FUNCTION__);
++		do {
++			status = wait_event_interruptible(crp->crp_waitq,
++					((crp->crp_flags & CRYPTO_F_DONE) != 0));
++			if (status) {
++				schedule();
++				status = 0;
++			}
++		} while ((crp->crp_flags & CRYPTO_F_DONE) == 0);
++		printk("%s 2 finished WAITING error=%d\n", __FUNCTION__, status);
++	}
++
++	if (crp->crp_etype != 0) {
++		status = crp->crp_etype;
++		printk("%s error in crp processing %x\n", __FUNCTION__,status);
++		return -1;
++	}
++
++	/*compare */
++	if(len == 16) {
++		if ((memcmp(aesData1, aesDecResult, len)) == 0) {
++			printk("*** Test AES CBC Dec Passed ***\n");
++			status = 0;
++		} else {
++			printk("*** Test AES CBC Dec Failed ***\n");
++			status = -1;
++		}
++	}
++	else if(len == 32) {
++                if ((memcmp(aesData2, aesDecResult, len)) == 0) {
++                        printk("*** Test AES CBC Dec Passed ***\n");
++                        status = 0;
++                } else {
++                        printk("*** Test AES CBC Dec Failed ***\n");
++                        status = -1;
++                }
++        }
++        else {
++		printk("The test case do not support the Len\n");
++	}
++
++
++	for(i=1;i<=8;i++){
++		printk("0x%x",*(aesDecResult+i));
++	//	desDecResult++;
++	}
++	printk("\n");
++	for(i=1;i<=8;i++){
++		if(len == 16) {
++                	printk("0x%x",aesData1[i]);
++        //      desDecResult++;
++                } 
++		else if (len == 32) {
++                	printk("0x%x",aesData2[i]);
++		}
++        }              
++printk("%s: aesDecResult %x,aesEncResult %x\n",__FUNCTION__,aesDecResult,aesEncResult);
++printk("\n*** Test AES CBC 1*\n");
++	kfree(aesDecResult);
++printk("\n*** Test AES CBC 2*\n");
++	kfree(aesEncResult);\
++printk("\n*** Test AES CBC 3*\n");
++	kfree(aes_key);
++	printk("\n*** Test AES CBC 4*\n");
++	crypto_freesession(sid);
++	printk("\n*** Test AES CBC Done ***\n");
++
++	return status;
++}
++
++
++/* Top level of test */
++int testAesAll(void)
++{
++	int status=0, nFails=0, nTests=0;
++
++	/* All tests complete, show status and exit */
++	if ((status = testAes(16, 1)) == 0)  /* DES (0x2.) */
++		nTests++;
++	else
++		printk("testAes(%d) Failed! %04x\n", ++nFails, status);
++
++        if ((status = testAes(32, 0)) == 0)  /* DES (0x2.) */
++                nTests++;
++        else
++                printk("testAes(%d) Failed! %04x\n", ++nFails, status);
++
++	if (nFails == 0)
++		printk("testAll(): All %d Tests Passed\n", nTests);
++	else
++		printk("Tests Passed %d, Failed %d!\n", nTests, nFails);
++
++	if (nFails)
++		return -1;
++
++	return 0;
++}
++
++static int __init sec1test_aes_init(void)
++{
++	testAesAll();
++	return 0;
++}
++
++static void __exit sec1test_aes_exit(void)
++{
++	return;
++}
++
++module_init(sec1test_aes_init);
++module_exit(sec1test_aes_exit);
++
++MODULE_LICENSE("GPL");
++MODULE_DESCRIPTION("SEC1.x driver test module");
++MODULE_AUTHOR("Freescale Semiconductor Inc.");
+diff --git a/crypto/ocf/sectest/ocf_arc4.c b/crypto/ocf/sectest/ocf_arc4.c
+new file mode 100644
+index 0000000..5e54770
+--- /dev/null
++++ b/crypto/ocf/sectest/ocf_arc4.c
+@@ -0,0 +1,467 @@
++/*
++ * Copyright (C) 2007 Freescale Semiconductor, Inc. All rights reserved.
++ *
++ * Author: Daniela Sirocchi <r52684@freescale.com>
++ * Maintainer: Olivia Yin <r63875@@freescale.com> for MPC83xxE family
++ *
++ * Description:
++ * ocftest.c - DES known-answer test for SEC2 device driver
++ *
++ * Changelog:
++ *
++ * July, 2007, Roy Zang <tie-fei.zang@freescale.com>
++ * 	- Change For MPC8544DS board SEC driver test
++ *
++ * This is free software; you can redistribute it and/or modify
++ * it under the terms of  the GNU General  Public License as published by
++ * the Free Software Foundation;  either version 2 of the  License, or
++ * (at your option) any later version.
++ *
++ */
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/uio.h>
++#include <linux/types.h>
++#include <linux/time.h>
++#include <linux/delay.h>
++#include <linux/list.h>
++#include <linux/sched.h>
++#include <linux/unistd.h>
++#include <linux/module.h>
++#include <linux/wait.h>
++#include <linux/fs.h>
++#include <linux/dcache.h>
++#include <linux/file.h>
++#include <linux/version.h>
++#include <asm/uaccess.h>
++#if 0
++#include <crypto/cryptodev.h>
++#endif
++#if 1
++#include <opencrypto/crypto.h>
++#include <opencrypto/cryptodev.h>
++#endif
++
++#define AES_KEYSIZE     (24)//16 24 32
++#define AES_CTXSIZE     (8)
++#define AES_MAXTESTSIZE (1024)
++
++static const unsigned char RC4Data1[] = {
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef
++};
++static const unsigned char result1[] = { 
++	0x75, 0xb7, 0x87, 0x80, 0x99, 0xe0, 0xc5, 0x96
++};
++static const unsigned char arc4Key1[] = {
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef
++};
++static int arc4KeyLen1 = 8;
++
++static const unsigned char RC4Data2[] = {
++        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
++};
++static const unsigned char result2[] = {
++        0x74, 0x94, 0xc2, 0xe7, 0x10, 0x4b, 0x08, 0x79
++};
++static const unsigned char arc4Key2[] = {
++        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef
++};
++static int arc4KeyLen2 = 8;
++
++static const unsigned char RC4Data3[] = {
++        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
++};
++static const unsigned char result3[] = {
++        0xde, 0x18, 0x89, 0x41, 0xa3, 0x37, 0x5d, 0x3a
++};
++static const unsigned char arc4Key3[] = {
++        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
++};
++static int arc4KeyLen3 = 8;
++
++static const unsigned char RC4Data4[] = {
++	0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
++	0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
++	0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
++	0x12, 0x34, 0x56, 0x78
++};/*len = 28*/
++static const unsigned char result4[] = {
++	0x66, 0xa0, 0x94, 0x9f, 0x8a, 0xf7, 0xd6, 0x89,
++	0x1f, 0x7f, 0x83, 0x2b, 0xa8, 0x33, 0xc0, 0x0c,
++	0x89, 0x2e, 0xbe, 0x30, 0x14, 0x3c, 0xe2, 0x87,
++	0x40, 0x01, 0x1e, 0xcf
++};
++static const unsigned char arc4Key4[] = {
++        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef
++};
++static int arc4KeyLen4 = 8;
++
++static const unsigned char RC4Data5[] = {
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF
++};/*len = 8*/
++static const unsigned char result5[] = {
++	0x69, 0x72, 0x36, 0x59, 0x1B, 0x52, 0x42, 0xB1
++};
++static const unsigned char arc4Key5[] = {
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF,
++	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
++};
++static int arc4KeyLen5 = 16;
++
++static int cryptotest_cb(void *op)
++{
++	struct cryptop *crp = (struct cryptop *) op;
++
++	printk("%s()\n", __FUNCTION__);
++	if (crp->crp_etype == EAGAIN) {
++		crp->crp_flags &= ~CRYPTO_F_DONE;
++#ifdef NOTYET
++		/*
++		 * DAVIDM I am fairly sure that we should turn this into a batch
++		 * request to stop bad karma/lockup, revisit
++		 */
++		crp->crp_flags |= CRYPTO_F_BATCH;
++#endif
++		return crypto_dispatch(crp);
++	}
++
++	wake_up_interruptible(&crp->crp_waitq);
++
++	return 0;
++}
++
++int testArc4(int len, int b, int num)
++{
++	int status=0;
++	int keybytes;
++	int ivbytes = 259;
++	struct cryptoini cri;
++	struct cryptop *crp;
++	struct cryptodesc *crd=NULL;
++	u_int64_t sid;
++	int i;
++	unsigned char *arc4DecResult;
++	unsigned char *arc4EncResult;
++	unsigned char *arc4_key;
++
++	if (len > 1024)
++	{
++		printk("%s: test data size limit is %d\n", __FUNCTION__, AES_MAXTESTSIZE);
++		return -1;
++	}
++
++	arc4DecResult = kmalloc(len, GFP_KERNEL);
++	arc4EncResult = kmalloc(len, GFP_KERNEL);
++	memset(&cri, 0, sizeof(cri));
++	printk("%s: arc4DecResult %x,arc4EncResult %x\n", __FUNCTION__, arc4DecResult, arc4EncResult);
++	if (b == 0) {
++		printk("\n*** Test ARC4 ECB *** %d size, klen %d\n", len, 16);
++		keybytes = 16;
++		cri.cri_alg = CRYPTO_ARC4;
++	}else {
++		printk("\n*** Test ARC4 ECB *** %d size, klen %d\n", len, 8);
++		keybytes = 8;
++		cri.cri_alg = CRYPTO_ARC4;
++	}
++
++/*************************************************************/
++	/* Encrypto */
++	arc4_key = kmalloc(keybytes, GFP_KERNEL);
++	if (num == 1){
++		memcpy(arc4_key, arc4Key1, keybytes);
++		memcpy(arc4EncResult, RC4Data1, len);
++	}
++	else if (num == 2){
++                memcpy(arc4_key, arc4Key2, keybytes);
++                memcpy(arc4EncResult, RC4Data2, len);
++        }
++        else if (num == 3){
++                memcpy(arc4_key, arc4Key3, keybytes);
++                memcpy(arc4EncResult, RC4Data3, len);
++        }
++        else if (num == 4){
++                memcpy(arc4_key, arc4Key4, keybytes);
++                memcpy(arc4EncResult, RC4Data4, len);
++        }
++        else if (num == 5){
++                memcpy(arc4_key, arc4Key5, keybytes);
++                memcpy(arc4EncResult, RC4Data5, len);
++        }
++	else {
++		printk("ARC test do not support\n");	
++	}
++
++	cri.cri_klen= keybytes*8;
++	cri.cri_key = (caddr_t)arc4_key;
++
++	status = crypto_newsession(&sid, &cri, CRYPTO_ANYHARDWARE);
++	if (status) {
++		printk("%s - newsession %d\n", __FUNCTION__, status);
++		return -1;
++	}
++
++	crp = crypto_getreq(1);
++
++	if (crp == NULL) {
++		printk("%s: ENOMEM\n", __FUNCTION__);
++		status = ENOMEM;
++		return status;
++	}
++
++	crd = crp->crp_desc;
++	crd->crd_alg = cri.cri_alg;
++	crd->crd_key = cri.cri_key;
++	crd->crd_klen = cri.cri_klen;
++	crd->crd_len = len;
++	crd->crd_skip = 0;
++	//memcpy(crd->crd_iv, cri.cri_iv, ivbytes);
++	//crd->crd_iv = 0;
++	crd->crd_flags |= CRD_F_ENCRYPT | CRD_F_IV_EXPLICIT | CRD_F_IV_PRESENT | CRD_ARC4_FIRST;
++
++	crp->crp_buf = (caddr_t)arc4EncResult;
++	crp->crp_sid = sid;
++	crp->crp_ilen = len;
++	crp->crp_flags = CRYPTO_F_CBIMM;
++	crp->crp_callback = (int (*) (struct cryptop *)) cryptotest_cb;
++	status = crypto_dispatch(crp);
++	if (status == 0) {
++		printk("%s 1 about to WAIT\n", __FUNCTION__);
++		//
++		// we really need to wait for driver to complete to maintain
++		// state,  luckily interrupts will be remembered
++		//
++		do {
++			status = wait_event_interruptible(crp->crp_waitq,
++					((crp->crp_flags & CRYPTO_F_DONE) != 0));
++			//
++			// we can't break out of this loop or we will leave behind
++			// a huge mess,  however,  staying here means if your driver
++			// is broken user applications can hang and not be killed.
++			// The solution,  fix your driver :-)
++			//
++			// XXX - MCR says BS, processes should always be killable.
++			//
++			if (status) {
++				schedule();
++				status = 0;
++			}
++		} while ((crp->crp_flags & CRYPTO_F_DONE) == 0);
++		printk("%s 1 finished WAITING status=%d\n", __FUNCTION__, status);
++	}
++
++	if (crp->crp_etype != 0) {
++		status = crp->crp_etype;
++		printk("%s error in crp processing %x\n", __FUNCTION__,status);
++		return -1;
++	}
++
++	/*----------------------------------------------------------------------*/
++	if (num == 1) {
++		if ((memcmp(result1, arc4EncResult, len)) == 0) {
++			printk("*** Test ARC4 ECB Enc Passed ***\n");
++			status = 0;
++		} else {
++			printk("*** Test ARC4 ECB Enc Failed ***\n");
++			status = -1;
++		}
++	}
++	else if (num == 2) {
++                if ((memcmp(result2, arc4EncResult, len)) == 0) {
++                        printk("*** Test ARC4 ECB Enc Passed ***\n");
++                        status = 0;
++                } else {
++                        printk("*** Test ARC4 ECB Enc Failed ***\n");
++                        status = -1;
++		}
++        }
++        else if (num == 3) {
++                if ((memcmp(result3, arc4EncResult, len)) == 0) {
++                        printk("*** Test ARC4 ECB Enc Passed ***\n");
++                        status = 0;
++                } else {
++                        printk("*** Test ARC4 ECB Enc Failed ***\n");
++                        status = -1;
++		}
++        }
++        else if (num == 4) {
++                if ((memcmp(result4, arc4EncResult, len)) == 0) {
++                        printk("*** Test ARC4 ECB Enc Passed ***\n");
++                        status = 0;
++                } else {
++                        printk("*** Test ARC4 ECB Enc Failed ***\n");
++                        status = -1;
++		}
++        }
++        else if (num == 5) {
++                if ((memcmp(result5, arc4EncResult, len)) == 0) {
++                        printk("*** Test ARC4 ECB Enc Passed ***\n");
++                        status = 0;
++                } else {
++                        printk("*** Test ARC4 ECB Enc Failed ***\n");
++                        status = -1;
++		}
++        }
++
++        for(i=1;i<=8;i++){
++                printk("0x%x ",*(arc4EncResult+i));
++        }
++	printk("\n");
++	//memcpy(cri.cri_iv, crd->crd_iv, ivbytes);
++	/************************8 Decrypto *****************************/
++	memcpy(arc4DecResult, arc4EncResult, len);
++	//memcpy(crd->crd_iv, cri.cri_iv, ivbytes);
++	//crd->crd_iv = NULL;
++	crd->crd_next = 0;
++	crp->crp_buf = (caddr_t)arc4DecResult;
++	crd->crd_flags &= ~CRD_F_ENCRYPT;
++	crd->crd_flags |= CRD_F_IV_EXPLICIT | CRD_F_IV_PRESENT | CRD_ARC4_FIRST;
++	crp->crp_flags = CRYPTO_F_CBIMM;
++	status = crypto_dispatch(crp);
++	if (status == 0) {
++		printk("%s 2 about to WAIT\n", __FUNCTION__);
++		do {
++			status = wait_event_interruptible(crp->crp_waitq,
++					((crp->crp_flags & CRYPTO_F_DONE) != 0));
++			if (status) {
++				schedule();
++				status = 0;
++			}
++		} while ((crp->crp_flags & CRYPTO_F_DONE) == 0);
++		printk("%s 2 finished WAITING error=%d\n", __FUNCTION__, status);
++	}
++
++	if (crp->crp_etype != 0) {
++		status = crp->crp_etype;
++		printk("%s error in crp processing %x\n", __FUNCTION__,status);
++		return -1;
++	}
++
++	/*compare */
++	if (num == 1) {
++		if ((memcmp(RC4Data1, arc4DecResult, len)) == 0) {
++			printk("*** Test ARC4 ECB Dec Passed ***\n");
++			status = 0;
++		} else {
++			printk("*** Test AES ECB Dec Failed ***\n");
++			status = -1;
++		}
++	}
++        else if (num == 2) {
++                if ((memcmp(RC4Data2, arc4DecResult, len)) == 0) {
++                        printk("*** Test ARC4 ECB Dec Passed ***\n");
++                        status = 0;
++                } else {
++                        printk("*** Test AES ECB Dec Failed ***\n");
++                        status = -1;
++		}
++        }
++        else if (num == 3) {
++                if ((memcmp(RC4Data3, arc4DecResult, len)) == 0) {
++                        printk("*** Test ARC4 ECB Dec Passed ***\n");
++                        status = 0;
++                } else {
++                        printk("*** Test AES ECB Dec Failed ***\n");
++                        status = -1;
++		}
++        }
++        else if (num == 4) {
++                if ((memcmp(RC4Data4, arc4DecResult, len)) == 0) {
++                        printk("*** Test ARC4 ECB Dec Passed ***\n");
++                        status = 0;
++                } else {
++                        printk("*** Test AES ECB Dec Failed ***\n");
++                        status = -1;
++		}
++        }
++        else if (num == 5) {
++                if ((memcmp(RC4Data5, arc4DecResult, len)) == 0) {
++                        printk("*** Test ARC4 ECB Dec Passed ***\n");
++                        status = 0;
++                } else {
++                        printk("*** Test AES ECB Dec Failed ***\n");
++                        status = -1;
++		}
++        }
++
++
++	for(i=1;i<=8;i++){
++		printk("0x%x",*(arc4DecResult+i));
++	//	desDecResult++;
++	}
++	printk("\n");
++	for(i=1;i<=8;i++){
++                printk("0x%x",RC4Data1[i]);
++        //      desDecResult++;
++        
++        }              
++
++	kfree(arc4DecResult);
++	kfree(arc4EncResult);
++	kfree(arc4_key);
++	crypto_freesession(sid);
++	printk("\n*** Test ARC4 ECB Done ***\n");
++
++	return status;
++}
++
++
++/* Top level of test */
++int testArc4All(void)
++{
++	int status=0, nFails=0, nTests=0;
++
++	/* All tests complete, show status and exit */
++	if ((status = testArc4(8, 1, 1)) == 0)  
++		nTests++;
++	else
++		printk("testArc4(%d) Failed! %04x\n", ++nFails, status);
++/*
++        if ((status = testArc4(8, 1, 2)) == 0)  
++                nTests++;
++        else
++                printk("testArc4(%d) Failed! %04x\n", ++nFails, status);
++
++        if ((status = testArc4(8, 1, 3)) == 0)  
++                nTests++;
++        else
++                printk("testArc4(%d) Failed! %04x\n", ++nFails, status);
++        if ((status = testArc4(28, 1, 4)) == 0)  
++                nTests++;
++        else
++                printk("testArc4(%d) Failed! %04x\n", ++nFails, status);
++        if ((status = testArc4(8, 0, 5)) == 0)  
++                nTests++;
++        else
++                printk("testArc4(%d) Failed! %04x\n", ++nFails, status);
++*/
++
++	if (nFails == 0)
++		printk("testAll(): All %d Tests Passed\n", nTests);
++	else
++		printk("Tests Passed %d, Failed %d!\n", nTests, nFails);
++
++	if (nFails)
++		return -1;
++
++	return 0;
++}
++
++static int __init sec1test_arc4_init(void)
++{
++	testArc4All();
++	return 0;
++}
++
++static void __exit sec1test_arc4_exit(void)
++{
++	return;
++}
++
++module_init(sec1test_arc4_init);
++module_exit(sec1test_arc4_exit);
++
++MODULE_LICENSE("GPL");
++MODULE_DESCRIPTION("SEC1.x driver test module");
++MODULE_AUTHOR("Freescale Semiconductor Inc.");
+diff --git a/crypto/ocf/sectest/ocf_des.c b/crypto/ocf/sectest/ocf_des.c
+new file mode 100644
+index 0000000..b80746a
+--- /dev/null
++++ b/crypto/ocf/sectest/ocf_des.c
+@@ -0,0 +1,792 @@
++/*
++ * Copyright (C) 2007 Freescale Semiconductor, Inc. All rights reserved.
++ *
++ * Author: Daniela Sirocchi <r52684@freescale.com>
++ * Maintainer: Olivia Yin <r63875@@freescale.com> for MPC83xxE family
++ *
++ * Description:
++ * ocftest.c - DES known-answer test for SEC2 device driver
++ *
++ * Changelog:
++ *
++ * July, 2007, Roy Zang <tie-fei.zang@freescale.com>
++ * 	- Change For MPC8544DS board SEC driver test
++ *
++ * This is free software; you can redistribute it and/or modify
++ * it under the terms of  the GNU General  Public License as published by
++ * the Free Software Foundation;  either version 2 of the  License, or
++ * (at your option) any later version.
++ *
++ */
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/uio.h>
++#include <linux/types.h>
++#include <linux/time.h>
++#include <linux/delay.h>
++#include <linux/list.h>
++#include <linux/sched.h>
++#include <linux/unistd.h>
++#include <linux/module.h>
++#include <linux/wait.h>
++#include <linux/fs.h>
++#include <linux/dcache.h>
++#include <linux/file.h>
++#include <linux/version.h>
++#include <asm/uaccess.h>
++#if 0
++#include <crypto/cryptodev.h>
++#endif
++#if 1
++#include <opencrypto/crypto.h>
++#include <opencrypto/cryptodev.h>
++#endif
++
++#define DES_KEYSIZE     (24)
++#define DES_CTXSIZE     (8)
++#define DES_MAXTESTSIZE (4096)
++
++static const unsigned char desData[] = {
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
++	0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
++	0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12,
++	0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23,
++	0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34,
++	0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
++	0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56,
++	0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
++	0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78,
++	0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
++	0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a,
++	0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
++	0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
++	0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
++	0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde
++};
++
++static const unsigned char desKey[] = {
++	0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++	0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10,
++	0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88
++};
++
++static const unsigned char iv_in[] = "abcedf01";
++
++static int cryptotest_cb(void *op)
++{
++	struct cryptop *crp = (struct cryptop *) op;
++
++	printk("%s()\n", __FUNCTION__);
++	if (crp->crp_etype == EAGAIN) {
++		crp->crp_flags &= ~CRYPTO_F_DONE;
++#ifdef NOTYET
++		/*
++		 * DAVIDM I am fairly sure that we should turn this into a batch
++		 * request to stop bad karma/lockup, revisit
++		 */
++		crp->crp_flags |= CRYPTO_F_BATCH;
++#endif
++		return crypto_dispatch(crp);
++	}
++
++	wake_up_interruptible(&crp->crp_waitq);
++
++	return 0;
++}
++
++int testDes(int len, int b)
++{
++	int status=0;
++	int keybytes;
++	struct cryptoini cri;
++	struct cryptop *crp;
++	struct cryptodesc *crd=NULL;
++	u_int64_t sid;
++	int i;
++	unsigned char *desDecResult;
++	unsigned char *desEncResult;
++	unsigned char *des_key;
++
++	if (len > 4096)
++	{
++		printk("testDes(): test data size limit is %d\n", DES_MAXTESTSIZE);
++		return -1;
++	}
++
++	desDecResult = kmalloc(len, GFP_KERNEL);
++	desEncResult = kmalloc(len, GFP_KERNEL);
++	memset(&cri, 0, sizeof(cri));
++	/*printk("%s: desDecResult %x,desEncResult %x\n",__FUNCTION__,desDecResult,desEncResult);*/
++	if (b == 0) {
++		printk("\n*** Test 3DES CBC *** %d size\n", len);
++		keybytes = 24;
++		cri.cri_alg = CRYPTO_3DES_CBC;
++	}else {
++		printk("\n*** Test DES CBC *** %d size\n", len);
++		keybytes = 8;
++		cri.cri_alg = CRYPTO_DES_CBC;
++	}
++
++	des_key = kmalloc(keybytes, GFP_KERNEL);
++	memcpy(des_key, desKey, keybytes);
++	memcpy(desEncResult, desData, len);
++	cri.cri_klen= keybytes*8;
++	cri.cri_key = (caddr_t)des_key;
++	memcpy(cri.cri_iv, iv_in, 8);
++	status = crypto_newsession(&sid, &cri, CRYPTO_ANYHARDWARE);
++	if (status) {
++		printk("%s - newsession %d\n", __FUNCTION__, status);
++		return -1;
++	}
++
++	crp = crypto_getreq(1);
++
++	if (crp == NULL) {
++		printk("%s: ENOMEM\n", __FUNCTION__);
++		status = ENOMEM;
++		return status;
++	}
++
++	crd = crp->crp_desc;
++	crd->crd_alg = cri.cri_alg;
++	crd->crd_key = cri.cri_key;
++	crd->crd_klen = cri.cri_klen;
++	crd->crd_len = len;
++	crd->crd_skip = 0;
++	memcpy(crd->crd_iv, cri.cri_iv, 8);
++	crd->crd_flags |= CRD_F_ENCRYPT | CRD_F_IV_EXPLICIT | CRD_F_IV_PRESENT;
++
++	crp->crp_buf = (caddr_t)desEncResult;
++	crp->crp_sid = sid;
++	crp->crp_ilen = len;
++	crp->crp_flags = CRYPTO_F_CBIMM;
++	crp->crp_callback = (int (*) (struct cryptop *)) cryptotest_cb;
++	status = crypto_dispatch(crp);
++	if (status == 0) {
++		printk("%s 1 about to WAIT\n", __FUNCTION__);
++		//
++		// we really need to wait for driver to complete to maintain
++		// state,  luckily interrupts will be remembered
++		//
++		do {
++			status = wait_event_interruptible(crp->crp_waitq,
++					((crp->crp_flags & CRYPTO_F_DONE) != 0));
++			//
++			// we can't break out of this loop or we will leave behind
++			// a huge mess,  however,  staying here means if your driver
++			// is broken user applications can hang and not be killed.
++			// The solution,  fix your driver :-)
++			//
++			// XXX - MCR says BS, processes should always be killable.
++			//
++			if (status) {
++				schedule();
++				status = 0;
++			}
++		} while ((crp->crp_flags & CRYPTO_F_DONE) == 0);
++		printk("%s 1 finished WAITING status=%d\n", __FUNCTION__, status);
++	}
++
++	if (crp->crp_etype != 0) {
++		status = crp->crp_etype;
++		printk("%s error in crp processing %x\n", __FUNCTION__,status);
++		return -1;
++	}
++
++	/* Decrypto */
++	memcpy(desDecResult, desEncResult, len);
++	memcpy(crd->crd_iv, cri.cri_iv, 8);
++	crp->crp_buf = (caddr_t)desDecResult;
++	crd->crd_flags &= ~CRD_F_ENCRYPT;
++	crd->crd_flags |= CRD_F_IV_EXPLICIT | CRD_F_IV_PRESENT;
++	crp->crp_flags = CRYPTO_F_CBIMM;
++	status = crypto_dispatch(crp);
++	if (status == 0) {
++		printk("%s 2 about to WAIT\n", __FUNCTION__);
++		do {
++			status = wait_event_interruptible(crp->crp_waitq,
++					((crp->crp_flags & CRYPTO_F_DONE) != 0));
++			if (status) {
++				schedule();
++				status = 0;
++			}
++		} while ((crp->crp_flags & CRYPTO_F_DONE) == 0);
++		printk("%s 2 finished WAITING error=%d\n", __FUNCTION__, status);
++	}
++
++	if (crp->crp_etype != 0) {
++		status = crp->crp_etype;
++		printk("%s error in crp processing %x\n", __FUNCTION__,status);
++		return -1;
++	}
++
++	if ((memcmp(desData, desDecResult, len)) == 0) {
++		printk("*** Test DES CBC Passed ***\n");
++		status = 0;
++	} else {
++		printk("*** Test DES CBC Failed ***\n");
++		status = -1;
++	}
++
++	for(i=1;i<=8;i++){
++		printk("0x%x",*(desDecResult+i));
++	//	desDecResult++;
++	}
++printk("%s: desDecResult %x,desEncResult %x\n",__FUNCTION__,desDecResult,desEncResult);
++printk("\n*** Test DES CBC 1*\n");
++	kfree(desDecResult);
++printk("\n*** Test DES CBC 2*\n");
++	kfree(desEncResult);\
++printk("\n*** Test DES CBC 3*\n");
++	kfree(des_key);
++	printk("\n*** Test DES CBC 4*\n");
++	crypto_freesession(sid);
++	printk("\n*** Test DES CBC Done ***\n");
++
++	return status;
++}
++
++
++/* Top level of test */
++int testAll(void)
++{
++	int status=0, nFails=0, nTests=0;
++
++	/* All tests complete, show status and exit */
++	if ((status = testDes(512, 1)) == 0)  /* DES (0x2.) */
++		nTests++;
++	else
++		printk("testDes(%d) Failed! %04x\n", ++nFails, status);
++
++        if ((status = testDes(512, 0)) == 0)  /* DES (0x2.) */
++                nTests++;
++        else
++                printk("testDes(%d) Failed! %04x\n", ++nFails, status);
++
++	if (nFails == 0)
++		printk("testAll(): All %d Tests Passed\n", nTests);
++	else
++		printk("Tests Passed %d, Failed %d!\n", nTests, nFails);
++
++	if (nFails)
++		return -1;
++
++	return 0;
++}
++
++static int __init sec2test_init(void)
++{
++	testAll();
++	return 0;
++}
++
++static void __exit sec2test_exit(void)
++{
++	return;
++}
++
++module_init(sec2test_init);
++module_exit(sec2test_exit);
++
++MODULE_LICENSE("GPL");
++MODULE_DESCRIPTION("SEC2.x driver test module");
++MODULE_AUTHOR("Freescale Semiconductor Inc.");
+diff --git a/crypto/ocf/talitos/Kconfig b/crypto/ocf/talitos/Kconfig
+new file mode 100644
+index 0000000..849d774
+--- /dev/null
++++ b/crypto/ocf/talitos/Kconfig
+@@ -0,0 +1,21 @@
++
++menu "Talitos Driver"
++
++config OCF_TALITOS
++	tristate "talitos (HW crypto engine)"
++	depends on OCF_OCF
++	help
++	  OCF driver for Freescale's security engine (SEC/talitos).
++
++config OCF_TALITOS_GTIMER
++	tristate "global timer used with talitos"
++	depends on OCF_TALITOS
++	help
++	  Global timer driver.
++
++config OCF_TALITOS_KTIMER
++	tristate "kernel timer used with talitos"
++	depends on OCF_TALITOS
++	help
++	  Global timer driver.
++endmenu
+diff --git a/crypto/ocf/talitos/Makefile b/crypto/ocf/talitos/Makefile
+index b25dbb1..bb1814e 100644
+--- a/crypto/ocf/talitos/Makefile
++++ b/crypto/ocf/talitos/Makefile
+@@ -5,7 +5,8 @@ else
+ my_inc_base = .
+ O_TARGET := talitos.o
+ endif
+-
++obj-$(CONFIG_OCF_TALITOS_KTIMER)    += $(obj-base)ktimer/
++obj-$(CONFIG_OCF_TALITOS_GTIMER)    += $(obj-base)gtimer/
+ obj-$(CONFIG_OCF_TALITOS)    += $(obj-base)talitos.o
+ 
+ EXTRA_CFLAGS += -I$(my_inc_base)/.
+diff --git a/crypto/ocf/talitos/gtimer/Makefile b/crypto/ocf/talitos/gtimer/Makefile
+new file mode 100644
+index 0000000..9402027
+--- /dev/null
++++ b/crypto/ocf/talitos/gtimer/Makefile
+@@ -0,0 +1,13 @@
++
++ifdef obj
++my_inc_base = $(obj)
++else
++my_inc_base = .
++O_TARGET := gtimer.o
++endif
++
++obj-$(CONFIG_OCF_TALITOS_GTIMER)    += $(obj-base)gtimer.o
++
++EXTRA_CFLAGS += -I$(my_inc_base)/.
++
++
+diff --git a/crypto/ocf/talitos/gtimer/gtimer.c b/crypto/ocf/talitos/gtimer/gtimer.c
+new file mode 100644
+index 0000000..056c809
+--- /dev/null
++++ b/crypto/ocf/talitos/gtimer/gtimer.c
+@@ -0,0 +1,296 @@
++/*
++ * Freescale SEC data structures for integration with ocf-linux
++ *
++ * Copyright (c) 2006 Freescale Semiconductor, Inc.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ * 3. The name of the author may not be used to endorse or promote products
++ *    derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
++ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
++ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
++ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
++ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
++ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/interrupt.h>
++#include <linux/spinlock.h>
++#include <linux/random.h>
++#include <linux/skbuff.h>
++#include <asm/scatterlist.h>
++#include <linux/dma-mapping.h>  /* dma_map_single() */
++#include <linux/moduleparam.h>
++#include <linux/uio.h>
++
++#include <linux/version.h>
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,15)
++#include <linux/platform_device.h>
++#endif
++
++#include <crypto/cryptodev.h>
++#include "gtimer.h"
++#include <asm/io.h>
++#define DRV_NAME "gtimer0" 
++#define GTIMER0_DEBUG
++
++static void gtimer0_test(void);
++static int  gtimer0_remove (struct platform_device *pdev);
++static inline void gtimer_write(volatile unsigned *addr, u32 val)
++{
++        /*out_be32(addr, val);*/
++	*(volatile unsigned long *)((unsigned long)addr) = val;
++}
++
++static inline u32 gtimer_read(volatile unsigned *addr)
++{
++        u32 val;
++        /*val = in_be32(addr);*/
++	val = *(volatile unsigned long *)((unsigned long)addr) ;
++        return val;
++}
++
++
++struct gtimer0_dev {
++  int (*open) (unsigned long count);
++  int (*close) (void);
++};
++
++struct gtimer0_dev gtimer_dev;
++struct gtimer0_info *tm;
++
++
++static int gtimer0_open (unsigned long count)
++{
++  
++  unsigned long v;
++  int i = 100;
++
++  /* make sure counting is disabled first 
++   * and then put down the base cnt value
++  */
++  v = gtimer_read(tm->tm_base_addr + GTIMER0_GTBCR_OFFSET);
++  v |= 0x80000000; /* disable */
++  gtimer_write(tm->tm_base_addr + GTIMER0_GTBCR_OFFSET, v);
++
++  v = gtimer_read(tm->tm_base_addr + GTIMER0_GTBCR_OFFSET);
++  v &= 0x80000000; /* clear count */
++  gtimer_write(tm->tm_base_addr + GTIMER0_GTBCR_OFFSET, v);
++
++  v = gtimer_read(tm->tm_base_addr + GTIMER0_GTBCR_OFFSET);
++  v |= count; /* base cnt */
++  gtimer_write(tm->tm_base_addr + GTIMER0_GTBCR_OFFSET, v);
++
++  /* clear the count reg just in case */
++  gtimer_write(tm->tm_base_addr + GTIMER0_GTCCR_OFFSET, 0);
++
++
++  /* now enable counting */
++  v = gtimer_read(tm->tm_base_addr + GTIMER0_GTBCR_OFFSET);
++  v &= 0x7fffffff;
++  gtimer_write(tm->tm_base_addr + GTIMER0_GTBCR_OFFSET, v);
++
++  /* poll the current count reg */
++  while (1)
++    {
++      v = gtimer_read(tm->tm_base_addr + GTIMER0_GTCCR_OFFSET);
++      //printk("cur. cnt reg = 0x%8.8x \n", v);
++      if (v & 0x80000000)
++	break;
++    }
++  printk("%s TOG bit of CCR got set ...\n", __FUNCTION__);
++
++  /* now check whether activity bit got set */
++  //#if 0
++  while (1)
++    {
++      v = gtimer_read(tm->tm_base_addr + GTIMER0_GTVPR_OFFSET);
++      printk("%s vec/pri reg = 0x%8.8x \n", __FUNCTION__, v);
++      if (v & 0x40000000)
++	break;
++    }
++  //#endif
++  
++
++}
++
++static int gtimer0_close (void)
++{
++   unsigned long *pRegRead;
++ 
++  /* make sure counting is disabled first */
++  pRegRead = (tm->tm_base_addr + GTIMER0_GTBCR_OFFSET);
++  *pRegRead |= 0x80000000; 
++
++  /* clear the base cnt register */
++  *pRegRead &= 0x80000000;
++
++}
++
++
++static irqreturn_t
++gtimer0_intr (int irq, void *arg, struct pt_regs *regs)
++{
++	/* stop counting and reload initial count value */
++	/* figure out channel# and the FF# which are outstanding */
++	/* access the queue to service those SEC req */
++	/* obtain the desc ptr for all processed req and 
++         clear their status for reuse */
++         printk("%s timer working \n", __FUNCTION__);
++  
++         gtimer_dev.close();
++
++	return IRQ_HANDLED;
++}
++
++
++
++static int  gtimer0_probe (struct platform_device *pdev) 
++{
++ 
++	struct resource *r;
++        int rc;
++	int i;
++	unsigned long offset;
++
++	tm = (struct gtimer0_info *) kmalloc(sizeof(*tm), GFP_KERNEL);
++	if (!tm)
++		return -ENOMEM;
++	memset(tm, 0, sizeof(*tm));
++
++	tm->tm_irq = -1; 
++        tm->tm_dev = pdev;
++       
++        platform_set_drvdata(tm->tm_dev, tm);
++
++	/* obtain irq for this timer */
++	tm->tm_irq = platform_get_irq(pdev, 0);
++	printk("%s IRQ number = %d \n", __FUNCTION__, tm->tm_irq);
++
++	rc = request_irq(tm->tm_irq, gtimer0_intr, 0, DRV_NAME, tm);
++	if (rc) {
++		printk(KERN_ERR DRV_NAME ": failed to hook irq %d\n", 
++			tm->tm_irq);
++		tm->tm_irq = -1;
++		goto out;
++	}
++
++        /* get the pointer to timer registers */
++	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++        tm->tm_base_addr = (unsigned long) ioremap(r->start, (r->end - r->start));
++	printk("%s Immr base = 0x%8.8x \n", __FUNCTION__, tm->tm_base_addr);
++	if (!tm->tm_base_addr) {
++		printk(KERN_ERR DRV_NAME ": failed to ioremap\n");
++		goto out;
++	}
++
++	/* initialize function pointers : open, close */
++	gtimer_dev.open  = gtimer0_open;
++	gtimer_dev.close = gtimer0_close;  
++
++       /* now test the module */
++	gtimer0_test();  
++
++	return 0;
++
++out:
++	gtimer0_remove(pdev);
++	return -ENOMEM;
++
++}
++
++
++
++static int  gtimer0_remove (struct platform_device *pdev) 
++{
++        struct gtimer0_info *tm = platform_get_drvdata(pdev);
++	int i;
++      
++        /* make sure timer0 counting is disabled */
++	/* clear any malloc memory */
++	/* release IRQ */
++	if (tm->tm_irq != -1)
++	  free_irq(tm->tm_irq, tm);
++	if (tm->tm_base_addr)
++       		iounmap((void *) tm->tm_base_addr);
++
++	kfree(tm);
++        return 0;
++
++}
++
++static void gtimer0_test(void)
++{
++  unsigned long count;
++
++  count = 0x7fffffff;  /* 2 sec wall clock */
++  printk("%s Kicking timer with count = %d \n", __FUNCTION__, count);
++
++  /* Kick the timer */
++  gtimer_dev.open( count);
++
++}
++
++
++/* Structure for a timer0 device driver */
++static struct platform_driver gtimer0_driver = {
++	.probe = gtimer0_probe,
++	.remove = gtimer0_remove,
++	.driver = {
++		.name = "fsl-gtimer0",
++	}
++};
++
++static int __init gtimer0_init(void)
++{
++	return platform_driver_register(&gtimer0_driver);
++}
++
++static void __exit gtimer0_exit(void)
++{
++
++	platform_driver_unregister(&gtimer0_driver);
++}
++
++module_init(gtimer0_init);
++module_exit(gtimer0_exit);
++
++MODULE_LICENSE("Dual BSD/GPL");
++MODULE_AUTHOR("ahsan.kabir@freescale.com");
++MODULE_DESCRIPTION("OpenPIC Global timer driver");
++
++
++
++
++/*
++TCR = default value
++GTBCR0 = first CI=1 (disable counting), then load BASECNT = 24x3000= 9000 ticks = 0x384
++GTVPR0 = taken care of by MPC8548CDS BSP
++GTDR0 = default value
++*/
++
++
++//talitos_process ()
++//{
++
++
++	/* if chx and FF0 kick the timer */
++
++
++//}
++
+diff --git a/crypto/ocf/talitos/gtimer/gtimer.h b/crypto/ocf/talitos/gtimer/gtimer.h
+new file mode 100644
+index 0000000..8a4d0f5
+--- /dev/null
++++ b/crypto/ocf/talitos/gtimer/gtimer.h
+@@ -0,0 +1,47 @@
++/*
++ * Freescale SEC data structures for integration with ocf-linux
++ *
++ * Copyright (c) 2006 Freescale Semiconductor, Inc.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ * 3. The name of the author may not be used to endorse or promote products
++ *    derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
++ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
++ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
++ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
++ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
++ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++/*
++ * Holds data specific to timer0.
++ */
++struct gtimer0_info {
++	struct platform_device	*tm_dev;	/* device backpointer */
++	unsigned long		tm_base_addr;
++	int			tm_irq;
++};
++
++
++#define FRR_OFFSET            0x1000
++
++#define TFRR_OFFSET           0x10F0
++#define GTIMER0_GTCCR_OFFSET  0x1100
++#define GTIMER0_GTBCR_OFFSET  0x1110
++#define GTIMER0_GTVPR_OFFSET  0x1120
++#define GTIMER0_GTDR_OFFSET   0x1130
++#define TCR_OFFSET            0x1300
+diff --git a/crypto/ocf/talitos/ktimer/Makefile b/crypto/ocf/talitos/ktimer/Makefile
+new file mode 100644
+index 0000000..95fbf1e
+--- /dev/null
++++ b/crypto/ocf/talitos/ktimer/Makefile
+@@ -0,0 +1,10 @@
++ifdef obj
++my_inc_base = $(obj)
++else
++my_inc_base = .
++O_TARGET := ktimer.o
++endif
++
++obj-$(CONFIG_OCF_TALITOS_KTIMER)    += $(obj-base)ktimer.o
++
++EXTRA_CFLAGS += -I$(my_inc_base)/.
+diff --git a/crypto/ocf/talitos/ktimer/ktimer.c b/crypto/ocf/talitos/ktimer/ktimer.c
+new file mode 100644
+index 0000000..062462f
+--- /dev/null
++++ b/crypto/ocf/talitos/ktimer/ktimer.c
+@@ -0,0 +1,312 @@
++/*
++ * Freescale SEC data structures for integration with ocf-linux
++ *
++ * Copyright (c) 2006 Freescale Semiconductor, Inc.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ * 3. The name of the author may not be used to endorse or promote products
++ *    derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
++ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
++ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
++ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
++ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
++ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/interrupt.h>
++#include <linux/spinlock.h>
++#include <linux/random.h>
++#include <linux/skbuff.h>
++#include <asm/scatterlist.h>
++#include <linux/dma-mapping.h>  
++#include <linux/moduleparam.h>
++#include <linux/uio.h>
++
++#include <linux/version.h>
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,15)
++#include <linux/platform_device.h>
++#endif
++
++//#define TALITOS_SMALL_PACKET_IMPROVE
++//#define TALITOS_INTERRUPT_COALESCE 
++#define TALITOS_HDR_DONE_BITS	0xff000000
++/* This data structure used as "data" for the timer and tasklet functions */
++struct talitos_timer_data {
++	struct timer_list timer;
++	int (*kick) (unsigned long tdelay);
++	int (*stop) (void);
++        unsigned long prevjiffies;
++};
++
++extern struct talitos_timer_data ktimer_data;
++
++#ifdef TALITOS_SMALL_PACKET_IMPROVE
++extern volatile unsigned long gPending; 
++extern volatile unsigned long gPendingLoopIndex; 
++extern volatile struct cryptop		*pCryptopPending[10]; /* assuming there could */
++                                                      /* 100 req. outstanding at the max. */
++static void talitos_timer_finish_job(void);
++#endif
++
++#ifdef TALITOS_INTERRUPT_COALESCE 
++static void talitos_timer_coalesce_pending_job (void);
++extern int talitos_assign_chnfifo(u32 reset);
++extern int talitos_find_channel(int i, u32 reset, int chnum);
++struct coalesce_info {
++	u32 *pCryptopCoalesce[100]; /* pointer to cryptop struct */
++	u32 *pTalitos_hdr[100];     /* pointer to talitos header */
++	u32 how_many_pending;
++	int chnum;
++};
++extern struct coalesce_info talitos_coalesce_info;
++#endif
++
++
++
++/* function prototypes */
++static void talitos_timer_fn(unsigned long arg);
++static void talitos_kick_timer(unsigned long tdelay);
++static int talitos_stop_timer(void);
++static int talitos_init_timer(void);
++
++
++/*
++ * setup the timer data structure and initialize
++ * the kernel timer
++ */
++static int talitos_init_timer(void)
++{	
++	init_timer(&ktimer_data.timer);
++
++	#if 0
++	if( ktimer_data.timer.entry.next != NULL)
++		printk("%s entry.next is not NULL! panic...\n", __FUNCTION__);
++	else
++		printk("%s entry.next is NULL, cool ...\n", __FUNCTION__);
++	#endif
++
++
++	/* initialize function pointers */
++	ktimer_data.kick = talitos_kick_timer;
++	ktimer_data.stop = talitos_stop_timer;
++	       
++	return 0;
++}
++
++/*
++ * starting th kernel timer to count tdelay jiffies
++ * at the end of which the talitos_timer_fn will
++ * be called
++ */
++static void talitos_kick_timer(unsigned long tdelay)
++{
++	unsigned long j = jiffies;
++	//printk("%s adding the kernel timer ...\n", __FUNCTION__);
++
++	/* fill the data for our timer function */
++	ktimer_data.prevjiffies = j;
++	
++	/* register the timer */
++	ktimer_data.timer.data = &ktimer_data;
++	ktimer_data.timer.function = talitos_timer_fn;
++	ktimer_data.timer.expires = j + tdelay; /* parameter */
++
++	#if 0
++	if( ktimer_data.timer.entry.next != NULL)
++		printk("%s entry.next is not NULL! panic...\n", __FUNCTION__);
++	else
++		printk("%s entry.next is NULL, cool ...\n", __FUNCTION__);
++	#endif
++
++	add_timer(&ktimer_data.timer);
++}
++
++/*
++ * this will delete the timer
++ */
++static int talitos_stop_timer(void)
++{
++        del_timer(&ktimer_data.timer);
++}
++
++/*
++ * this is the function that is invoked after 
++ * tdelay jiffies. Its responsibility is to cleanup
++ * outstanding crypto requests to talitos
++ */
++static void talitos_timer_fn(unsigned long arg)
++{
++
++	/* before doing anything stop the timer first */
++	ktimer_data.stop();
++
++        #ifdef TALITOS_SMALL_PACKET_IMPROVE
++
++	/* finish the outstanding job */
++	talitos_timer_finish_job();
++        #endif
++
++	#ifdef TALITOS_INTERRUPT_COALESCE
++	talitos_timer_coalesce_pending_job();
++
++	#endif
++       
++}
++
++#ifdef TALITOS_SMALL_PACKET_IMPROVE
++static void talitos_timer_finish_job(void)
++{
++	unsigned long i;;
++	gPendingLoopIndex = gPending;
++	printk("%s complete...\n", __FUNCTION__);
++	for (i = 0; i < gPendingLoopIndex; i++) {
++	  if (gPending >= 100) {
++	    printk("%s panic  %d outstanding req. \n", __FUNCTION__, gPending);
++	  }
++
++	  /* AK : do the postprocessing here */
++          crypto_done(pCryptopPending[i]);
++
++	  /* AK : update the pending counter */
++	  gPending--;
++          //printk("%s gPending = %d \n", __FUNCTION__, gPending);
++	}
++
++}
++#endif
++
++#ifdef TALITOS_INTERRUPT_COALESCE
++static void talitos_timer_coalesce_pending_job (void)
++{
++	u32 num_of_pending = 0;
++	u32 num_completed = 0;
++	u32 i;
++	u32 reset;
++	int fifo_num;
++	int chnum;
++
++	/* find out how many jobs where originally submitted */
++
++	num_of_pending = talitos_coalesce_info.how_many_pending;
++
++	/* find out the number of jobs completed and for the
++	 * completed jobs call crypto_done to finish post
++	 * processing 
++	*/
++	for (i = 0; i < num_of_pending; i++) {
++		
++		/* check whether the header associated with 
++		 * this state indicates SEC completion of 
++		 * the job
++		*/
++		//if((*talitos_coalesce_info.pTalitos_hdr[i]
++		//	& TALITOS_HDR_DONE_BITS) 
++		//        == TALITOS_HDR_DONE_BITS) {
++		num_completed++;
++		crypto_done(talitos_coalesce_info.pCryptopCoalesce[i]);
++		/* now tag the descriptor as available */
++		*talitos_coalesce_info.pTalitos_hdr[i] = 0;
++		//}
++	}
++	
++	//printk(KERN_INFO "%s pending=%d, completed=%d \n", __FUNCTION__,
++	//       num_of_pending, num_completed);
++
++	/* if SEC completed all jobs then do housekeeping
++	 * work here, otherwise, kick the timer again so that 
++	 * we can come back here to complete the remainder of 
++	 * the jobs
++	*/
++	if ((num_of_pending - num_completed) == 0) {
++
++		/* do some housekeeping work */
++
++		/* reset the pending counter */
++		talitos_coalesce_info.how_many_pending = 0;
++
++		/* try to implement resetting the fifo number, there
++		   is some problem in doing this due to static defn. 
++		   of fifo number in talitos.c file. FIXME */
++		reset = 1;
++		fifo_num = talitos_assign_chnfifo(reset);
++		//if (fifo_num == -1)
++		//	printk(KERN_INFO "%s fifo num reset OK ...\n", __FUNCTION__);
++		//else
++		//	printk(KERN_INFO "%s fifo num reset not OK ...\n", __FUNCTION__);
++
++		chnum = talitos_find_channel(0, 1, (talitos_coalesce_info.chnum));
++
++	}else {
++		/* schedule the timer again so 
++		 *   that we can complete the pending
++		 *  job
++		*/
++		ktimer_data.kick(1000);
++	}
++	//printk(KERN_INFO "%s trace 5 \n", __FUNCTION__);
++
++}
++#endif
++
++/*
++ * initializes a kernel timer
++ */
++static int  talitos_ktimer_probe (void) 
++{
++        talitos_init_timer();    
++  
++}
++
++/*
++ * removes kernel timer
++ */
++static int  talitos_ktimer_remove (void) 
++{
++        /* delete kernel timer */
++        //del_timer(&data->timer);
++
++        /* now free up the timer struct */
++	printk("%s removing ktimer ...\n", __FUNCTION__);
++ 
++}
++
++
++static int __init talitos_ktimer_init(void)
++{
++	printk("%s ktimer initialized...\n", __FUNCTION__);
++        talitos_ktimer_probe();
++	
++}
++
++static void __exit talitos_ktimer_exit(void)
++{
++        talitos_ktimer_remove();
++
++}
++
++module_init(talitos_ktimer_init);
++module_exit(talitos_ktimer_exit);
++
++MODULE_LICENSE("Dual BSD/GPL");
++MODULE_AUTHOR("ahsan.kabir@freescale.com");
++MODULE_DESCRIPTION("Timer for talitos driver");
++
++
++
++
+diff --git a/crypto/ocf/talitos/talitos.c b/crypto/ocf/talitos/talitos.c
+index 062ca21..ac5413d 100644
+--- a/crypto/ocf/talitos/talitos.c
++++ b/crypto/ocf/talitos/talitos.c
+@@ -40,12 +40,12 @@
+  * The Freescale SEC (also known as 'talitos') resides on the
+  * internal bus, and runs asynchronous to the processor core.  It has
+  * a wide gamut of cryptographic acceleration features, including single-
+- * pass IPsec (also known as algorithm chaining).  To properly utilize
+- * all of the SEC's performance enhancing features, further reworking
++ * pass IPsec (also known as algorithm chaining).  To properly utilize 
++ * all of the SEC's performance enhancing features, further reworking 
+  * of higher level code (framework, applications) will be necessary.
+  *
+  * The following table shows which SEC version is present in which devices:
+- *
++ * 
+  * Devices       SEC version
+  *
+  * 8272, 8248    SEC 1.0
+@@ -89,13 +89,13 @@
+  *
+  * Channel ch0 may drive an aes operation to the aes unit (AESU),
+  * and, at the same time, ch1 may drive a message digest operation
+- * to the mdeu. Each channel has an input descriptor FIFO, and the
++ * to the mdeu. Each channel has an input descriptor FIFO, and the 
+  * FIFO can contain, e.g. on the 8541E, up to 24 entries, before a
+  * a buffer overrun error is triggered. The controller is responsible
+- * for fetching the data from descriptor pointers, and passing the
+- * data to the appropriate EUs. The controller also writes the
+- * cryptographic operation's result to memory. The SEC notifies
+- * completion by triggering an interrupt and/or setting the 1st byte
++ * for fetching the data from descriptor pointers, and passing the 
++ * data to the appropriate EUs. The controller also writes the 
++ * cryptographic operation's result to memory. The SEC notifies 
++ * completion by triggering an interrupt and/or setting the 1st byte 
+  * of the hdr field to 0xff.
+  *
+  * TODO:
+@@ -107,40 +107,41 @@
+  * o add statistics
+  */
+ 
+-#ifndef AUTOCONF_INCLUDED
+-#include <linux/config.h>
+-#endif
+ #include <linux/module.h>
+-#include <openswan.h>
+-#include <net/ip.h>		/* struct iphdr */
+-#include <linux/tcp.h>         /* struct tcphdr */
+-#include <linux/udp.h>         /* struct udphdr */
+-#include <net/icmp.h>		/* icmp_send() */
+-#include <linux/types.h>
+ #include <linux/init.h>
+ #include <linux/interrupt.h>
+ #include <linux/spinlock.h>
+ #include <linux/random.h>
+ #include <linux/skbuff.h>
++//#include <linux/tracer.h> /* AK : tracing for perf */
+ #include <asm/scatterlist.h>
+ #include <linux/dma-mapping.h>  /* dma_map_single() */
+ #include <linux/moduleparam.h>
+ #include <linux/uio.h>
+ 
++
+ #include <linux/version.h>
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 15)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,15)
+ #include <linux/platform_device.h>
+ #endif
+-
++#if 0
++#include <crypto/cryptodev.h>
++#endif
++#if 1
+ #include <opencrypto/crypto.h>
+ #include <opencrypto/cryptodev.h>
++#endif
+ 
+-#define DRV_NAME "talitos"
++#define DRV_NAME "talitos" 
+ 
+ #include "talitos_dev.h"
+ #include "talitos_soft.h"
+-
+-#define read_random(p, l) get_random_bytes(p, l)
++#include <asm/io.h>
++#include <linux/mm.h>
++#include <asm/m5485sec.h>
++#include <asm/m5485sim.h>
++#include <asm/coldfire.h>
++#define read_random(p,l) get_random_bytes(p,l)
+ 
+ const char talitos_driver_name[] = "Talitos OCF";
+ const char talitos_driver_version[] = "0.1";
+@@ -153,78 +154,142 @@ static void skb_copy_bits_back(struct sk_buff *skb, int offset, caddr_t cp,
+ 								 int len);
+ static int talitos_read_random(void *arg, u_int32_t *buf, int maxwords);
+ static void talitos_rng_init(struct talitos_softc *sc);
+-static int talitos_newsession(void *arg, u_int32_t *sidp,
++static int talitos_newsession(void *arg, u_int32_t *sidp, 
+ 							struct cryptoini *cri);
+-static int talitos_submit(struct talitos_softc *sc, struct talitos_desc *td,
++static int talitos_submit(struct talitos_softc *sc, struct talitos_desc *td, 
+ 								int chsel);
+ static int talitos_process(void *arg, struct cryptop *crp, int hint);
+-static void talitos_doneprocessing(struct talitos_softc *sc,
+-							unsigned long chnum);
+ static void talitos_init_device(struct talitos_softc *sc);
+ static void talitos_reset_device_master(struct talitos_softc *sc);
+ static void talitos_reset_device(struct talitos_softc *sc);
+-static void talitos_errorprocessing(struct talitos_softc *sc,
+-						unsigned long chnum);
+-static void talitos_print_ip (struct iphdr *ip);
+-static void talitos_print_desc(struct talitos_desc *td);
++
++
++static void talitos_doneprocessing(struct talitos_softc *sc, unsigned long chnum);
++static void talitos_errorprocessing(struct talitos_softc *sc, unsigned long chnum);
+ static int talitos_probe(struct platform_device *pdev);
+ static int talitos_remove(struct platform_device *pdev);
+ 
+ #ifdef TALITOS_TASKLET
+-int talitos_inline_polling(unsigned long lock_flags);
+-static inline void talitos_poll(unsigned long lock_flags);
++static inline int talitos_inline_polling (unsigned long lock_flags);
++static inline void talitos_poll (unsigned long lock_flags);
+ static ocf_iomem_t sec_base_addr;
+-static u32 chnum;
+-static u32 fifo_num;
+-static void talitos_tasklet(unsigned long data);
++static u32 chnum = 0;
++static u32 fifo_num = 0;
++static void talitos_tasklet (unsigned long data);	  
+ DECLARE_TASKLET(isr_talitos_tasklet, talitos_tasklet, 0);
+ static LIST_HEAD(talitos_tasklet_q);
+ static spinlock_t talitos_tasklet_q_lock;
+ #define	TALITOS_TASKLET_Q_LOCK() \
+ 			({ \
+-	spin_lock_irqsave(&talitos_tasklet_q_lock, r_flags); \
+-	dprintk("%s,%d: RETQ_LOCK\n", __FILE__, __LINE__); \
++				spin_lock_irqsave(&talitos_tasklet_q_lock, r_flags); \
++				dprintk("%s,%d: RETQ_LOCK\n", __FILE__, __LINE__); \
+ 			 })
+ #define	TALITOS_TASKLET_Q_UNLOCK() \
+ 			({ \
+-	dprintk("%s,%d: RETQ_UNLOCK\n", __FILE__, __LINE__); \
+-	spin_unlock_irqrestore(&talitos_tasklet_q_lock, r_flags); \
++			 	dprintk("%s,%d: RETQ_UNLOCK\n", __FILE__, __LINE__); \
++				spin_unlock_irqrestore(&talitos_tasklet_q_lock, r_flags); \
+ 			 })
++
+ #endif /* TALITOS_TASKLET */
+ 
+-static int debug;
++
++static int debug = 1;
++
+ module_param(debug, int, 0644);
+ MODULE_PARM_DESC(debug, "Enable debug");
+-
+-#define	DPRINTF(a...)	if (debug) { printk(DRV_NAME ": " a); }
++static int coldfire_debug = 0;
+ 
+ static inline void talitos_write(volatile unsigned *addr, u32 val)
+ {
+-	out_be32(addr, val);
++#ifdef FSL_SEC11_MCF547X_8X
++	*(volatile unsigned long *)((unsigned long)addr) = val;
++#else
++        out_be32(addr, val);
++#endif
+ }
+ 
+ static inline u32 talitos_read(volatile unsigned *addr)
+ {
+-	u32 val;
+-	val = in_be32(addr);
+-	return val;
++        u32 val;
++#ifdef FSL_SEC11_MCF547X_8X
++	val = *(volatile unsigned long *)((unsigned long)addr);
++#else
++        val = in_be32(addr);
++#endif
++        return val;
+ }
+-
++		
+ static void dump_talitos_status(struct talitos_softc *sc)
+ {
+-	unsigned int v;
+-	unsigned int v_hi;
+-	unsigned int *ptr;
+-	unsigned int i;
+-
+-	v = talitos_read(sc->sc_base_addr + TALITOS_MDEU_ISR);
+-	v_hi = talitos_read(sc->sc_base_addr + TALITOS_MDEU_ISR_HI);
+-	printk(KERN_INFO DRV_NAME ": MDEU_ISR     0x%08x_%08x\n", v, v_hi);
+-
+-	v = talitos_read(sc->sc_base_addr + TALITOS_MDEU_ICR);
+-	v_hi = talitos_read(sc->sc_base_addr + TALITOS_MDEU_ICR_HI);
+-	printk(KERN_INFO DRV_NAME ": MDEU_ICR     0x%08x_%08x\n", v, v_hi);
+-
++	unsigned int v, v_hi, i, *ptr;
++#ifdef FSL_SEC11_MCF547X_8X
++        v = talitos_read(sc->sc_base_addr + TALITOS_EUACR);
++        v_hi = talitos_read(sc->sc_base_addr + TALITOS_EUACR_HI);
++        printk(KERN_INFO DRV_NAME ": EUACR          0x%08x_%08x\n", v, v_hi);
++        v = talitos_read(sc->sc_base_addr + TALITOS_EUASR);
++        v_hi = talitos_read(sc->sc_base_addr + TALITOS_EUASR_HI);
++        printk(KERN_INFO DRV_NAME ": EUASR          0x%08x_%08x\n", v, v_hi);
++
++        v = talitos_read(sc->sc_base_addr + TALITOS_DEURCR);
++        printk(KERN_INFO DRV_NAME ": DEU  Reset 0x%08x\n", v);
++        v = talitos_read(sc->sc_base_addr + TALITOS_DEUSR);
++        v_hi = talitos_read(sc->sc_base_addr + TALITOS_DEUSR_HI);
++        printk(KERN_INFO DRV_NAME ": DEU  Status 0x%08x_%08x\n", v, v_hi);
++        v = talitos_read(sc->sc_base_addr + TALITOS_DEUISR);
++        v_hi = talitos_read(sc->sc_base_addr + TALITOS_DEUISR_HI);
++        printk(KERN_INFO DRV_NAME ": DEU  ISR 0x%08x_%08x\n", v, v_hi);
++        v = talitos_read(sc->sc_base_addr + TALITOS_DEUICR);
++        v_hi = talitos_read(sc->sc_base_addr + TALITOS_DEUICR_HI);
++        printk(KERN_INFO DRV_NAME ": DEU  ICR 0x%08x_%08x\n", v, v_hi);
++
++        v = talitos_read(sc->sc_base_addr + TALITOS_AESURCR);
++        printk(KERN_INFO DRV_NAME ": AESU  Reset 0x%08x\n", v);
++        v = talitos_read(sc->sc_base_addr + TALITOS_AESUSR);
++        v_hi = talitos_read(sc->sc_base_addr + TALITOS_AESUSR_HI);
++        printk(KERN_INFO DRV_NAME ": AESU  Status 0x%08x_%08x\n", v, v_hi);
++        v = talitos_read(sc->sc_base_addr + TALITOS_AESUISR);
++        v_hi = talitos_read(sc->sc_base_addr + TALITOS_AESUISR_HI);
++        printk(KERN_INFO DRV_NAME ": AESU  ISR 0x%08x_%08x\n", v, v_hi);
++        v = talitos_read(sc->sc_base_addr + TALITOS_AESUICR);
++        v_hi = talitos_read(sc->sc_base_addr + TALITOS_AESUICR_HI);
++        printk(KERN_INFO DRV_NAME ": AESU  ICR 0x%08x_%08x\n", v, v_hi);
++
++        v = talitos_read(sc->sc_base_addr + TALITOS_MDEURCR);
++        printk(KERN_INFO DRV_NAME ": MDEU  Reset 0x%08x\n", v);
++        v = talitos_read(sc->sc_base_addr + TALITOS_MDEUSR);
++        v_hi = talitos_read(sc->sc_base_addr + TALITOS_MDEUSR_HI);
++        printk(KERN_INFO DRV_NAME ": MDEU  Status 0x%08x_%08x\n", v, v_hi);
++        v = talitos_read(sc->sc_base_addr + TALITOS_MDEUISR);
++        v_hi = talitos_read(sc->sc_base_addr + TALITOS_MDEUISR_HI);
++        printk(KERN_INFO DRV_NAME ": MDEU  ISR 0x%08x_%08x\n", v, v_hi);
++        v = talitos_read(sc->sc_base_addr + TALITOS_MDEUICR);
++        v_hi = talitos_read(sc->sc_base_addr + TALITOS_MDEUICR_HI);
++        printk(KERN_INFO DRV_NAME ": MDEU  ICR 0x%08x_%08x\n", v, v_hi);
++
++        v = talitos_read(sc->sc_base_addr + TALITOS_AFEURCR);
++        printk(KERN_INFO DRV_NAME ": AFEU  Reset 0x%08x\n", v);
++        v = talitos_read(sc->sc_base_addr + TALITOS_AFEUSR);
++        v_hi = talitos_read(sc->sc_base_addr + TALITOS_AFEUSR_HI);
++        printk(KERN_INFO DRV_NAME ": AFEU  Status 0x%08x_%08x\n", v, v_hi);
++        v = talitos_read(sc->sc_base_addr + TALITOS_AFEUISR);
++        v_hi = talitos_read(sc->sc_base_addr + TALITOS_AFEUISR_HI);
++        printk(KERN_INFO DRV_NAME ": AFEU  ISR 0x%08x_%08x\n", v, v_hi);
++        v = talitos_read(sc->sc_base_addr + TALITOS_AFEUICR);
++        v_hi = talitos_read(sc->sc_base_addr + TALITOS_AFEUICR_HI);
++        printk(KERN_INFO DRV_NAME ": AFEU  ICR 0x%08x_%08x\n", v, v_hi);
++
++        v = talitos_read(sc->sc_base_addr + TALITOS_RNGRCR);
++        printk(KERN_INFO DRV_NAME ": RNG  Reset 0x%08x\n", v);
++        v = talitos_read(sc->sc_base_addr + TALITOS_RNGSR);
++        v_hi = talitos_read(sc->sc_base_addr + TALITOS_RNGSR_HI);
++        printk(KERN_INFO DRV_NAME ": RNG  Status 0x%08x_%08x\n", v, v_hi);
++        v = talitos_read(sc->sc_base_addr + TALITOS_RNGISR);
++        v_hi = talitos_read(sc->sc_base_addr + TALITOS_RNGISR_HI);
++        printk(KERN_INFO DRV_NAME ": RNG  ISR 0x%08x_%08x\n", v, v_hi);
++        v = talitos_read(sc->sc_base_addr + TALITOS_RNGICR);
++        v_hi = talitos_read(sc->sc_base_addr + TALITOS_RNGICR_HI);
++        printk(KERN_INFO DRV_NAME ": RNG  ICR 0x%08x_%08x\n", v, v_hi);
++#endif
+ 	v = talitos_read(sc->sc_base_addr + TALITOS_MCR);
+ 	v_hi = talitos_read(sc->sc_base_addr + TALITOS_MCR_HI);
+ 	printk(KERN_INFO DRV_NAME ": MCR          0x%08x_%08x\n", v, v_hi);
+@@ -234,30 +299,34 @@ static void dump_talitos_status(struct talitos_softc *sc)
+ 	v = talitos_read(sc->sc_base_addr + TALITOS_ISR);
+ 	v_hi = talitos_read(sc->sc_base_addr + TALITOS_ISR_HI);
+ 	printk(KERN_INFO DRV_NAME ": ISR          0x%08x_%08x\n", v, v_hi);
+-	for (i = 0; i < sc->sc_num_channels; i++) {
+-		v = talitos_read(sc->sc_base_addr + i*TALITOS_CH_OFFSET +
++	for (i = 0; i < sc->sc_num_channels; i++) { 
++		v = talitos_read(sc->sc_base_addr + i*TALITOS_CH_OFFSET + 
+ 			TALITOS_CH_CDPR);
+-		v_hi = talitos_read(sc->sc_base_addr + i*TALITOS_CH_OFFSET +
++		v_hi = talitos_read(sc->sc_base_addr + i*TALITOS_CH_OFFSET + 
+ 			TALITOS_CH_CDPR_HI);
+-		printk(KERN_INFO DRV_NAME ": CDPR     ch%d 0x%08x_%08x\n",
++		printk(KERN_INFO DRV_NAME ": CDPR     ch%d 0x%08x_%08x\n", 
+ 			i, v, v_hi);
+ 	}
+-	for (i = 0; i < sc->sc_num_channels; i++) {
+-		v = talitos_read(sc->sc_base_addr + i*TALITOS_CH_OFFSET +
++	for (i = 0; i < sc->sc_num_channels; i++) { 
++		v = talitos_read(sc->sc_base_addr + i*TALITOS_CH_OFFSET + 
+ 			TALITOS_CH_CCPSR);
+-		v_hi = talitos_read(sc->sc_base_addr + i*TALITOS_CH_OFFSET +
++		v_hi = talitos_read(sc->sc_base_addr + i*TALITOS_CH_OFFSET + 
+ 			TALITOS_CH_CCPSR_HI);
+-		printk(KERN_INFO DRV_NAME ": CCPSR    ch%d 0x%08x_%08x\n",
++		printk(KERN_INFO DRV_NAME ": CCPSR    ch%d 0x%08x_%08x\n", 
+ 			i, v, v_hi);
+ 	}
+ 	ptr = sc->sc_base_addr + TALITOS_CH_DESCBUF;
+-	for (i = 0; i < 16; i++) {
++	v = talitos_read(ptr++);
++	 	printk(KERN_INFO DRV_NAME 
++                        ": DESCBUF  ch0 0x%08x (tdp%02d)\n",v);
++	for (i = 0; i < 15; i++) { 
+ 		v = talitos_read(ptr++); v_hi = talitos_read(ptr++);
+-		printk(KERN_INFO DRV_NAME
+-			": DESCBUF  ch0 0x%08x_%08x (tdp%02d)\n",
++		printk(KERN_INFO DRV_NAME 
++			": DESCBUF  ch0 0x%08x_%08x (tdp%02d)\n", 
+ 			v, v_hi, i);
+ 	}
+ 	return;
++
+ }
+ 
+ 
+@@ -266,8 +335,9 @@ static void
+ skb_copy_bits_back(struct sk_buff *skb, int offset, caddr_t cp, int len)
+ {
+ 	int i;
++	/*printk("%s\n",__FUNCTION__);*/
+ 	if (offset < skb_headlen(skb)) {
+-		memcpy(skb->data + offset, cp,
++		memcpy(skb->data + offset, cp, 
+ 			min_t(int, skb_headlen(skb), len));
+ 		len -= skb_headlen(skb);
+ 		cp += skb_headlen(skb);
+@@ -277,7 +347,7 @@ skb_copy_bits_back(struct sk_buff *skb, int offset, caddr_t cp, int len)
+ 		if (offset < skb_shinfo(skb)->frags[i].size) {
+ 			memcpy(page_address(skb_shinfo(skb)->frags[i].page) +
+ 					skb_shinfo(skb)->frags[i].page_offset,
+-					cp, min_t(int,
++					cp, min_t(int, 
+ 					skb_shinfo(skb)->frags[i].size, len));
+ 			len -= skb_shinfo(skb)->frags[i].size;
+ 			cp += skb_shinfo(skb)->frags[i].size;
+@@ -286,7 +356,7 @@ skb_copy_bits_back(struct sk_buff *skb, int offset, caddr_t cp, int len)
+ 	}
+ }
+ 
+-/*
++/* 
+  * pull random numbers off the RNG FIFO, not exceeding amount available
+  */
+ static int
+@@ -296,8 +366,60 @@ talitos_read_random(void *arg, u_int32_t *buf, int maxwords)
+ 	int rc;
+ 	u_int32_t v;
+ 
+-	DPRINTF("%s()\n", __FUNCTION__);
++#ifdef FSL_SEC11_MCF547X_8X
++	struct talitos_desc *td;
++	int out_fifo = 4;
++	unsigned long r_flags;
++	int maxlen = 0, maxleft = 0;
++
++	td = &sc->sc_chnfifo[0][0].cf_desc;
++	memset(td,0, sizeof(*td));
++	memset((unsigned char*)buf,0, maxwords*4);
+ 
++	rc = 0 ;
++	if (maxwords <= 0){
++        	printk("%s error:len %x < 0\n",__FUNCTION__,maxwords);
++		return rc;
++	}
++	
++	maxwords = maxwords * 4;
++	if(maxwords % 4 != 0){
++		/*printk("%s error:len %x is not mutiple of 4\n",__FUNCTION__,maxwords);*/
++		maxleft = maxwords % 4;
++		maxlen  = maxwords - maxleft;
++		/*
++		printk("%s error:len %x is not mutiple of 4. left %x len %x\n"
++			,__FUNCTION__,maxwords,maxleft,maxlen); 
++		*/
++	}
++        
++        /*
++ 	* OFL is number of available 64-bit words, 
++ 	* shift and convert to a 32-bit word count
++ 	*/
++        
++	/*printk("%s SR %x. maxwords %x\n",__FUNCTION__,v,maxwords);*/
++
++        td->ptr[out_fifo].ptr = dma_map_single(NULL, (unsigned char *)buf,
++                        	maxwords, DMA_TO_DEVICE);
++        td->ptr[out_fifo].len = maxwords;
++	
++	td->hdr = 0x40000010; 
++	if (coldfire_debug)
++		dump_talitos_status(sc);
++
++	talitos_submit(sc,td,1);
++	rc = maxwords;
++	if (coldfire_debug)
++		dump_talitos_status(sc);
++        //#ifdef TALITOS_TASKLET  
++        //TALITOS_TASKLET_Q_LOCK();       
++        //list_add_tail(&sc->sc_chnfifo[0][0].desc_list , &talitos_tasklet_q);        
++        //talitos_inline_polling(r_flags);
++        //TALITOS_TASKLET_Q_UNLOCK();
++	//while(1){};
++	//#endif
++#else
+ 	/* check for things like FIFO underflow */
+ 	v = talitos_read(sc->sc_base_addr + TALITOS_RNGISR_HI);
+ 	if (unlikely(v)) {
+@@ -305,26 +427,27 @@ talitos_read_random(void *arg, u_int32_t *buf, int maxwords)
+ 		return 0;
+ 	}
+ 	/*
+-	 * OFL is number of available 64-bit words,
++	 * OFL is number of available 64-bit words, 
+ 	 * shift and convert to a 32-bit word count
+ 	 */
+ 	v = talitos_read(sc->sc_base_addr + TALITOS_RNGSR_HI);
+ 	v = (v & TALITOS_RNGSR_HI_OFL) >> (16 - 1);
+ 	if (maxwords > v)
+ 		maxwords = v;
+-	for (rc = 0; rc < maxwords; rc++)
+-		buf[rc] = talitos_read(sc->sc_base_addr +
++	for (rc = 0; rc < maxwords; rc++) {
++		buf[rc] = talitos_read(sc->sc_base_addr + 
+ 			TALITOS_RNG_FIFO + rc*sizeof(u_int32_t));
++	}
+ 	if (maxwords & 1) {
+-		/*
++		/* 
+ 		 * RNG will complain with an AE in the RNGISR
+ 		 * if we don't complete the pairs of 32-bit reads
+ 		 * to its 64-bit register based FIFO
+ 		 */
+-		v = talitos_read(sc->sc_base_addr +
++		v = talitos_read(sc->sc_base_addr + 
+ 			TALITOS_RNG_FIFO + rc*sizeof(u_int32_t));
+ 	}
+-
++#endif
+ 	return rc;
+ }
+ 
+@@ -332,24 +455,57 @@ static void
+ talitos_rng_init(struct talitos_softc *sc)
+ {
+ 	u_int32_t v;
+-
++#ifdef FSL_SEC11_MCF547X_8X
++	unsigned long time = jiffies;
++#endif
+ 	DPRINTF("%s()\n", __FUNCTION__);
+ 	/* reset RNG EU */
++#ifdef FSL_SEC11_MCF547X_8X
++        v = talitos_read(sc->sc_base_addr + TALITOS_RNGRCR);
++        v |= TALITOS_RNGRCR_SR;
++        talitos_write(sc->sc_base_addr + TALITOS_RNGRCR, v);
++        while ((talitos_read(sc->sc_base_addr + TALITOS_RNGSR)
++                & TALITOS_RNGSR_RD) == 0){
++                        /*cpu_relax();*/ /* This causes CPU lockup!!! */
++                if(jiffies - time > SEC_INIT_TIMEOUT){
++                        printk("%s fail, timeout\n",__FUNCTION__);
++                        return;
++                }
++        }
++        /*
++	* we tell the RNG to start filling the RNG FIFO
++ 	* by writing the RNGDSR 
++ 	*/
++        v = talitos_read(sc->sc_base_addr + TALITOS_RNGDSR);
++        talitos_write(sc->sc_base_addr + TALITOS_RNGDSR, v);
++        /*
++ 	* 64 bits of data will be pushed onto the FIFO every 
++	* 256 SEC cycles until the FIFO is full.  The RNG then 
++ 	* attempts to keep the FIFO full.
++ 	*/
++        v = talitos_read(sc->sc_base_addr + TALITOS_RNGISR);
++        if (v) {
++                printk(KERN_ERR DRV_NAME ": RNGISR_HI error %08x\n", v);
++                return;
++        }
++
++#else
+ 	v = talitos_read(sc->sc_base_addr + TALITOS_RNGRCR_HI);
+ 	v |= TALITOS_RNGRCR_HI_SR;
+ 	talitos_write(sc->sc_base_addr + TALITOS_RNGRCR_HI, v);
+-	while ((talitos_read(sc->sc_base_addr + TALITOS_RNGSR_HI)
+-		& TALITOS_RNGSR_HI_RD) == 0)
+-			cpu_relax();
++	while ((talitos_read(sc->sc_base_addr + TALITOS_RNGSR_HI) 
++		& TALITOS_RNGSR_HI_RD) == 0){
++			cpu_relax(); /* This causes CPU lockup!!! */
++	}
+ 	/*
+ 	 * we tell the RNG to start filling the RNG FIFO
+-	 * by writing the RNGDSR
++	 * by writing the RNGDSR 
+ 	 */
+ 	v = talitos_read(sc->sc_base_addr + TALITOS_RNGDSR_HI);
+ 	talitos_write(sc->sc_base_addr + TALITOS_RNGDSR_HI, v);
+ 	/*
+-	 * 64 bits of data will be pushed onto the FIFO every
+-	 * 256 SEC cycles until the FIFO is full.  The RNG then
++	 * 64 bits of data will be pushed onto the FIFO every 
++	 * 256 SEC cycles until the FIFO is full.  The RNG then 
+ 	 * attempts to keep the FIFO full.
+ 	 */
+ 	v = talitos_read(sc->sc_base_addr + TALITOS_RNGISR_HI);
+@@ -357,10 +513,12 @@ talitos_rng_init(struct talitos_softc *sc)
+ 		printk(KERN_ERR DRV_NAME ": RNGISR_HI error %08x\n", v);
+ 		return;
+ 	}
++#endif
+ 	/*
+-	 * n.b. we need to add a FIPS test here - if the RNG is going
++	 * n.b. we need to add a FIPS test here - if the RNG is going 
+ 	 * to fail, it's going to fail at reset time
+ 	 */
++	DPRINTF("%s success\n", __FUNCTION__);
+ 	return;
+ }
+ 
+@@ -380,30 +538,72 @@ talitos_newsession(void *arg, u_int32_t *sidp, struct cryptoini *cri)
+ 		DPRINTF("%s,%d - EINVAL\n", __FILE__, __LINE__);
+ 		return EINVAL;
+ 	}
++
+ 	for (c = cri; c != NULL; c = c->cri_next) {
++#ifdef FSL_SEC11_MCF547X_8X
++		if(coldfire_debug)
++			DPRINTF("%s: c->cri_alg %x\n", 
++				__FUNCTION__,c->cri_alg);
++#endif
+ 		if (c->cri_alg == CRYPTO_MD5 ||
+ 		    c->cri_alg == CRYPTO_MD5_HMAC ||
+ 		    c->cri_alg == CRYPTO_SHA1 ||
+ 		    c->cri_alg == CRYPTO_SHA1_HMAC ||
+ 		    c->cri_alg == CRYPTO_NULL_HMAC) {
+ 			if (macini)
++#ifdef FSL_SEC11_MCF547X_8X
++                        {
++				if(coldfire_debug)
++					DPRINTF("%s: macini =0\n",
++                                		__FUNCTION__);
+ 				return EINVAL;
++			}
++#else
++				return EINVAL;
++#endif
+ 			macini = c;
+ 		} else if (c->cri_alg == CRYPTO_DES_CBC ||
+-		    c->cri_alg == CRYPTO_3DES_CBC ||
+-		    c->cri_alg == CRYPTO_AES_CBC ||
+-		    c->cri_alg == CRYPTO_NULL_CBC) {
++			c->cri_alg == CRYPTO_3DES_CBC ||
++			c->cri_alg == CRYPTO_AES_CBC ||
++			c->cri_alg == CRYPTO_NULL_CBC ||
++			c->cri_alg == CRYPTO_ARC4) {
+ 			if (encini)
++#ifdef FSL_SEC11_MCF547X_8X
++                        {
++				if(coldfire_debug)
++                                	DPRINTF("%s: encini =0\n",
++                                		__FUNCTION__);
+ 				return EINVAL;
++                        }
++#else
++				return EINVAL;
++#endif
+ 			encini = c;
+ 		} else {
+ 			DPRINTF("UNKNOWN c->cri_alg %d\n", encini->cri_alg);
+ 			return EINVAL;
+ 		}
+ 	}
++
+ 	if (encini == NULL && macini == NULL)
++#ifdef FSL_SEC11_MCF547X_8X
++        {      
++		if(coldfire_debug)
++			DPRINTF("%s encini NULL,macini NULL\n",
++				__FUNCTION__);
+ 		return EINVAL;
++	}
++#else
++		return EINVAL;
++#endif
++
+ 	if (encini) {
++#ifdef FSL_SEC11_MCF547X_8X
++		if(coldfire_debug)
++			DPRINTF("%s encini: cri_klen %x,cri_alg %x \n",
++				__FUNCTION__,encini->cri_klen,
++				encini->cri_alg);
++#endif
+ 		/* validate key length */
+ 		switch (encini->cri_alg) {
+ 		case CRYPTO_DES_CBC:
+@@ -411,9 +611,9 @@ talitos_newsession(void *arg, u_int32_t *sidp, struct cryptoini *cri)
+ 				return EINVAL;
+ 			break;
+ 		case CRYPTO_3DES_CBC:
+-			if (encini->cri_klen != 192)
++			if (encini->cri_klen != 192) {
+ 				return EINVAL;
+-
++			}
+ 			break;
+ 		case CRYPTO_AES_CBC:
+ 			if (encini->cri_klen != 128 &&
+@@ -421,18 +621,30 @@ talitos_newsession(void *arg, u_int32_t *sidp, struct cryptoini *cri)
+ 			    encini->cri_klen != 256)
+ 				return EINVAL;
+ 			break;
++		case CRYPTO_ARC4:
++			if ( ( encini->cri_klen < ARC4_SEC_MIN_KEY_SIZE*8 ) ||
++			( encini->cri_klen > ARC4_SEC_MAX_KEY_SIZE*8 ) ) {
++				printk("%s: ARC4 do not support the "
++					"key size %d\n", __FUNCTION__, encini->cri_klen);
++				return EINVAL;
++			}
++			else {
++				/*printk("%s: ARC4 support klen %d", __FUNCTION__, encini->cri_klen);*/
++				sc->sc_rc4_first = 1;
++			}
++			break;
+ 		default:
+-			DPRINTF("UNKNOWN encini->cri_alg %d\n",
++			DPRINTF("UNKNOWN encini->cri_alg %d\n", 
+ 				encini->cri_alg);
+ 			return EINVAL;
+ 		}
+ 	}
++
+ 	if (sc->sc_sessions == NULL) {
+-		ses = (struct talitos_session *)
++		ses = sc->sc_sessions = (struct talitos_session *)
+ 			kmalloc(sizeof(struct talitos_session), GFP_ATOMIC);
+ 		if (ses == NULL)
+ 			return ENOMEM;
+-		sc->sc_sessions = ses;
+ 		memset(ses, 0, sizeof(struct talitos_session));
+ 		sesn = 0;
+ 		sc->sc_nsessions = 1;
+@@ -448,13 +660,13 @@ talitos_newsession(void *arg, u_int32_t *sidp, struct cryptoini *cri)
+ 			/* allocating session */
+ 			sesn = sc->sc_nsessions;
+ 			ses = (struct talitos_session *) kmalloc(
+-				(sesn + 1) * sizeof(struct talitos_session),
++				(sesn + 1) * sizeof(struct talitos_session), 
+ 				GFP_ATOMIC);
+ 			if (ses == NULL)
+ 				return ENOMEM;
+ 			memset(ses, 0,
+ 				(sesn + 1) * sizeof(struct talitos_session));
+-			memcpy(ses, sc->sc_sessions,
++			memcpy(ses, sc->sc_sessions, 
+ 				sesn * sizeof(struct talitos_session));
+ 			memset(sc->sc_sessions, 0,
+ 				sesn * sizeof(struct talitos_session));
+@@ -473,6 +685,12 @@ talitos_newsession(void *arg, u_int32_t *sidp, struct cryptoini *cri)
+ 		read_random(ses->ses_iv, sizeof(ses->ses_iv));
+ 
+ 		ses->ses_klen = (encini->cri_klen + 7) / 8;
++#ifdef FSL_SEC11_MCF547X_8X
++		if(coldfire_debug)
++                	DPRINTF("%s encini: ses_klen %x,cri_klen %x,sizeof(ses->ses_iv) %x \n",
++				__FUNCTION__,ses->ses_klen,encini->cri_klen,
++				sizeof(ses->ses_iv));
++#endif
+ 		memcpy(ses->ses_key, encini->cri_key, ses->ses_klen);
+ 		if (macini) {
+ 			/* doing hash on top of cipher */
+@@ -480,17 +698,20 @@ talitos_newsession(void *arg, u_int32_t *sidp, struct cryptoini *cri)
+ 			memcpy(ses->ses_hmac, macini->cri_key,
+ 				ses->ses_hmac_len);
+ 		}
+-	} else
++	} else 
+ 	if (macini) {
+ 		/* doing hash */
+ 		ses->ses_klen = (macini->cri_klen + 7) / 8;
+ 		memcpy(ses->ses_key, macini->cri_key, ses->ses_klen);
+ 	}
+-	/* really should make up a template td here,
++	/* really should make up a template td here, 
+ 	 * and only fill things like i/o and direction in process() */
+ 
+ 	/* assign session ID */
+ 	*sidp = TALITOS_SID(sc->sc_num, sesn);
++	if(coldfire_debug)
++		DPRINTF("%s over: sc_num %x,sesn %x,*sip %x \n",
++			__FUNCTION__,sc->sc_num,sesn,*sidp);
+ 	return 0;
+ }
+ 
+@@ -501,8 +722,7 @@ static int
+ talitos_freesession(void *arg, u_int64_t tid)
+ {
+ 	struct talitos_softc *sc = arg;
+-	int session;
+-	int ret;
++	int session, ret;
+ 	u_int32_t sid = ((u_int32_t) tid) & 0xffffffff;
+ 
+ 	if (sc == NULL)
+@@ -518,186 +738,144 @@ talitos_freesession(void *arg, u_int64_t tid)
+ }
+ 
+ /*
+- * launch device processing - it will come back with done notification
+- * in the form of an interrupt and/or HDR_DONE_BITS in header
++ * launch device processing - it will come back with done notification 
++ * in the form of an interrupt and/or HDR_DONE_BITS in header 
+  */
+-static int
++static int 
+ talitos_submit(
+ 	struct talitos_softc *sc,
+ 	struct talitos_desc *td,
+ 	int chsel)
+ {
+ 	u_int32_t v;
+-
++#ifdef FSL_SEC11_MCF547X_8X
++	/*printk("%s channel %x\n",__FUNCTION__,chsel);*/
++        v = dma_map_single(NULL, td, sizeof(*td), DMA_TO_DEVICE);
++        talitos_write(sc->sc_base_addr + 
++                chsel*TALITOS_CH_OFFSET + TALITOS_CH_FF, v);
++	if (coldfire_debug)
++		dump_talitos_status(sc);
++#else
+ 	v = dma_map_single(NULL, td, sizeof(*td), DMA_TO_DEVICE);
+-	talitos_write(sc->sc_base_addr +
++	talitos_write(sc->sc_base_addr + 
+ 		chsel*TALITOS_CH_OFFSET + TALITOS_CH_FF, 0);
+-	talitos_write(sc->sc_base_addr +
++	talitos_write(sc->sc_base_addr + 
+ 		chsel*TALITOS_CH_OFFSET + TALITOS_CH_FF_HI, v);
++#endif
+ 	return 0;
+ }
+ 
+ static int
+ talitos_process(void *arg, struct cryptop *crp, int hint)
+ {
+-	int i;
+-	int err = 0;
+-	int ivsize;
+-
++	int i,k, err = 0, ivsize;
+ 	struct talitos_softc *sc = arg;
+ 	struct cryptodesc *crd1, *crd2, *maccrd, *enccrd;
+ 	caddr_t iv;
+ 	struct talitos_session *ses;
+ 	struct talitos_desc *td;
+-	int chsel;
+-	unsigned long flags;
++	int chsel; /* AK */
+ 	/* descriptor mappings */
+-	int hmac_key;
+-	int hmac_data;
+-	int cipher_iv;
+-	int cipher_key;
+-	int in_fifo;
+-	int out_fifo;
+-	int cipher_iv_out;
++	int hmac_key, hmac_data, cipher_iv, cipher_key, 
++		in_fifo, out_fifo, cipher_iv_out;
++	unsigned long flags;
+ 	unsigned long r_flags;
+-	int status;
++	int status; /* AK */
+ 	int rc;
+-	u32 addr;
+-	u32 *p;
++	u32 desc_header = 0 ; /* AK */
+ 
+-	DPRINTF("%s()\n", __FUNCTION__);
+-
+-	if (crp == NULL || crp->crp_callback == NULL || sc == NULL)
++	if (crp == NULL || crp->crp_callback == NULL || sc == NULL) {
+ 		return EINVAL;
++	}
+ 	crp->crp_etype = 0;
+-
+-	if (TALITOS_SESSION(crp->crp_sid) >= sc->sc_nsessions)
++	if (TALITOS_SESSION(crp->crp_sid) >= sc->sc_nsessions) {
+ 		return EINVAL;
++	}
+ 
+ 	ses = &sc->sc_sessions[TALITOS_SESSION(crp->crp_sid)];
+-
+-#ifdef TALITOS_TASKLET
+-	/* enter the channel scheduler */
+-	spin_lock_irqsave(&sc->sc_chnfifolock[sc->sc_num_channels], flags);
++	
++  
++	#ifdef TALITOS_TASKLET
++	/* AK : obtain ch and fifo - TBD */
++    	/* enter the channel scheduler */ 
++	//spin_lock_irqsave(&sc->sc_chnfifolock[sc->sc_num_channels], flags);
++	/* 
++	 * Added by Vishnu
++	 * Makes the code compatible over different SEC Revisions
++	 * Get the Number of channels/FIFO for this SEC Revision
++	 */
+ 	chsel = chnum;
+ 	i = fifo_num;
++	//chsel = sc->sc_num_channels - 1;
++	//i = sc->sc_chfifo_len - 1;
+ 	fifo_num++;
+-	if (fifo_num == sc->sc_chfifo_len) {
++	if (fifo_num > i ){
+ 		fifo_num = 0;
+ 		chnum++;
+-		if (chnum == sc->sc_num_channels)
++		if (chnum > chsel)
+ 			chnum = 0;
+ 	}
+-	/* release the channel scheduler lock */
+-	spin_unlock_irqrestore(&sc->sc_chnfifolock[sc->sc_num_channels], flags);
++	
++	/* release the channel scheduler lock */ 
++	//spin_unlock_irqrestore(&sc->sc_chnfifolock[sc->sc_num_channels], flags);
+ 
+ 	/*
+ 	 * now check whether the desc. is free. set the done
+ 	 * notification if free
+ 	 */
+ 	if (sc->sc_chnfifo[chsel][i].cf_desc.hdr == 0) {
+-		/* TBD */
++		/* TBD - do we really need to clear everything out*/
+ 		memset(&sc->sc_chnfifo[chsel][i].cf_desc,
+ 				0, sizeof(*td));
+-		sc->sc_chnfifo[chsel][i].cf_desc.hdr |=
+-					TALITOS_DONE_NOTIFY;
++
+ 	} else {
+ 		/* process all backlogs */
+-		for (;;) {
+-			TALITOS_TASKLET_Q_LOCK();
+-			rc = talitos_inline_polling(r_flags);
++		  for(;;) {
++			TALITOS_TASKLET_Q_LOCK();	
++ 			rc = talitos_inline_polling(r_flags);
+ 			TALITOS_TASKLET_Q_UNLOCK();
+-			/* if tasklet q empty that means we have
+-			 * processed all pending jobs, therefore
+-			 * break out of the loop
+-			*/
+-			if (rc) {
+-				chnum = 0;
+-				fifo_num = 0;
+-				i = 0;
+-				chsel = 0;
++			printk(KERN_INFO "%s %d times checking Q",__FUNCTION__, k);
++			if(rc) {
++			  printk(KERN_INFO "empty\n");
+ 				break;
+ 			}
++			printk("not empty processed\n");
++			chnum = fifo_num = i = chsel = 0;			
++
+ 		}
+ 		/* check the channel+fifo again */
+ 		if (sc->sc_chnfifo[chsel][i].cf_desc.hdr == 0) {
+ 			memset(&sc->sc_chnfifo[chsel][i].cf_desc,
+ 					0, sizeof(*td));
+-			sc->sc_chnfifo[chsel][i].cf_desc.hdr |=
++			sc->sc_chnfifo[chsel][i].cf_desc.hdr |= 
+ 						TALITOS_DONE_NOTIFY;
+-		} else
+-			printk(KERN_INFO "%s panic full - needs debug\n",
+-						__FUNCTION__);
+-	}
+-#else
+-	/* enter the channel scheduler */
+-	spin_lock_irqsave(&sc->sc_chnfifolock[sc->sc_num_channels], flags);
+-
+-	/* reuse channel that already had/has requests for the required EU */
+-	for (i = 0; i < sc->sc_num_channels; i++) {
+-		if (sc->sc_chnlastalg[i] == crp->crp_desc->crd_alg)
+-			break;
+-	}
+-	if (i == sc->sc_num_channels)
+-		/*
+-		 * haven't seen this algo the last sc_num_channels or more
+-		 * use round robin in this case
+-		 * nb: sc->sc_num_channels must be power of 2
+-		 */
+-		chsel = (chsel + 1) & (sc->sc_num_channels - 1);
+-	else
+-		/*
+-		 * matches channel with same target execution unit;
+-		 * use same channel in this case
+-		 */
+-		chsel = i;
+-
+-	sc->sc_chnlastalg[chsel] = crp->crp_desc->crd_alg;
+-
+-	/* release the channel scheduler lock */
+-	spin_unlock_irqrestore(&sc->sc_chnfifolock[sc->sc_num_channels], flags);
+-
+-	/* acquire the selected channel fifo lock */
+-	spin_lock_irqsave(&sc->sc_chnfifolock[chsel], flags);
+-
+-	/* find and reserve next available descriptor-cryptop pair */
+-	for (i = 0; i < sc->sc_chfifo_len; i++) {
+-		if (sc->sc_chnfifo[chsel][i].cf_desc.hdr == 0) {
+-			/*
+-			 * ensure correct descriptor formation by
+-			 * avoiding inadvertently setting "optional" entries
+-			 * e.g. not using "optional" dptr2 for MD/HMAC descs
+-			 */
+-			memset(&sc->sc_chnfifo[chsel][i].cf_desc,
+-				0, sizeof(*td));
+-			/* reserve it with done notification request bit */
+-			sc->sc_chnfifo[chsel][i].cf_desc.hdr |=
+-				TALITOS_DONE_NOTIFY;
+-			break;
++		} else {
++			printk(KERN_INFO "%s panic full - needs debug\n",__FUNCTION__);
+ 		}
+ 	}
+-	spin_unlock_irqrestore(&sc->sc_chnfifolock[chsel], flags);
++       
++	#endif /* TALITOS_TASKLET */			
+ 
+-	if (i == sc->sc_chfifo_len) {
+-		/* fifo full */
+-		err = ERESTART;
+-		goto errout;
+-	}
+-#endif /* TALITOS_TASKLET */
+ 	td = &sc->sc_chnfifo[chsel][i].cf_desc;
+ 	sc->sc_chnfifo[chsel][i].cf_crp = crp;
+ 
+ 	crd1 = crp->crp_desc;
+ 	if (crd1 == NULL) {
+ 		err = EINVAL;
++		printk(KERN_INFO "%s crd1 null\n",__FUNCTION__);
+ 		goto errout;
+ 	}
+ 	crd2 = crd1->crd_next;
++	/*printk("crd1 %x , crd2 %x\n",crd1,crd2);*/
+ 	/* prevent compiler warning */
+ 	hmac_key = 0;
+ 	hmac_data = 0;
+ 	if (crd2 == NULL) {
+-		td->hdr |= TD_TYPE_COMMON_NONSNOOP_NO_AFEU;
++		if(coldfire_debug)
++			DPRINTF("%s crd2 = NULL, alg %x, desc_type %x\n",
++				__FUNCTION__,crd1->crd_alg,sc->sc_desc_types);
++		//td->hdr |= TD_TYPE_COMMON_NONSNOOP_NO_AFEU;
++		desc_header |= TD_TYPE_COMMON_NONSNOOP_NO_AFEU;
+ 		/* assign descriptor dword ptr mappings for this desc. type */
+ 		cipher_iv = 1;
+ 		cipher_key = 2;
+@@ -722,11 +900,13 @@ talitos_process(void *arg, struct cryptop *crp, int hint)
+ 			err = EINVAL;
+ 			goto errout;
+ 		}
+-		goto hmac_process;
+ 	} else {
+-		if (sc->sc_desc_types & TALITOS_HAS_DT_IPSEC_ESP)
+-			td->hdr |= TD_TYPE_IPSEC_ESP;
+-		else {
++		DPRINTF("%s crd2 != NULL,alg %x, desc_type %x\n",
++			__FUNCTION__,crd1->crd_alg,sc->sc_desc_types);
++		if (sc->sc_desc_types & TALITOS_HAS_DT_IPSEC_ESP) {
++			//td->hdr |= TD_TYPE_IPSEC_ESP;
++			desc_header |=  TD_TYPE_IPSEC_ESP;
++		} else {
+ 			DPRINTF("unimplemented: multiple descriptor ipsec\n");
+ 			err = EINVAL;
+ 			goto errout;
+@@ -740,24 +920,24 @@ talitos_process(void *arg, struct cryptop *crp, int hint)
+ 		out_fifo = 5;
+ 		cipher_iv_out = 6;
+ 		if ((crd1->crd_alg == CRYPTO_MD5_HMAC ||
+-		    crd1->crd_alg == CRYPTO_SHA1_HMAC ||
+-		    crd1->crd_alg == CRYPTO_MD5 ||
+-		    crd1->crd_alg == CRYPTO_SHA1) &&
++                     crd1->crd_alg == CRYPTO_SHA1_HMAC ||
++                     crd1->crd_alg == CRYPTO_MD5 ||
++                     crd1->crd_alg == CRYPTO_SHA1) &&
+ 		    (crd2->crd_alg == CRYPTO_DES_CBC ||
+-		    crd2->crd_alg == CRYPTO_3DES_CBC ||
+-		    crd2->crd_alg == CRYPTO_AES_CBC ||
+-		    crd2->crd_alg == CRYPTO_ARC4) &&
++		     crd2->crd_alg == CRYPTO_3DES_CBC ||
++		     crd2->crd_alg == CRYPTO_AES_CBC ||
++		     crd2->crd_alg == CRYPTO_ARC4) &&
+ 		    ((crd2->crd_flags & CRD_F_ENCRYPT) == 0)) {
+ 			maccrd = crd1;
+ 			enccrd = crd2;
+ 		} else if ((crd1->crd_alg == CRYPTO_DES_CBC ||
+-		    crd1->crd_alg == CRYPTO_ARC4 ||
+-		    crd1->crd_alg == CRYPTO_3DES_CBC ||
+-		    crd1->crd_alg == CRYPTO_AES_CBC) &&
++		     crd1->crd_alg == CRYPTO_ARC4 ||
++		     crd1->crd_alg == CRYPTO_3DES_CBC ||
++		     crd1->crd_alg == CRYPTO_AES_CBC) &&
+ 		    (crd2->crd_alg == CRYPTO_MD5_HMAC ||
+-		    crd2->crd_alg == CRYPTO_SHA1_HMAC ||
+-		    crd2->crd_alg == CRYPTO_MD5 ||
+-		    crd2->crd_alg == CRYPTO_SHA1) &&
++                     crd2->crd_alg == CRYPTO_SHA1_HMAC ||
++                     crd2->crd_alg == CRYPTO_MD5 ||
++                     crd2->crd_alg == CRYPTO_SHA1) &&
+ 		    (crd1->crd_flags & CRD_F_ENCRYPT)) {
+ 			enccrd = crd1;
+ 			maccrd = crd2;
+@@ -768,6 +948,7 @@ talitos_process(void *arg, struct cryptop *crp, int hint)
+ 			goto errout;
+ 		}
+ 	}
++
+ 	/* assign in_fifo and out_fifo based on input/output struct type */
+ 	if (crp->crp_flags & CRYPTO_F_SKBUF) {
+ 		/* using SKB buffers */
+@@ -777,17 +958,17 @@ talitos_process(void *arg, struct cryptop *crp, int hint)
+ 			err = EINVAL;
+ 			goto errout;
+ 		}
+-		td->ptr[in_fifo].ptr = dma_map_single(NULL, skb->data,
++		td->ptr[in_fifo].ptr = dma_map_single(NULL, skb->data, 
+ 			skb->len, DMA_TO_DEVICE);
+ 		td->ptr[in_fifo].len = skb->len;
+-		td->ptr[out_fifo].ptr = dma_map_single(NULL, skb->data,
++		td->ptr[out_fifo].ptr = dma_map_single(NULL, skb->data, 
+ 			skb->len, DMA_TO_DEVICE);
+ 		td->ptr[out_fifo].len = skb->len;
+ 		td->ptr[hmac_data].ptr = dma_map_single(NULL, skb->data,
+ 			skb->len, DMA_TO_DEVICE);
+ 	} else if (crp->crp_flags & CRYPTO_F_IOV) {
+ 		/* using IOV buffers */
+-		struct ocf_uio *uiop = (struct ocf_uio *)crp->crp_buf;
++		struct ocf_uio *uiop = (struct uio *)crp->crp_buf;
+ 		if (uiop->uio_iovcnt > 1) {
+ 			printk(DRV_NAME ": iov frags unimplemented\n");
+ 			err = EINVAL;
+@@ -811,37 +992,75 @@ talitos_process(void *arg, struct cryptop *crp, int hint)
+ 		/* using contig buffers */
+ 		td->ptr[in_fifo].ptr = dma_map_single(NULL,
+ 			crp->crp_buf, crp->crp_ilen, DMA_TO_DEVICE);
++		//td->ptr[in_fifo].ptr =	virt_to_phys(crp->crp_buf);
+ 		td->ptr[in_fifo].len = crp->crp_ilen;
+ 		td->ptr[out_fifo].ptr = dma_map_single(NULL,
+ 			crp->crp_buf, crp->crp_ilen, DMA_TO_DEVICE);
++		//td->ptr[out_fifo].ptr =  virt_to_phys(crp->crp_buf);
+ 		td->ptr[out_fifo].len = crp->crp_ilen;
+ 	}
++
+ 	if (enccrd) {
+ 		switch (enccrd->crd_alg) {
+ 		case CRYPTO_3DES_CBC:
+-			td->hdr |= TALITOS_MODE0_DEU_3DES;
++		  	//td->hdr |= TALITOS_MODE0_DEU_3DES;
++			desc_header |= TALITOS_MODE0_DEU_3DES;
+ 			/* FALLTHROUGH */
+ 		case CRYPTO_DES_CBC:
+-			td->hdr |= TALITOS_SEL0_DEU
++		  	//td->hdr |= TALITOS_SEL0_DEU
++		  	//		|  TALITOS_MODE0_DEU_CBC;
++			desc_header |= TALITOS_SEL0_DEU
+ 				|  TALITOS_MODE0_DEU_CBC;
+ 			if (enccrd->crd_flags & CRD_F_ENCRYPT)
+-				td->hdr |= TALITOS_MODE0_DEU_ENC;
++				//td->hdr |= TALITOS_MODE0_DEU_ENC;
++				desc_header |= TALITOS_MODE0_DEU_ENC;
+ 			ivsize = 2*sizeof(u_int32_t);
+ 			DPRINTF("%cDES ses %d ch %d len %d\n",
+-				(td->hdr & TALITOS_MODE0_DEU_3DES)?'3':'1',
++				(/*td->hdr*/desc_header & TALITOS_MODE0_DEU_3DES)?'3':'1',
+ 				(u32)TALITOS_SESSION(crp->crp_sid),
+ 				chsel, td->ptr[in_fifo].len);
+ 			break;
+ 		case CRYPTO_AES_CBC:
+-			td->hdr |= TALITOS_SEL0_AESU
++		  	//td->hdr |= TALITOS_SEL0_AESU
++		  	//		|  TALITOS_MODE0_AESU_CBC;
++			desc_header |= TALITOS_SEL0_AESU
+ 				|  TALITOS_MODE0_AESU_CBC;
+ 			if (enccrd->crd_flags & CRD_F_ENCRYPT)
+-				td->hdr |= TALITOS_MODE0_AESU_ENC;
++			  	//td->hdr |= TALITOS_MODE0_AESU_ENC;
++				desc_header |= TALITOS_MODE0_AESU_ENC;
+ 			ivsize = 4*sizeof(u_int32_t);
+ 			DPRINTF("AES  ses %d ch %d len %d\n",
+ 				(u32)TALITOS_SESSION(crp->crp_sid),
+ 				chsel, td->ptr[in_fifo].len);
+ 			break;
++		case CRYPTO_ARC4:
++			if(coldfire_debug)
++				printk("flags %x\n", enccrd->crd_flags);
++			if ((enccrd->crd_flags & CRD_ARC4_FIRST) == CRD_ARC4_FIRST) {
++				sc->sc_rc4_first = 1;
++				if(coldfire_debug)
++					printk("ARC4 first\n");
++			}
++			else {
++				sc->sc_rc4_first = 0;
++			}
++
++			if (sc->sc_rc4_first == 1) {
++				desc_header = SEC_ALG_AFEU_KEY ;
++			}
++			else if (sc->sc_rc4_first == 0) {
++				desc_header = SEC_ALG_AFEU_CONTEXT;
++			}
++			else {
++				printk("%s: the ARC4 error,first 1\n", __FUNCTION__);
++			}
++
++			ivsize = ARC4_SEC_CONTEXT_LEN;
++			if(coldfire_debug)
++                        	DPRINTF("ARC4  ses %d ch %d len %d ivsize %d\n",
++					(u32)TALITOS_SESSION(crp->crp_sid),
++					chsel, td->ptr[in_fifo].len,ivsize);
++			break;
+ 		default:
+ 			printk(DRV_NAME ": unimplemented enccrd->crd_alg %d\n",
+ 				enccrd->crd_alg);
+@@ -858,80 +1077,116 @@ talitos_process(void *arg, struct cryptop *crp, int hint)
+ 		 * copy both the header+IV.
+ 		 */
+ 		if (enccrd->crd_flags & CRD_F_ENCRYPT) {
+-			td->hdr |= TALITOS_DIR_OUTBOUND;
++		  	//td->hdr |= TALITOS_DIR_OUTBOUND; 
++		  	/*printk("enccrd->crd_flags & CRD_F_ENCRYPT \n");*/
++			desc_header |= TALITOS_DIR_OUTBOUND; 
+ 			if (enccrd->crd_flags & CRD_F_IV_EXPLICIT)
+ 				iv = enccrd->crd_iv;
+ 			else
+ 				iv = (caddr_t) ses->ses_iv;
+ 			if ((enccrd->crd_flags & CRD_F_IV_PRESENT) == 0) {
+-				if (crp->crp_flags & CRYPTO_F_SKBUF)
++				if (crp->crp_flags & CRYPTO_F_SKBUF)     {
+ 					skb_copy_bits_back(
+ 						(struct sk_buff *)
+ 						(crp->crp_buf),
+-						enccrd->crd_inject,
++						enccrd->crd_inject, 
+ 						iv, ivsize);
+-				else if (crp->crp_flags & CRYPTO_F_IOV)
+-					cuio_copyback((struct ocf_uio *)
+-						(crp->crp_buf),
+-						enccrd->crd_inject,
++				}
++				else if (crp->crp_flags & CRYPTO_F_IOV)  {
++					cuio_copyback((struct uio *)
++						(crp->crp_buf),  
++						enccrd->crd_inject, 
+ 						ivsize, iv);
++				}
+ 			}
+ 		} else {
+-			td->hdr |= TALITOS_DIR_INBOUND;
++			/*printk("enccrd->crd_flags ! CRD_F_ENCRYPT \n");*/
++			//td->hdr |= TALITOS_DIR_INBOUND; 
++			desc_header |= TALITOS_DIR_INBOUND; 
+ 			if (enccrd->crd_flags & CRD_F_IV_EXPLICIT)
+ 				iv = enccrd->crd_iv;
+ 			else
+ 				iv = (caddr_t) ses->ses_iv;
+ 			if ((enccrd->crd_flags & CRD_F_IV_PRESENT) == 0) {
+-				if (crp->crp_flags & CRYPTO_F_SKBUF)
++				if (crp->crp_flags & CRYPTO_F_SKBUF)     {
+ 					skb_copy_bits((struct sk_buff *)
+ 						(crp->crp_buf),
+-						enccrd->crd_inject,
++						enccrd->crd_inject, 
+ 						iv, ivsize);
+-				else if (crp->crp_flags & CRYPTO_F_IOV)
+-					cuio_copyback((struct ocf_uio *)
++				}
++				else if (crp->crp_flags & CRYPTO_F_IOV)  {
++					cuio_copyback((struct uio *)
+ 						(crp->crp_buf),
+ 						enccrd->crd_inject,
+ 						ivsize, iv);
++				}
+ 			}
+ 		}
+-		td->ptr[cipher_iv].ptr = dma_map_single(NULL, iv, ivsize,
+-			DMA_TO_DEVICE);
+-		td->ptr[cipher_iv].len = ivsize;
+-
+-		/* BUG FIX: we don't need the cipher iv out length/pointer
+-		 * field to do ESP IPsec. Therefore we set the len field as 0,
+-		 * which tells the SEC not to do anything with this
+-		 * length/pointer field. Previously, when length/pointer as
+-		 * pointing to iv, it gave us corruption of packets.
+-		*/
+-		/* td->ptr[cipher_iv_out].ptr = dma_map_single(NULL, iv, ivsize,
+-			DMA_TO_DEVICE); */
+-		td->ptr[cipher_iv_out].len = 0;
++
++		if (enccrd->crd_alg == CRYPTO_ARC4) {
++			/*ivsize = ARC4_SEC_CONTEXT_LEN*/
++			if (sc->sc_rc4_first == 1) {
++                        	td->ptr[cipher_iv].ptr = NULL;
++                        	td->ptr[cipher_iv].len = 0;
++			}
++			else if (sc->sc_rc4_first == 0) {
++			        
++				td->ptr[cipher_iv].ptr = dma_map_single(NULL, iv, ivsize, 
++                                	DMA_TO_DEVICE);
++                        	//td->ptr[cipher_iv].ptr = virt_to_phys(iv);
++				td->ptr[cipher_iv].len = ivsize;
++			}
++			else {
++				printk("%s: the ARC4 error,first 2\n", __FUNCTION__);	
++			}
++                        td->ptr[cipher_iv_out].ptr = dma_map_single(NULL, iv, ivsize, 
++                        	DMA_TO_DEVICE);
++                        //td->ptr[cipher_iv_out].ptr = virt_to_phys(iv);
++                        td->ptr[cipher_iv_out].len = ivsize;
++		}
++		else {
++			td->ptr[cipher_iv].ptr = dma_map_single(NULL, iv, ivsize, 
++				DMA_TO_DEVICE);
++			//td->ptr[cipher_iv].ptr = virt_to_phys(iv);
++			td->ptr[cipher_iv].len = ivsize;
++			td->ptr[cipher_iv_out].ptr = dma_map_single(NULL, iv, ivsize, 
++				DMA_TO_DEVICE);
++			//td->ptr[cipher_iv_out].ptr = virt_to_phys(iv);
++			td->ptr[cipher_iv_out].len = ivsize;
++		}
+ 	}
++
+ 	if (enccrd && maccrd) {
++		//int bypass, coffset, oplen; /* AK commented out, not used */
+ 		/* this is ipsec only for now */
+-		td->hdr |= TALITOS_SEL1_MDEU
++		//td->hdr |= TALITOS_SEL1_MDEU
++		//	|  TALITOS_MODE1_MDEU_INIT
++		//	|  TALITOS_MODE1_MDEU_PAD;
++		desc_header |= TALITOS_SEL1_MDEU
+ 			|  TALITOS_MODE1_MDEU_INIT
+ 			|  TALITOS_MODE1_MDEU_PAD;
+ 		switch (maccrd->crd_alg) {
+-		case	CRYPTO_MD5:
+-			td->hdr |= TALITOS_MODE1_MDEU_MD5;
+-			break;
+-		case	CRYPTO_MD5_HMAC:
+-			td->hdr |= TALITOS_MODE1_MDEU_MD5_HMAC;
+-			break;
+-		case	CRYPTO_SHA1:
+-			td->hdr |= TALITOS_MODE1_MDEU_SHA1;
+-			break;
+-		case	CRYPTO_SHA1_HMAC:
+-			td->hdr |= TALITOS_MODE1_MDEU_SHA1_HMAC;
+-			break;
+-		default:
+-			/* We cannot order the SEC as requested */
+-			printk(DRV_NAME ": cannot do the order\n");
+-			err = EINVAL;
+-			goto errout;
++			case	CRYPTO_MD5:	
++			  	//td->hdr |= TALITOS_MODE1_MDEU_MD5;
++				desc_header |= TALITOS_MODE1_MDEU_MD5;
++				break;
++			case	CRYPTO_MD5_HMAC:	
++			  	//td->hdr |= TALITOS_MODE1_MDEU_MD5_HMAC;
++				desc_header |= TALITOS_MODE1_MDEU_MD5_HMAC;
++				break;
++			case	CRYPTO_SHA1:	
++			  	//td->hdr |= TALITOS_MODE1_MDEU_SHA1;
++				desc_header |= TALITOS_MODE1_MDEU_SHA1;
++				break;
++			case	CRYPTO_SHA1_HMAC:	
++			  	//td->hdr |= TALITOS_MODE1_MDEU_SHA1_HMAC;
++				desc_header |= TALITOS_MODE1_MDEU_SHA1_HMAC;
++				break;
++			default:
++				/* We cannot order the SEC as requested */
++				printk(DRV_NAME ": cannot do the order\n");
++				err = EINVAL;
++				goto errout;
+ 		}
+ 		if ((maccrd->crd_alg == CRYPTO_MD5_HMAC) ||
+ 		   (maccrd->crd_alg == CRYPTO_SHA1_HMAC)) {
+@@ -940,83 +1195,59 @@ talitos_process(void *arg, struct cryptop *crp, int hint)
+ 			 * crypt data is the difference in the skips.
+ 			 */
+ 			/* ipsec only for now */
+-			td->ptr[hmac_key].ptr = dma_map_single(NULL,
+-				ses->ses_hmac, ses->ses_hmac_len,
+-						DMA_TO_DEVICE);
++			td->ptr[hmac_key].ptr = dma_map_single(NULL, 
++				ses->ses_hmac, ses->ses_hmac_len, DMA_TO_DEVICE);
+ 			td->ptr[hmac_key].len = ses->ses_hmac_len;
+ 			td->ptr[in_fifo].ptr  += enccrd->crd_skip;
+ 			td->ptr[in_fifo].len  =  enccrd->crd_len;
+ 			td->ptr[out_fifo].ptr += enccrd->crd_skip;
+ 			td->ptr[out_fifo].len =  enccrd->crd_len;
+ 			/* bytes of HMAC to postpend to ciphertext */
+-			td->ptr[out_fifo].extent =  12;	/* ipsec */
+-			td->ptr[hmac_data].ptr += maccrd->crd_skip;
+-			td->ptr[hmac_data].len = enccrd->crd_skip
+-						- maccrd->crd_skip;
++			//td->ptr[out_fifo].extent =  12;	/* ipsec */
++			td->ptr[hmac_data].ptr += maccrd->crd_skip; 
++			td->ptr[hmac_data].len = enccrd->crd_skip - maccrd->crd_skip;
+ 		}
+-		if (enccrd->crd_flags & CRD_F_KEY_EXPLICIT)
++		if (enccrd->crd_flags & CRD_F_KEY_EXPLICIT) {
+ 			printk(DRV_NAME ": CRD_F_KEY_EXPLICIT unimplemented\n");
++		}
+ 	}
+ 
+-hmac_process:
+ 	if (!enccrd && maccrd) {
+-		hmac_key = 2;
+-		hmac_data = 3;
+-		//cipher_iv_out = 6;
+-		cipher_iv_out = 5;
+-		if (crp->crp_flags & CRYPTO_F_SKBUF) {
+-			/* using SKB buffers */
+-			struct sk_buff *skb = (struct sk_buff *)crp->crp_buf;
+-			if (skb_shinfo(skb)->nr_frags) {
+-				printk(DRV_NAME ": skb frags unimplemented\n");
+-				err = EINVAL;
+-				goto errout;
+-			}
+-
+-			td->ptr[hmac_data].ptr = dma_map_single(NULL, skb->data,
+-					skb->len, DMA_TO_DEVICE);
+-			td->ptr[hmac_data].len = skb->len;
+-
+-			td->ptr[cipher_iv_out].ptr = dma_map_single(NULL, skb->data,
+-						skb->len, DMA_TO_DEVICE);
+-			td->ptr[cipher_iv_out].ptr += maccrd->crd_inject;
+-			td->ptr[cipher_iv_out].len = 12;
+-		}
+-
+ 		/* single MD5 or SHA */
+-		td->hdr |= TALITOS_SEL0_MDEU
++		//td->hdr |= TALITOS_SEL0_MDEU
++		//		|  TALITOS_MODE0_MDEU_INIT
++		//		|  TALITOS_MODE0_MDEU_PAD;
++		desc_header |= TALITOS_SEL0_MDEU
+ 				|  TALITOS_MODE0_MDEU_INIT
+ 				|  TALITOS_MODE0_MDEU_PAD;
+ 		switch (maccrd->crd_alg) {
+-		case	CRYPTO_MD5:
+-			td->hdr |= TALITOS_MODE0_MDEU_MD5;
+-			DPRINTF("MD5  ses %d ch %d len %d\n",
+-				(u32)TALITOS_SESSION(crp->crp_sid),
+-				chsel, td->ptr[hmac_data].len);
+-			break;
+-		case	CRYPTO_MD5_HMAC:
+-			td->hdr |= TALITOS_MODE0_MDEU_MD5_HMAC;
+-			DPRINTF("MD5_HMAC  ses %d ch %d len %d\n",
+-				(u32)TALITOS_SESSION(crp->crp_sid),
+-				chsel, td->ptr[hmac_data].len);
+-			break;
+-		case	CRYPTO_SHA1:
+-			td->hdr |= TALITOS_MODE0_MDEU_SHA1;
+-			DPRINTF("SHA1 ses %d ch %d len %d\n",
+-				(u32)TALITOS_SESSION(crp->crp_sid),
+-				chsel, td->ptr[hmac_data].len);
+-			break;
+-		case	CRYPTO_SHA1_HMAC:
+-			td->hdr |= TALITOS_MODE0_MDEU_SHA1_HMAC;
+-			DPRINTF("SHA1_HMAC  ses %d ch %d len %d\n",
+-				(u32)TALITOS_SESSION(crp->crp_sid),
+-				chsel, td->ptr[hmac_data].len);
+-			break;
+-		default:
+-			/* We cannot order the SEC as requested */
+-			DPRINTF(DRV_NAME ": cannot do the order\n");
+-			err = EINVAL;
+-			goto errout;
++			case	CRYPTO_MD5:	
++			  	//td->hdr |= TALITOS_MODE0_MDEU_MD5;
++				desc_header |= TALITOS_MODE0_MDEU_MD5;
++				DPRINTF("MD5  ses %d ch %d len %d\n",
++					(u32)TALITOS_SESSION(crp->crp_sid), 
++					chsel, td->ptr[in_fifo].len);
++				break;
++			case	CRYPTO_MD5_HMAC:	
++			  	//td->hdr |= TALITOS_MODE0_MDEU_MD5_HMAC;
++				desc_header |= TALITOS_MODE0_MDEU_MD5_HMAC;
++				break;
++			case	CRYPTO_SHA1:	
++			  	//td->hdr |= TALITOS_MODE0_MDEU_SHA1;
++			  	desc_header |= TALITOS_MODE0_MDEU_SHA1;
++				DPRINTF("SHA1 ses %d ch %d len %d\n",
++					(u32)TALITOS_SESSION(crp->crp_sid), 
++					chsel, td->ptr[in_fifo].len);
++				break;
++			case	CRYPTO_SHA1_HMAC:	
++				//td->hdr |= TALITOS_MODE0_MDEU_SHA1_HMAC;
++				desc_header |= TALITOS_MODE0_MDEU_SHA1_HMAC;
++				break;
++			default:
++				/* We cannot order the SEC as requested */
++				DPRINTF(DRV_NAME ": cannot do the order\n");
++				err = EINVAL;
++				goto errout;
+ 		}
+ 
+ 		if (crp->crp_flags & CRYPTO_F_IOV)
+@@ -1025,220 +1256,215 @@ hmac_process:
+ 
+ 		if ((maccrd->crd_alg == CRYPTO_MD5_HMAC) ||
+ 		   (maccrd->crd_alg == CRYPTO_SHA1_HMAC)) {
+-			td->ptr[hmac_key].ptr = dma_map_single(NULL,
+-				ses->ses_key, ses->ses_klen,
++			td->ptr[hmac_key].ptr = dma_map_single(NULL, 
++				ses->ses_hmac, ses->ses_hmac_len, 
+ 				DMA_TO_DEVICE);
+-			td->ptr[hmac_key].len = ses->ses_klen;
++			td->ptr[hmac_key].len = ses->ses_hmac_len;
+ 		}
+-	} else {
++	} 
++	else {
+ 		/* using process key (session data has duplicate) */
+-		td->ptr[cipher_key].ptr = dma_map_single(NULL,
+-			enccrd->crd_key, (enccrd->crd_klen + 7) / 8,
+-			DMA_TO_DEVICE);
+-		td->ptr[cipher_key].len = (enccrd->crd_klen + 7) / 8;
++		if (enccrd->crd_alg == CRYPTO_ARC4) {
++                        if (sc->sc_rc4_first == 1) {
++				td->ptr[cipher_key].ptr = dma_map_single(NULL, 
++                                	enccrd->crd_key, (enccrd->crd_klen + 7) / 8, 
++                                	DMA_TO_DEVICE);
++				td->ptr[cipher_key].len = (enccrd->crd_klen + 7) / 8;
++                        }
++                        else if (sc->sc_rc4_first == 0) {
++				td->ptr[cipher_key].ptr = NULL;
++				td->ptr[cipher_key].len = 0;       
++                        }
++			else {
++				printk("%s: the ARC4 error,first 2\n", __FUNCTION__);   
++			}
++		}
++		else {
++			td->ptr[cipher_key].ptr = dma_map_single(NULL, 
++				enccrd->crd_key, (enccrd->crd_klen + 7) / 8, 
++				DMA_TO_DEVICE);
++			//td->ptr[cipher_key].ptr = virt_to_phys(enccrd->crd_key);
++			td->ptr[cipher_key].len = (enccrd->crd_klen + 7) / 8;
++		}
++	}	
++
++	
++	if (enccrd->crd_alg != CRYPTO_ARC4) {
++		desc_header |= TALITOS_DONE_NOTIFY;
+ 	}
++	/* Obtain spinlock */
++	spin_lock_irqsave(&sc->sc_chnfifo[chsel][i].desc_lock, flags);
++
++	/* write to header */					
++	td->hdr = desc_header;
++	/* release spinlock */
++	spin_unlock_irqrestore(&sc->sc_chnfifo[chsel][i].desc_lock, flags);
++
++
+ 	/* descriptor complete - GO! */
+ 	status = talitos_submit(sc, td, chsel);
+-#ifdef TALITOS_TASKLET
+-	TALITOS_TASKLET_Q_LOCK();
+-	list_add_tail(&sc->sc_chnfifo[chsel][i].desc_list , &talitos_tasklet_q);
++
++	/* AK tracing */
++	//trace_log_L1(34,0,0);
++	if (enccrd->crd_alg == CRYPTO_ARC4) {
++		if (sc->sc_rc4_first == 1) {
++			sc->sc_rc4_first = 0;
++			printk("%s: ARC4 SETkey over,then do context\n",
++				__FUNCTION__);
++		}
++	}
++	/* AK : add this job to the tasklet q */
++	#ifdef TALITOS_TASKLET	
++	TALITOS_TASKLET_Q_LOCK();	
++	list_add_tail(&sc->sc_chnfifo[chsel][i].desc_list , &talitos_tasklet_q);	
+ 	talitos_inline_polling(r_flags);
+ 	TALITOS_TASKLET_Q_UNLOCK();
+-#endif /* TALITOS_TASKLET */
++	#endif /* TALITOS_TASKLET */
++	if (coldfire_debug)
++		dump_talitos_status(sc);
++	
+ 	return status;
++
++
+ errout:
+ 	if (err != ERESTART) {
+ 		crp->crp_etype = err;
+ 		crypto_done(crp);
+-	} else
+-		sc->sc_needwakeup |= CRYPTO_SYMQ;
++	} else {
++	        sc->sc_needwakeup |= CRYPTO_SYMQ;
++        }  
++	
+ 	return err;
+ }
+ 
+-static void
+-talitos_print_ip(struct iphdr *ip)
+-{
+-#define TALITOS_ADDRTOA_BUF 16
+-	char buf[TALITOS_ADDRTOA_BUF];
+-	printk("%s: ", __FUNCTION__); 
+-	printk(" ihl:%d", ip->ihl << 2);
+-	printk(" ver:%d", ip->version);
+-	printk(" tos:%d", ip->tos);
+-	printk(" tlen:%d", ntohs(ip->tot_len));
+-	printk(" id:%d", ntohs(ip->id));
+-	printk(" %s%s%sfrag_off:%d",
+-               ip->frag_off & __constant_htons(IP_CE) ? "CE " : "",
+-               ip->frag_off & __constant_htons(IP_DF) ? "DF " : "",
+-               ip->frag_off & __constant_htons(IP_MF) ? "MF " : "",
+-               (ntohs(ip->frag_off) & IP_OFFSET) << 3);
+-	printk(" ttl:%d", ip->ttl);
+-	printk(" proto:%d", ip->protocol);
+-	printk(" chk:%d", ntohs(ip->check));
+-
+-	addrtoa(*((struct in_addr*)(&ip->saddr)), 0, buf, sizeof(buf));
+-	printk(" saddr:%s", buf);
+-	if(ip->protocol == IPPROTO_UDP)
+-		printk(":%d",
+-		       ntohs(((struct udphdr*)((caddr_t)ip + (ip->ihl << 2)))->source));
+-	if(ip->protocol == IPPROTO_TCP)
+-		printk(":%d",
+-		       ntohs(((struct tcphdr*)((caddr_t)ip + (ip->ihl << 2)))->source));
+-	addrtoa(*((struct in_addr*)(&ip->daddr)), 0, buf, sizeof(buf));
+-	printk(" daddr:%s", buf);
+-	if(ip->protocol == IPPROTO_UDP)
+-		printk(":%d",
+-		       ntohs(((struct udphdr*)((caddr_t)ip + (ip->ihl << 2)))->dest));
+-	if(ip->protocol == IPPROTO_TCP)
+-		printk(":%d",
+-		       ntohs(((struct tcphdr*)((caddr_t)ip + (ip->ihl << 2)))->dest));
+-	if(ip->protocol == IPPROTO_ICMP)
+-		printk(" type:code=%d:%d",
+-		       ((struct icmphdr*)((caddr_t)ip + (ip->ihl << 2)))->type,
+-		       ((struct icmphdr*)((caddr_t)ip + (ip->ihl << 2)))->code);
+-	printk("\n");
+-
+-}
+-
+-static void talitos_print_desc(struct talitos_desc *td)
+-{
+-	u32 *p;
+-	printk("hdr = 0x%08x\n", td->hdr);
+-
+-	printk("0: ptr = 0x%08x\n", td->ptr[0].ptr);
+-	printk("0: len = %d\n", td->ptr[0].len);
+-
+-	printk("1: ptr = 0x%08x\n", td->ptr[1].ptr);
+-	printk("1: len = %d\n", td->ptr[1].len);
+-
+-	printk("2: ptr = 0x%08x\n", td->ptr[2].ptr);
+-	printk("2: len = %d\n", td->ptr[2].len);
+-
+-	printk("3: ptr = 0x%08x\n", td->ptr[3].ptr);
+-	printk("3: len = %d\n", td->ptr[3].len);
+-
+-	printk("4: ptr = 0x%08x\n", td->ptr[4].ptr);
+-	printk("4: len = %d\n", td->ptr[4].len);
+-
+-	printk("5: ptr = 0x%08x\n", td->ptr[5].ptr);
+-	printk("5: len = %d\n", td->ptr[5].len);
+-
+-	printk("6: ptr = 0x%08x\n", td->ptr[6].ptr);
+-	printk("6: len = %d\n", td->ptr[6].len);
+-}
+-
+ 
+ #ifdef TALITOS_TASKLET
+-
+ /*
+  * Inline polling - from program context
+  */
+-
+-int talitos_inline_polling(unsigned long lock_flags)
++static inline int talitos_inline_polling (unsigned long lock_flags)
+ {
+ 	int rc;
+ 	u32 v;
+ 	unsigned long r_flags = lock_flags;
++	unsigned long flags;
+ 	struct cryptop *crpt;
+ 	struct desc_cryptop_pair *descp;
+ 	rc = list_empty(&talitos_tasklet_q);
+-
+ 	if (!rc) {
+-		descp = list_entry(talitos_tasklet_q.next, typeof(*descp),
+-							desc_list);
+-		/* check for done notification */
+-		if ((descp->cf_desc.hdr & TALITOS_HDR_DONE_BITS)
++			descp = list_entry(talitos_tasklet_q.next, typeof(*descp), 			     								desc_list);
++			/* check for done notification */
++			if ((descp->cf_desc.hdr & TALITOS_HDR_DONE_BITS) 
+ 			    == TALITOS_HDR_DONE_BITS) {
+-			crpt = descp->cf_crp;
++			  //trace_log_L1(44,0,0);
++				crpt = descp->cf_crp;
++				if(coldfire_debug)
++					printk(KERN_INFO "%s 0x%08x,0x%08x\n",
++						__FUNCTION__,&descp->cf_desc.hdr,
++						descp->cf_desc.hdr);
+ 
+-			/* every single pkt needs to be ack-ed to avoid
+-			* stored done interrupt generation. maybe one
+-			* write would do as we never unmask the cha
+-			* interrupts
+-			*/
+-			v = 0xffffffff;
+-			talitos_write(sec_base_addr + TALITOS_ICR, v);
+-			/* talitos_write(sec_base_addr + TALITOS_ICR_HI, v); */
+-			/* clear descriptor header */
+-			descp->cf_desc.hdr = 0;
++				/* every single pkt needs to be ack-ed to avoid
++			 	* stored done interrupt generation. maybe one
++			 	* write would do as we never unmask the cha 
++			 	* interrupts
++				*/
++ 				v = 0xffffffff;
++				talitos_write(sec_base_addr + TALITOS_ICR, v);
++				//talitos_write(sec_base_addr + TALITOS_ICR_HI, v);
+ 
+-			/* remove element from list */
+-			list_del(&descp->desc_list);
++				spin_lock_irqsave(&descp->desc_lock, flags);
++				/* clear descriptor header */
++				descp->cf_desc.hdr = 0;
++				spin_unlock_irqrestore(&descp->desc_lock, flags);
+ 
+-			TALITOS_TASKLET_Q_UNLOCK();
+-			/* complete post procesing */
+-			crypto_done(crpt);
++				/* remove element from list */
++				list_del(&descp->desc_list);
+ 
+-			TALITOS_TASKLET_Q_LOCK();
+-		}
++				TALITOS_TASKLET_Q_UNLOCK();
++				/* complete post procesing */
++       				crypto_done(crpt);
++
++				TALITOS_TASKLET_Q_LOCK();
++			}
++			
+ 	}
+ 	return rc;
+ }
+ 
++
++
+ /*
+  * This routine is called by talitos tasklet
+  */
+-static inline void talitos_poll(unsigned long lock_flags)
++static inline void talitos_poll (unsigned long lock_flags)
+ {
+ 	struct cryptop *crpt;
+ 	struct desc_cryptop_pair *descp;
+ 	unsigned long r_flags = lock_flags;
++	unsigned long flags;
+ 	u32 num_of_times;
+ 	u32 v;
+ 	num_of_times = 0;
+-	for (;;) {
++	for(;;) {
+ 		descp = NULL;
+ 		if (!list_empty(&talitos_tasklet_q)) {
+-			descp = list_entry(talitos_tasklet_q.next,
+-						typeof(*descp), desc_list);
++			descp = list_entry(talitos_tasklet_q.next, typeof(*descp), 														desc_list);
+ 			crpt = descp->cf_crp;
+ 			/* check for done notification */
+-			if ((descp->cf_desc.hdr & TALITOS_HDR_DONE_BITS)
++			if ((descp->cf_desc.hdr & TALITOS_HDR_DONE_BITS) 
+ 			    == TALITOS_HDR_DONE_BITS) {
+ 
+ 				/* every single pkt needs to be ack-ed to avoid
+-				* stored done interrupt generation. maybe one
+-				* write would do as we never unmask the cha
+-				* interrupts
++			 	* stored done interrupt generation. maybe one
++			 	* write would do as we never unmask the cha 
++			 	* interrupts
+ 				*/
+-				v = 0xffffffff;
++ 				v = 0xffffffff;
+ 				talitos_write(sec_base_addr + TALITOS_ICR, v);
+-				/* talitos_write(sec_base_addr +
+-					TALITOS_ICR_HI, v); */
++				//talitos_write(sec_base_addr + TALITOS_ICR_HI, v);
+ 
++				spin_lock_irqsave(&descp->desc_lock, flags);
+ 				/* clear descriptor header */
+ 				descp->cf_desc.hdr = 0;
++				spin_unlock_irqrestore(&descp->desc_lock, flags);
+ 
+ 				/* remove element from list */
+ 				list_del(&descp->desc_list);
+ 
+ 				TALITOS_TASKLET_Q_UNLOCK();
+ 				/* complete post procesing */
+-				crypto_done(crpt);
++				//trace_log_L1(41,0,0);
++       				crypto_done(crpt);
+ 				TALITOS_TASKLET_Q_LOCK();
+ 				num_of_times++;
+ 			} else {
++				//trace_log_L1(42,0,0);
+ 				/* reschedule tasklet - this may be costly*/
+-				/* tasklet_schedule(&isr_talitos_tasklet); */
++				//tasklet_schedule(&isr_talitos_tasklet);
++				
+ 				v = talitos_read(sec_base_addr + TALITOS_IMR);
+ 				v |= TALITOS_IMR_ALL;
+ 				talitos_write(sec_base_addr + TALITOS_IMR, v);
+ 				break;
+ 			}
++		
+ 		} else {
+ 			/* since Q empty we need to unmask talitos interrupt
+-			* so that tasklet can be scheduled again
+-			* before we unmask clear out talitos interrupt sources
+-			*/
++			* so that tasklet can be scheduled again */
++		  	//trace_log_L1(43,0,0);			 	
++
++		  	/* before we unmask clear out talitos interrupt sources */
+ 			v = 0xffffffff;
+ 			talitos_write(sec_base_addr + TALITOS_ICR, v);
+ 			talitos_write(sec_base_addr + TALITOS_ICR_HI, v);
+-			/* unmask talitos interrupt */
++		  	/* unmask talitos interrupt */
+ 			v = talitos_read(sec_base_addr + TALITOS_IMR);
+-			v |= TALITOS_IMR_ALL;
++			v = 0;//|= TALITOS_IMR_ALL;
+ 			talitos_write(sec_base_addr + TALITOS_IMR, v);
+ 			break;
+ 		}
+ 	}
++
+ }
+ 
+ 
+@@ -1246,45 +1472,57 @@ static inline void talitos_poll(unsigned long lock_flags)
+  * this is the bottom half for talitos interrupt
+  * processing
+  */
+-static void talitos_tasklet(unsigned long data)
++static void talitos_tasklet (unsigned long data)
+ {
+ 	unsigned long r_flags;
+ 	TALITOS_TASKLET_Q_LOCK();
+ 	talitos_poll(r_flags);
+ 	TALITOS_TASKLET_Q_UNLOCK();
++       
+ }
+ #endif /* TALITOS_TASKLET */
+ 
+ 
+-/* go through all channels descriptors, notifying OCF what has
+- * _and_hasn't_ successfully completed and reset the device
++
++/* go through all channels descriptors, notifying OCF what has 
++ * _and_hasn't_ successfully completed and reset the device 
+  * (otherwise it's up to decoding desc hdrs!)
+  */
+-static void
+-talitos_errorprocessing(struct talitos_softc *sc, unsigned long chnum)
++static void talitos_errorprocessing(struct talitos_softc *sc, unsigned long chnum)
+ {
+ 	unsigned long flags;
+-	int i;
+-	int j;
++	int i=0, j=0;
++
++	//printk(KERN_INFO "%s ERROR! we will be scewed if we proceed \n",__FUNCTION__);
++	
+ 
+ 	/* disable further scheduling until under control */
+-	spin_lock_irqsave(&sc->sc_chnfifolock[sc->sc_num_channels], flags);
++	//spin_lock_irqsave(&sc->sc_chnfifolock[sc->sc_num_channels], flags);
+ 
+ 	if (debug) dump_talitos_status(sc);
+-	/* go through descriptors, try and salvage those successfully done,
++	/* go through descriptors, try and salvage those successfully done, 
+ 	 * and EIO those that weren't
+ 	 */
++	/* 
++	 * Added by: Vishnu
++	 * For TALITOS_IS_SEC_2_2_0
++	 * Number of Channels is 1
++	 * We can avoid this loop
++	 */
++	/*
+ 	for (i = 0; i < sc->sc_num_channels; i++) {
+-		spin_lock_irqsave(&sc->sc_chnfifolock[i], flags);
++		//spin_lock_irqsave(&sc->sc_chnfifolock[i], flags);
++	*/
+ 		for (j = 0; j < sc->sc_chfifo_len; j++) {
+ 			if (sc->sc_chnfifo[i][j].cf_desc.hdr) {
+-				if ((sc->sc_chnfifo[i][j].cf_desc.hdr
+-					& TALITOS_HDR_DONE_BITS)
+-					!= TALITOS_HDR_DONE_BITS)
++				if ((sc->sc_chnfifo[i][j].cf_desc.hdr 
++					& TALITOS_HDR_DONE_BITS) 
++					!= TALITOS_HDR_DONE_BITS) {
+ 					/* this one didn't finish */
+ 					/* signify in crp->etype */
+-					sc->sc_chnfifo[i][j].cf_crp->crp_etype
++					sc->sc_chnfifo[i][j].cf_crp->crp_etype 
+ 						= EIO;
++				}
+ 			} else
+ 				continue; /* free entry */
+ 			/* either way, notify ocf */
+@@ -1292,8 +1530,10 @@ talitos_errorprocessing(struct talitos_softc *sc, unsigned long chnum)
+ 			/* and tag it available again */
+ 			sc->sc_chnfifo[i][j].cf_desc.hdr = 0;
+ 		}
+-		spin_unlock_irqrestore(&sc->sc_chnfifolock[i], flags);
++	/*
++		//spin_unlock_irqrestore(&sc->sc_chnfifolock[i], flags);
+ 	}
++	*/
+ 	/* reset and initialize the SEC h/w device */
+ 	talitos_reset_device(sc);
+ 	talitos_init_device(sc);
+@@ -1301,148 +1541,414 @@ talitos_errorprocessing(struct talitos_softc *sc, unsigned long chnum)
+ 		talitos_rng_init(sc);
+ 
+ 	/* Okay. Stand by. */
+-	spin_unlock_irqrestore(&sc->sc_chnfifolock[sc->sc_num_channels], flags);
++	//spin_unlock_irqrestore(&sc->sc_chnfifolock[sc->sc_num_channels], flags);
+ 
+ 	return;
+ }
+ 
+ /* go through all channels descriptors, notifying OCF what's been done */
+-static void
+-talitos_doneprocessing(struct talitos_softc *sc, unsigned long chnum)
++static void talitos_doneprocessing(struct talitos_softc *sc, unsigned long chnum)
+ {
+ 	unsigned long flags;
+-	int i;
+-	int j;
+ 	u32 v;
+ 
+-#ifdef TALITOS_TASKLET
++      	/* enter the channel scheduler */ 
++	//spin_lock_irqsave(&sc->sc_chnfifolock[sc->sc_num_channels], flags);
++
++	#ifdef TALITOS_TASKLET
+ 
+ 	/* mask SEC interrupt */
+ 	v = talitos_read(sc->sc_base_addr + TALITOS_IMR);
+-	v &= ~TALITOS_IMR_ALL;
++	v = 0;//&= ~TALITOS_IMR_ALL;
+ 	talitos_write(sc->sc_base_addr + TALITOS_IMR, v);
+ 
++	//trace_log_L1(40,0,0);
++
+ 	/* raise tasklet irq */
+ 	tasklet_schedule(&isr_talitos_tasklet);
++	#endif /* TALITOS_TASKLET */
+ 
+-	/* release the channel scheduler lock */
+-	spin_unlock_irqrestore(&sc->sc_chnfifolock[sc->sc_num_channels], flags);
+-#else
+-	/* go through descriptors looking for done bits */
+-	for (i = 0; i < sc->sc_num_channels; i++) {
+-		spin_lock_irqsave(&sc->sc_chnfifolock[i], flags);
+-		for (j = 0; j < sc->sc_chfifo_len; j++) {
+-			/* descriptor has done bits set? */
+-			if ((sc->sc_chnfifo[i][j].cf_desc.hdr
+-				& TALITOS_HDR_DONE_BITS)
+-				== TALITOS_HDR_DONE_BITS) {
+-				/* notify ocf */
+-				crypto_done(sc->sc_chnfifo[i][j].cf_crp);
+-				/* and tag it available again */
+-				sc->sc_chnfifo[i][j].cf_desc.hdr = 0;
+-			}
+-		}
+-		spin_unlock_irqrestore(&sc->sc_chnfifolock[i], flags);
+-	}
+-#endif
++	/* release the channel scheduler lock */ 
++	//spin_unlock_irqrestore(&sc->sc_chnfifolock[sc->sc_num_channels], flags);
+ 	return;
+ }
+ 
+-static irqreturn_t
+-talitos_intr(int irq, void *arg, struct pt_regs *regs)
++
++static irqreturn_t 
++talitos_intr(int irq, void *arg)
+ {
+ 	struct talitos_softc *sc = arg;
+-	u_int32_t v;
+-	u_int32_t v_hi;
+-	unsigned long chnum;
++	u_int32_t v, v_hi;
++	unsigned long chnum = 0;
++	
+ 	/* read the status register */
+ 	v = talitos_read(sc->sc_base_addr + TALITOS_ISR);
+ 	v_hi = talitos_read(sc->sc_base_addr + TALITOS_ISR_HI);
+ 
+ 	/* determine for which channel we got this interrupt */
+-	if ( v & 0x00000003)
++#if 0
++	if ( v & 0x00000003)	
+ 		chnum = 0;
+-	else if ( v & 0x0000000c)
++	else if ( v & 0x0000000c)	
+ 		chnum = 1;
+-	else if ( v & 0x00000030)
++	else if ( v & 0x00000030)	
+ 		chnum = 2;
+-	else if ( v & 0x000000c0)
++	else if ( v & 0x000000c0)	
+ 		chnum = 3;
+ 	else
+-		printk(KERN_INFO "panic ISR_low=0x%8.8x,ISR_hi = 0x%8.8x...\n",
+-							 v, v_hi);
++		printk("panic, ISR_low = 0x%8.8x, ISR_hi = 0x%8.8x...\n", v, v_hi);
++#endif
++	chnum = 0;
++	
+ 	/* ack */
+ 	talitos_write(sc->sc_base_addr + TALITOS_ICR, v);
+ 	talitos_write(sc->sc_base_addr + TALITOS_ICR_HI, v_hi);
+ 
+ 	if (unlikely(v & TALITOS_ISR_ERROR)) {
+ 		/* Okay, Houston, we've had a problem here. */
+-		printk(KERN_DEBUG DRV_NAME
++		printk(KERN_DEBUG DRV_NAME 
+ 			": got error interrupt - ISR 0x%08x_%08x\n", v, v_hi);
++		//trace_set_L1(g,3);
++		//trace_log_L1(40, trace_var(g), 300); 
++		printk("%s error ...\n", __FUNCTION__);
++		while(1){};
+ 		talitos_errorprocessing(sc, chnum);
+ 	} else
+-	if (likely(v & TALITOS_ISR_DONE))
++	if (v & TALITOS_ISR_DONE) {
++		/* now do the done processing */
++		printk("%s Done ...\n", __FUNCTION__);
+ 		talitos_doneprocessing(sc, chnum);
+-
+-	if (sc->sc_needwakeup) { /* XXX check high watermark */
+-		int wakeup = sc->sc_needwakeup & (CRYPTO_SYMQ|CRYPTO_ASYMQ);
+-		DPRINTF("%s: wakeup crypto %x\n", __func__,
+-			sc->sc_needwakeup);
+-		sc->sc_needwakeup &= ~wakeup;
+-		crypto_unblock(sc->sc_cid, wakeup);
+ 	}
++	else {
++		printk(KERN_INFO "%s Panic : talitos intr. reason unknown \n", __FUNCTION__);
++	}
++	
++	/* AK added */
++        if (sc->sc_needwakeup) {                /* XXX check high watermark */
++               int wakeup = sc->sc_needwakeup & (CRYPTO_SYMQ|CRYPTO_ASYMQ);
++               DPRINTF("%s: wakeup crypto %x\n", __func__,
++                        sc->sc_needwakeup);
++               sc->sc_needwakeup &= ~wakeup;
++               crypto_unblock(sc->sc_cid, wakeup);
++        }
++
+ 	return IRQ_HANDLED;
+ }
+ 
+ /*
+- * Initialize registers we need to touch only once.
++ * set the master reset bit on the device.
+  */
+ static void
+-talitos_init_device(struct talitos_softc *sc)
++talitos_reset_device_master(struct talitos_softc *sc)
+ {
+ 	u_int32_t v;
+-	int i;
++#ifdef FSL_SEC11_MCF547X_8X
++        unsigned long time = jiffies;
++	if(coldfire_debug)
++		DPRINTF("%s()\n", __FUNCTION__);
++        v = 0;//talitos_read(sc->sc_base_addr + TALITOS_MCR);
++        talitos_write(sc->sc_base_addr + TALITOS_MCR, v | TALITOS_MCR_SWR);
++
++        while (talitos_read(sc->sc_base_addr + TALITOS_MCR) & TALITOS_MCR_SWR){
++                if (jiffies - time > SEC_INIT_TIMEOUT){
++                        printk("%s reset SEC1.1 Master timeout: %x\n",
++                                        __FUNCTION__,v);
++                        break;
++                }
++	}
++	if(coldfire_debug)
++		DPRINTF("%s ok\n", __FUNCTION__);
++#else
++	/* Reset the device by writing 1 to MCR:SWR and waiting 'til cleared */
++	v = talitos_read(sc->sc_base_addr + TALITOS_MCR);
++	talitos_write(sc->sc_base_addr + TALITOS_MCR, v | TALITOS_MCR_SWR);
+ 
+-	DPRINTF("%s()\n", __FUNCTION__);
++	while (talitos_read(sc->sc_base_addr + TALITOS_MCR) & TALITOS_MCR_SWR)
++		cpu_relax();
++#endif
++	return;
++}
+ 
+-	/* init all channels */
+-	for (i = 0; i < sc->sc_num_channels; i++) {
+-		v = talitos_read(sc->sc_base_addr +
+-			i*TALITOS_CH_OFFSET + TALITOS_CH_CCCR_HI);
+-		v |= TALITOS_CH_CCCR_HI_CDWE
+-		  |  TALITOS_CH_CCCR_HI_CDIE;  /* invoke interrupt if done */
+-		talitos_write(sc->sc_base_addr +
+-			i*TALITOS_CH_OFFSET + TALITOS_CH_CCCR_HI, v);
++#ifdef FSL_SEC11_MCF547X_8X
++static void
++talitos_init_DESU(struct talitos_softc *sc)
++{
++        u_int32_t v;
++	if(coldfire_debug)
++		DPRINTF("%s()\n", __FUNCTION__);
++        /* init DESU */
++        v = talitos_read(sc->sc_base_addr + TALITOS_DEUICR);
++        v = TALITOS_DEUICR_MASK;
++        talitos_write(sc->sc_base_addr + TALITOS_DEUICR, v);
++      
++}
++
++static void
++talitos_init_AFEU(struct talitos_softc *sc)
++{
++        u_int32_t v;
++	if(coldfire_debug)
++		DPRINTF("%s()\n", __FUNCTION__);
++        /* init AFEU */
++        v = talitos_read(sc->sc_base_addr + TALITOS_AFEUICR);
++        v = TALITOS_AFEUICR_MASK;
++        talitos_write(sc->sc_base_addr + TALITOS_AFEUICR, v);
++      
++}
++
++static void
++talitos_init_AESU(struct talitos_softc *sc)
++{
++        u_int32_t v;
++	if(coldfire_debug)
++		DPRINTF("%s()\n", __FUNCTION__);
++        /* init AESU */
++        v = talitos_read(sc->sc_base_addr + TALITOS_AESUICR);
++        v = TALITOS_AESUICR_MASK;
++        talitos_write(sc->sc_base_addr + TALITOS_AESUICR, v);
++      
++}
++
++static void
++talitos_init_MDEU(struct talitos_softc *sc)
++{
++        u_int32_t v;
++	if(coldfire_debug)
++		DPRINTF("%s()\n", __FUNCTION__);
++        /* init MDEU */
++        v = talitos_read(sc->sc_base_addr + TALITOS_MDEUICR);
++        v = TALITOS_MDEUICR_MASK;
++        talitos_write(sc->sc_base_addr + TALITOS_MDEUICR, v);
++      
++}
++
++static void
++talitos_init_RNG(struct talitos_softc *sc)
++{
++        u_int32_t v;
++	if(coldfire_debug)
++		DPRINTF("%s()\n", __FUNCTION__);
++        /* init RNG */
++        v = talitos_read(sc->sc_base_addr + TALITOS_RNGICR);
++        v = TALITOS_RNGICR_MASK;
++        talitos_write(sc->sc_base_addr + TALITOS_RNGICR, v);
++      
++}
++
++static void
++talitos_reset_DESU(struct talitos_softc *sc)
++{
++        u_int32_t v;
++	unsigned long time = jiffies;
++	if(coldfire_debug)
++		DPRINTF("%s()\n", __FUNCTION__);
++        /*
++ 	* DESU reset
++ 	*/
++	v = talitos_read(sc->sc_base_addr + TALITOS_DEURCR);
++	talitos_write(sc->sc_base_addr + TALITOS_DEURCR, 
++			v | TALITOS_DEURCR_RESET);
++
++	while(!(talitos_read(sc->sc_base_addr + TALITOS_DEUSR) 
++		& TALITOS_DEUSR_RESET)){
++		if (jiffies - time > SEC_INIT_TIMEOUT){
++			printk("%s reset DES unit timeout: %x\n",
++                        		__FUNCTION__,v);
++                        break;
++		}
+ 	}
+-	/* enable all interrupts */
+-	v = talitos_read(sc->sc_base_addr + TALITOS_IMR);
+-	v |= TALITOS_IMR_ALL;
+-	talitos_write(sc->sc_base_addr + TALITOS_IMR, v);
+-	v = talitos_read(sc->sc_base_addr + TALITOS_IMR_HI);
+-	v |= TALITOS_IMR_HI_ERRONLY;
+-	talitos_write(sc->sc_base_addr + TALITOS_IMR_HI, v);
+-	return;
++	if(coldfire_debug)
++		DPRINTF("%s ok\n", __FUNCTION__);
+ }
+ 
+-/*
+- * set the master reset bit on the device.
+- */
+ static void
+-talitos_reset_device_master(struct talitos_softc *sc)
++talitos_reset_AFEU(struct talitos_softc *sc)
+ {
+-	u_int32_t v;
++        u_int32_t v;
++        unsigned long time = jiffies;
++	if(coldfire_debug)
++		DPRINTF("%s()\n", __FUNCTION__);
++        /*
++ 	* AFEU reset
++	*/
++        v = talitos_read(sc->sc_base_addr + TALITOS_AFEURCR);
++        talitos_write(sc->sc_base_addr + TALITOS_AFEURCR, 
++                        v | TALITOS_AFEURCR_RESET);
++
++        while(!(talitos_read(sc->sc_base_addr + TALITOS_AFEUSR) & 
++		TALITOS_AFEUSR_RESET)){
++                if (jiffies - time > 10*SEC_INIT_TIMEOUT){
++                        printk("%s reset AFE unit timeout: %x should be %x\n",
++                                        __FUNCTION__,
++					talitos_read(sc->sc_base_addr + TALITOS_AFEUSR),
++					TALITOS_AFEUSR_RESET);
++                        return;
++                }
++        }
++	if(coldfire_debug)
++		DPRINTF("%s ok\n", __FUNCTION__);        
++}
+ 
+-	/* Reset the device by writing 1 to MCR:SWR and waiting 'til cleared */
+-	v = talitos_read(sc->sc_base_addr + TALITOS_MCR);
+-	talitos_write(sc->sc_base_addr + TALITOS_MCR, v | TALITOS_MCR_SWR);
++static void
++talitos_reset_AESU(struct talitos_softc *sc)
++{
++        u_int32_t v;
++        unsigned long time = jiffies;
++
++	if(coldfire_debug)
++		DPRINTF("%s()\n", __FUNCTION__);
++        /*
++	* AESU reset
++ 	*/
++        v = talitos_read(sc->sc_base_addr + TALITOS_AESURCR);
++        talitos_write(sc->sc_base_addr + TALITOS_AESURCR, 
++                        v | TALITOS_AESURCR_RESET);
++
++        while(!(talitos_read(sc->sc_base_addr + TALITOS_AESUSR) 
++		& TALITOS_AESUSR_RESET)){
++                if (jiffies - time > SEC_INIT_TIMEOUT){
++                        printk("%s reset AES unit timeout: %x\n",
++                                        __FUNCTION__,v);
++                        break;
++                }
++        }
++	if(coldfire_debug)
++		DPRINTF("%s ok\n", __FUNCTION__);
++}
+ 
+-	while (talitos_read(sc->sc_base_addr + TALITOS_MCR) & TALITOS_MCR_SWR)
+-		cpu_relax();
++static void
++talitos_reset_MDEU(struct talitos_softc *sc)
++{
++        u_int32_t v;
++        unsigned long time = jiffies;
++
++	if(coldfire_debug)
++		DPRINTF("%s()\n", __FUNCTION__);
++        /*
++	* MDEU reset
++	*/
++        v = talitos_read(sc->sc_base_addr + TALITOS_MDEURCR);
++        talitos_write(sc->sc_base_addr + TALITOS_MDEURCR,
++                        v | TALITOS_MDEURCR_RESET);
++
++        while(!(talitos_read(sc->sc_base_addr + TALITOS_MDEUSR)  
++		& TALITOS_MDEUSR_RESET)){
++                if (jiffies - time > SEC_INIT_TIMEOUT){
++                        printk("%s reset MDE unit timeout: %x\n",
++                                        __FUNCTION__,v);
++                        break;
++                }
++        }
++	if(coldfire_debug)
++		DPRINTF("%s ok\n", __FUNCTION__);
++}
++
++static void
++talitos_reset_RNG(struct talitos_softc *sc)
++{
++        u_int32_t v;
++        unsigned long time = jiffies;
++	if(coldfire_debug)
++		DPRINTF("%s()\n", __FUNCTION__);
++        /*
++	* RNG reset
++	*/
++        v = talitos_read(sc->sc_base_addr + TALITOS_RNGRCR);
++        talitos_write(sc->sc_base_addr + TALITOS_RNGRCR,
++                        v | TALITOS_RNGRCR_SR);
++
++        while(!(talitos_read(sc->sc_base_addr + TALITOS_RNGSR) 
++		& TALITOS_RNGSR_RD)){
++                if (jiffies - time > SEC_INIT_TIMEOUT){
++                        printk("%s reset RNG unit timeout: %x\n",
++                                        __FUNCTION__,v);
++                        break;
++                }
++        }
++	if(coldfire_debug)
++		DPRINTF("%s ok\n", __FUNCTION__);
+ 
+-	return;
+ }
++#endif
+ 
+ /*
++ *  * Initialize registers we need to touch only once.
++ *   */
++static void
++talitos_init_device(struct talitos_softc *sc)
++{
++        u_int32_t v;
++        int i;
++
++	if(coldfire_debug)
++		DPRINTF("%s()\n", __FUNCTION__);
++#ifdef FSL_SEC11_MCF547X_8X
++        /* init controller */
++
++        v = talitos_read(sc->sc_base_addr + TALITOS_IMR);
++        v = 0;//|= TALITOS_IMR_ALL;
++        talitos_write(sc->sc_base_addr + TALITOS_IMR, v);
++        v = talitos_read(sc->sc_base_addr + TALITOS_IMR_HI);
++        v |= TALITOS_IMR_HI_ALL;
++        talitos_write(sc->sc_base_addr + TALITOS_IMR_HI, v);
++
++        /* init all channels */
++        for (i = 0; i < sc->sc_num_channels; i++) {
++                v = talitos_read(sc->sc_base_addr +
++                        i*TALITOS_CH_OFFSET + TALITOS_CH_CCCR);
++                v |= TALITOS_CH_CCCR_CDWE
++                  |  TALITOS_CH_CCCR_NE
++                  |  TALITOS_CH_CCCR_NT     /* Do selective notification */
++                  |  TALITOS_CH_CCCR_CDIE;  /* invoke interrupt if done */
++                  talitos_write(sc->sc_base_addr +
++                        i*TALITOS_CH_OFFSET + TALITOS_CH_CCCR, v);
++        }
++
++        talitos_init_DESU(sc);
++        talitos_init_AESU(sc);
++        talitos_init_AFEU(sc);
++        talitos_init_MDEU(sc);
++        talitos_init_RNG(sc);
++
++	MCF_ICR(ISC_SEC) = ILP_SEC;
++
++       /* Enable the  SEC interrupt */
++        //enable_irq(64 + ISC_SEC);	
++	if (coldfire_debug)
++		dump_talitos_status(sc);
++#else
++        /* init all channels */
++        for (i = 0; i < sc->sc_num_channels; i++) {
++                v = talitos_read(sc->sc_base_addr +
++                        i*TALITOS_CH_OFFSET + TALITOS_CH_CCCR_HI);
++                v |= TALITOS_CH_CCCR_HI_CDWE
++                  //#ifdef TALITOS_INTERRUPT_COALESCE
++                  //|  TALITOS_CH_CCCR_HI_NT     /* Do selective notification */
++                  //#endif
++                  |  TALITOS_CH_CCCR_HI_CDIE;  /* invoke interrupt if done */
++                talitos_write(sc->sc_base_addr +
++                	i*TALITOS_CH_OFFSET + TALITOS_CH_CCCR_HI, v);
++        }
++        /* enable all interrupts */
++        v = talitos_read(sc->sc_base_addr + TALITOS_IMR);
++        v |= TALITOS_IMR_ALL;
++        talitos_write(sc->sc_base_addr + TALITOS_IMR, v);                                                                                                            /* AK commented out: we don't want to take interrupt
++           or want to get notified when individual cha units
++           complete its job. This could really hurt performance
++           and we will take two interrupt per packet despite
++           the fact that we use one descriptor
++         */
++        #if 0
++        #ifdef TALITOS_BASELINE
++        v = talitos_read(sc->sc_base_addr + TALITOS_IMR_HI);
++        v |= TALITOS_IMR_HI_ALL;
++        talitos_write(sc->sc_base_addr + TALITOS_IMR_HI, v); 
++        #endif
++        #endif
++#endif
++	return;
++}
++/*
+  * Resets the device.  Values in the registers are left as is
+  * from the reset (i.e. initial values are assigned elsewhere).
+  */
+@@ -1452,23 +1958,59 @@ talitos_reset_device(struct talitos_softc *sc)
+ 	u_int32_t v;
+ 	int i;
+ 
+-	DPRINTF("%s()\n", __FUNCTION__);
++	if(coldfire_debug)
++		DPRINTF("%s()\n", __FUNCTION__);
+ 
+ 	/*
+ 	 * Master reset
+-	 * errata documentation: warning: certain SEC interrupts
+-	 * are not fully cleared by writing the MCR:SWR bit,
+-	 * set bit twice to completely reset
++	 * errata documentation: warning: certain SEC interrupts 
++	 * are not fully cleared by writing the MCR:SWR bit, 
++	 * set bit twice to completely reset 
+ 	 */
++#ifdef FSL_SEC11_MCF547X_8X
++	unsigned long time;
++	if (coldfire_debug)
++		dump_talitos_status(sc);
++	/*MCF_SECSACR = 1;*/
++        talitos_reset_device_master(sc); 
++#else
+ 	talitos_reset_device_master(sc);	/* once */
+ 	talitos_reset_device_master(sc);	/* and once again */
++#endif	
+ 	/* reset all channels */
+ 	for (i = 0; i < sc->sc_num_channels; i++) {
+ 		v = talitos_read(sc->sc_base_addr + i*TALITOS_CH_OFFSET +
+ 			TALITOS_CH_CCCR);
+ 		talitos_write(sc->sc_base_addr + i*TALITOS_CH_OFFSET +
+ 			TALITOS_CH_CCCR, v | TALITOS_CH_CCCR_RESET);
++#ifdef FSL_SEC11_MCF547X_8X
++			time = jiffies;	
++			while(talitos_read(sc->sc_base_addr + i*TALITOS_CH_OFFSET 
++				+TALITOS_CH_CCCR) & TALITOS_CH_CCCR_RESET){
++				if (jiffies - time > SEC_INIT_TIMEOUT){
++					printk("%s reset channel %x timeout: %x,Addr %x\n",
++						__FUNCTION__,i,
++						talitos_read(sc->sc_base_addr + 
++						i*TALITOS_CH_OFFSET +TALITOS_CH_CCCR),
++						(sc->sc_base_addr + i*TALITOS_CH_OFFSET +
++                                                        TALITOS_CH_CCCR));
++					break;
++				}
++		
++			}
++#endif
+ 	}
++
++#ifdef FSL_SEC11_MCF547X_8X
++	talitos_reset_AFEU(sc);
++        talitos_reset_DESU(sc);
++	talitos_reset_AESU(sc);
++	talitos_reset_MDEU(sc);
++	talitos_reset_RNG(sc);
++	if (coldfire_debug)
++		dump_talitos_status(sc);
++#endif
++
+ }
+ 
+ /* Set up the crypto device structure, private data,
+@@ -1477,16 +2019,19 @@ static int talitos_probe(struct platform_device *pdev)
+ {
+ 	struct talitos_softc *sc;
+ 	struct resource *r;
+-	static int num_chips;
+-	int rc;
++	static int num_chips = 0;
++	int rc = 0;
+ 	int i;
+ 	int j;
+ 
+-	DPRINTF("%s()\n", __FUNCTION__);
++	if(coldfire_debug)
++		DPRINTF("%s()\n", __FUNCTION__);
+ 
+ 	sc = (struct talitos_softc *) kmalloc(sizeof(*sc), GFP_KERNEL);
+-	if (!sc)
++	if (!sc){
++		printk("%s kmalloc talitos_softc fail\n",__FUNCTION__);
+ 		return -ENOMEM;
++	}
+ 	memset(sc, 0, sizeof(*sc));
+ 
+ 	sc->sc_irq = -1;
+@@ -1497,10 +2042,11 @@ static int talitos_probe(struct platform_device *pdev)
+ 	platform_set_drvdata(sc->sc_dev, sc);
+ 
+ 	/* get the irq line */
+-	sc->sc_irq = platform_get_irq(pdev, 0);
+-	rc = request_irq(sc->sc_irq, talitos_intr, 0, DRV_NAME, sc);
++	//sc->sc_irq = 64 + platform_get_irq(pdev, 0);
++        sc->sc_irq = 64 + platform_get_irq(pdev, 0);
++	rc = request_irq(sc->sc_irq, talitos_intr, IRQF_DISABLED, DRV_NAME, sc);
+ 	if (rc) {
+-		printk(KERN_ERR DRV_NAME ": failed to hook irq %d\n",
++		printk(KERN_ERR DRV_NAME ": failed to hook irq %d\n", 
+ 			sc->sc_irq);
+ 		sc->sc_irq = -1;
+ 		goto out;
+@@ -1509,75 +2055,110 @@ static int talitos_probe(struct platform_device *pdev)
+ 	/* get a pointer to the register memory */
+ 	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 
+-	sc->sc_base_addr = (ocf_iomem_t) ioremap(r->start, (r->end - r->start));
++#ifdef FSL_SEC11_MCF547X_8X
++	sc->sc_base_addr = (ocf_iomem_t) r->start;
++	if(coldfire_debug)
++		DPRINTF("BaseAddr %x %x %x\n",sc->sc_base_addr,r->start,r->end);
++#else
++        sc->sc_base_addr = (ocf_iomem_t) ioremap(r->start, (r->end - r->start));
++#endif
++	#ifdef TALITOS_TASKLET 
++	sec_base_addr = sc->sc_base_addr;
++	#endif
++
+ 	if (!sc->sc_base_addr) {
+ 		printk(KERN_ERR DRV_NAME ": failed to ioremap\n");
+ 		goto out;
+ 	}
+-
+-#ifdef TALITOS_TASKLET
+-	sec_base_addr = sc->sc_base_addr;
+-#endif
+-
++	
+ 	/* figure out our SEC's properties and capabilities */
++#ifdef FSL_SEC11_MCF547X_8X
++        sc->sc_chiprev = (u64)talitos_read(sc->sc_base_addr + TALITOS_ID)
++                 | talitos_read(sc->sc_base_addr + TALITOS_ID_HI) << 32;
++	if(coldfire_debug)
++		DPRINTF("sec id %x %x %x\n", talitos_read(sc->sc_base_addr + TALITOS_ID),
++                                    talitos_read(sc->sc_base_addr + TALITOS_ID_HI),
++                                    SEC_SID);
++#else
+ 	sc->sc_chiprev = (u64)talitos_read(sc->sc_base_addr + TALITOS_ID) << 32
+ 		 | talitos_read(sc->sc_base_addr + TALITOS_ID_HI);
+-	DPRINTF("sec id 0x%llx\n", sc->sc_chiprev);
+-
++#endif
++	if(coldfire_debug)
++		DPRINTF("sec id 0x%llx\n", sc->sc_chiprev);
+ 	/* bulk should go away with openfirmware flat device tree support */
+ 	if (sc->sc_chiprev & TALITOS_ID_SEC_2_0) {
+ 		sc->sc_num_channels = TALITOS_NCHANNELS_SEC_2_0;
+ 		sc->sc_chfifo_len = TALITOS_CHFIFOLEN_SEC_2_0;
+ 		sc->sc_exec_units = TALITOS_HAS_EUS_SEC_2_0;
+ 		sc->sc_desc_types = TALITOS_HAS_DESCTYPES_SEC_2_0;
+-	} else if (sc->sc_chiprev & TALITOS_ID_SEC_2_1_2) {
++	}  
++	else if (sc->sc_chiprev & TALITOS_ID_SEC_2_1_2) { /* AK generates compiler warning? */
+ 		sc->sc_num_channels = TALITOS_NCHANNELS_SEC_2_0;
+ 		sc->sc_chfifo_len = TALITOS_CHFIFOLEN_SEC_2_0;
+ 		sc->sc_exec_units = TALITOS_HAS_EUS_SEC_2_0;
+ 		sc->sc_desc_types = TALITOS_HAS_DESCTYPES_SEC_2_0;
+-	} else {
++	}
++	else if (sc->sc_chiprev & TALITOS_ID_SEC_2_2_0) { /* Vishnu */
++		sc->sc_num_channels = TALITOS_NCHANNELS_SEC_2_2;
++		sc->sc_chfifo_len = TALITOS_CHFIFOLEN_SEC_2_2;
++		sc->sc_exec_units = TALITOS_HAS_EUS_SEC_2_2;
++		sc->sc_desc_types = TALITOS_HAS_DESCTYPES_SEC_2_2;
++	}
++#ifdef FSL_SEC11_MCF547X_8X
++        else if (sc->sc_chiprev & TALITOS_ID_SEC_1_1) {
++                sc->sc_num_channels = TALITOS_NCHANNELS_SEC_1_1;
++                sc->sc_chfifo_len = TALITOS_CHFIFOLEN_SEC_1_1;
++                sc->sc_exec_units = TALITOS_HAS_EUS_SEC_1_1;
++                sc->sc_desc_types = TALITOS_HAS_DESCTYPES_SEC_1_1;
++        }
++#endif
++	else {
+ 		printk(KERN_ERR DRV_NAME ": failed to id device\n");
+ 		goto out;
+ 	}
+ 
+-	/* + 1 is for the meta-channel lock used by the channel scheduler */
+-	sc->sc_chnfifolock = (spinlock_t *) kmalloc(
+-		(sc->sc_num_channels + 1) * sizeof(spinlock_t), GFP_KERNEL);
+-	if (!sc->sc_chnfifolock)
+-		goto out;
+-	for (i = 0; i < sc->sc_num_channels + 1; i++)
+-		spin_lock_init(&sc->sc_chnfifolock[i]);
+ 
+-#ifdef TALITOS_TASKLET
++	#ifdef TALITOS_TASKLET
+ 		spin_lock_init(&talitos_tasklet_q_lock);
+-#endif /* TALITOS_TASKLET */
++	#endif /* TALITOS_TASKLET */
+ 
+ 	sc->sc_chnlastalg = (int *) kmalloc(
+ 		sc->sc_num_channels * sizeof(int), GFP_KERNEL);
+ 	if (!sc->sc_chnlastalg)
+ 		goto out;
+ 	memset(sc->sc_chnlastalg, 0, sc->sc_num_channels * sizeof(int));
+-
+ 	sc->sc_chnfifo = (struct desc_cryptop_pair **) kmalloc(
+-		sc->sc_num_channels * sizeof(struct desc_cryptop_pair *),
++		sc->sc_num_channels * sizeof(struct desc_cryptop_pair *), 
+ 		GFP_KERNEL);
+ 	if (!sc->sc_chnfifo)
+ 		goto out;
++
+ 	for (i = 0; i < sc->sc_num_channels; i++) {
+ 		sc->sc_chnfifo[i] = (struct desc_cryptop_pair *) kmalloc(
+-			sc->sc_chfifo_len * sizeof(struct desc_cryptop_pair),
++			sc->sc_chfifo_len * sizeof(struct desc_cryptop_pair), 
+ 			GFP_KERNEL);
+ 		if (!sc->sc_chnfifo[i])
+ 			goto out;
+-		memset(sc->sc_chnfifo[i], 0,
++		memset(sc->sc_chnfifo[i], 0, 
+ 			sc->sc_chfifo_len * sizeof(struct desc_cryptop_pair));
+ 	}
+ 
+-#ifdef TALITOS_TASKLET
+-	for (i = 0; i < sc->sc_num_channels; i++)
+-		for (j = 0; j < sc->sc_chfifo_len; j++)
++	/* Initialize header locks */
++	for (i = 0; i < sc->sc_num_channels; i++) {
++	  for(j = 0; j < sc->sc_chfifo_len; j++) {
++		spin_lock_init(&sc->sc_chnfifo[i][j].desc_lock);
++	  }
++	}
++
++
++	#ifdef TALITOS_TASKLET
++	for (i = 0; i < sc->sc_num_channels; i++) {
++		for (j = 0; j < sc->sc_chfifo_len; j++){
+ 			INIT_LIST_HEAD(&sc->sc_chnfifo[i][j].desc_list);
+-#endif /* TALITOS_TASKLET */
++	  	}
++	}
++
++	#endif /* TALITOS_TASKLET */
+ 
+ 	/* reset and initialize the SEC h/w device */
+ 	talitos_reset_device(sc);
+@@ -1594,10 +2175,8 @@ static int talitos_probe(struct platform_device *pdev)
+ 
+ 	if (sc->sc_exec_units & TALITOS_HAS_EU_RNG)  {
+ 		printk(" rng");
+-		talitos_rng_init(sc);
+-#ifdef CONFIG_OCF_RANDOMHARVEST
++		//talitos_rng_init(sc);
+ 		crypto_rregister(sc->sc_cid, talitos_read_random, sc);
+-#endif
+ 	}
+ 	if (sc->sc_exec_units & TALITOS_HAS_EU_DEU) {
+ 		printk(" des/3des");
+@@ -1614,6 +2193,13 @@ static int talitos_probe(struct platform_device *pdev)
+ 			talitos_newsession, talitos_freesession,
+ 			talitos_process, sc);
+ 	}
++        if (sc->sc_exec_units & TALITOS_HAS_EU_AFEU) {
++                printk(" rc4");
++		sc->sc_rc4_first = 0;
++                crypto_register(sc->sc_cid, CRYPTO_ARC4, 0, 0,
++                        talitos_newsession, talitos_freesession,
++                        talitos_process, sc);
++        }
+ 	if (sc->sc_exec_units & TALITOS_HAS_EU_MDEU) {
+ 		printk(" md5");
+ 		crypto_register(sc->sc_cid, CRYPTO_MD5, 0, 0,
+@@ -1632,7 +2218,7 @@ static int talitos_probe(struct platform_device *pdev)
+ 			talitos_newsession, talitos_freesession,
+ 			talitos_process, sc);
+ 	}
+-	printk("\n");
++	printk(" \n");
+ 	return 0;
+ 
+ out:
+@@ -1640,6 +2226,8 @@ out:
+ 	return -ENOMEM;
+ }
+ 
++
++
+ static int talitos_remove(struct platform_device *pdev)
+ {
+ 	struct talitos_softc *sc = platform_get_drvdata(pdev);
+@@ -1654,12 +2242,12 @@ static int talitos_remove(struct platform_device *pdev)
+ 	}
+ 	if (sc->sc_chnlastalg)
+ 		kfree(sc->sc_chnlastalg);
+-	if (sc->sc_chnfifolock)
+-		kfree(sc->sc_chnfifolock);
++	//if (sc->sc_chnfifolock)
++	//	kfree(sc->sc_chnfifolock);
+ 	if (sc->sc_cid >= 0)
+ 		crypto_unregister_all(sc->sc_cid);
+ 	if (sc->sc_irq != -1)
+-		free_irq(sc->sc_irq, sc);
++		free_irq( sc->sc_irq, sc);
+ 	if (sc->sc_base_addr)
+ 		iounmap((void *) sc->sc_base_addr);
+ 	kfree(sc);
+@@ -1671,7 +2259,11 @@ static struct platform_driver talitos_driver = {
+ 	.probe = talitos_probe,
+ 	.remove = talitos_remove,
+ 	.driver = {
+-		.name = "fsl-sec2",
++#ifdef FSL_SEC11_MCF547X_8X
++		.name = "fsl-sec1",
++#else
++		.name = "fsl-sec2"
++#endif
+ 	}
+ };
+ 
+diff --git a/crypto/ocf/talitos/talitos_dev.h b/crypto/ocf/talitos/talitos_dev.h
+index cb28387..63d3daa 100644
+--- a/crypto/ocf/talitos/talitos_dev.h
++++ b/crypto/ocf/talitos/talitos_dev.h
+@@ -27,21 +27,22 @@
+  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  *
+  */
+-
++#define FSL_SEC11_MCF547X_8X 1
+ /* device ID register values */
+-#define TALITOS_ID_SEC_2_0	0x40
+-#define TALITOS_ID_SEC_2_1	0x40 /* cross ref with IP block revision reg */
+-#define TALITOS_ID_SEC_2_0_1    (0x00000041)  /* low word  - MPC8349E */
+-#define TALITOS_ID_SEC_2_1_0    (0x00000080)  /* low word  - original MPC8548 */
+-#define TALITOS_ID_SEC_2_1_1    (0x0030010100000000)  /* high word - MPC8548 */
+-#define TALITOS_ID_SEC_2_1_2    (0x0030010200000000)  /* high word - MPC8548 */
+-#define TALITOS_ID_SEC_2_2_0    (0x000000a0)  /* low word  - future use */
+-#define TALITOS_ID_SEC_2_2_1    (0x0030020000000000) /* future use */
+-#define TALITOS_ID_SEC_2_5_0    (0x0030050100000000) /* future use */
++#define TALITOS_ID_SEC_1_1                     (0x09000000)  /* MCF547x and MCF548x */
++#define TALITOS_ID_SEC_2_0	                      0x40
++#define TALITOS_ID_SEC_2_1	                      0x40   /* cross ref with IP block revision reg */
++#define TALITOS_ID_SEC_2_0_1                   (0x00000041)  /* low word  - MPC8349E */
++#define TALITOS_ID_SEC_2_1_0                   (0x00000080)  /* low word  - original MPC8548 */
++#define TALITOS_ID_SEC_2_1_1           (0x0030010100000000)  /* high word - MPC8548 */
++#define TALITOS_ID_SEC_2_1_2           (0x0030010200000000)  /* high word - MPC8548 */
++#define TALITOS_ID_SEC_2_2_0                   (0x000100a0)  /* low word  - future use */
++#define TALITOS_ID_SEC_2_2_1           (0x0030020000000000)  /* high word - future use */
++#define TALITOS_ID_SEC_2_5_0           (0x0030050100000000)  /* high word - future use */
+ #define TALITOS
+ 
+ /*
+- * following num_channels, channel-fifo-depth, exec-unit-mask, and
++ * following num_channels, channel-fifo-depth, exec-unit-mask, and 
+  * descriptor-types-mask are for forward-compatibility with openfirmware
+  * flat device trees
+  */
+@@ -52,10 +53,12 @@
+ 
+ /* n.b. this driver requires these values be a power of 2 */
+ #define TALITOS_NCHANNELS_SEC_1_0	4
++#define TALITOS_NCHANNELS_SEC_1_1       2
+ #define TALITOS_NCHANNELS_SEC_1_2	1
+ #define TALITOS_NCHANNELS_SEC_2_0	4
+ #define TALITOS_NCHANNELS_SEC_2_01	4
+ #define TALITOS_NCHANNELS_SEC_2_1	4
++#define TALITOS_NCHANNELS_SEC_2_2	1
+ #define TALITOS_NCHANNELS_SEC_2_4	4
+ 
+ /*
+@@ -63,17 +66,19 @@
+  *  pointers a channel fetch fifo can hold.
+  */
+ #define TALITOS_CHFIFOLEN_SEC_1_0	1
++#define TALITOS_CHFIFOLEN_SEC_1_1       1
+ #define TALITOS_CHFIFOLEN_SEC_1_2	1
+ #define TALITOS_CHFIFOLEN_SEC_2_0	24
+ #define TALITOS_CHFIFOLEN_SEC_2_01	24
+ #define TALITOS_CHFIFOLEN_SEC_2_1	24
++#define TALITOS_CHFIFOLEN_SEC_2_2	24
+ #define TALITOS_CHFIFOLEN_SEC_2_4	24
+ 
+-/*
++/* 
+  *  exec-unit-mask : The bitmask representing what Execution Units (EUs)
+- *  are available. EU information should be encoded following the SEC's
++ *  are available. EU information should be encoded following the SEC's 
+  *  EU_SEL0 bitfield documentation, i.e. as follows:
+- *
++ * 
+  *    bit 31 = set if SEC permits no-EU selection (should be always set)
+  *    bit 30 = set if SEC has the ARC4 EU (AFEU)
+  *    bit 29 = set if SEC has the des/3des EU (DEU)
+@@ -82,7 +87,7 @@
+  *    bit 26 = set if SEC has the public key EU (PKEU)
+  *    bit 25 = set if SEC has the aes EU (AESU)
+  *    bit 24 = set if SEC has the Kasumi EU (KEU)
+- *
++ * 
+  */
+ #define TALITOS_HAS_EU_NONE		(1<<0)
+ #define TALITOS_HAS_EU_AFEU		(1<<1)
+@@ -95,16 +100,18 @@
+ 
+ /* the corresponding masks for each SEC version */
+ #define TALITOS_HAS_EUS_SEC_1_0		0x7f
+-#define TALITOS_HAS_EUS_SEC_1_2		0x4d
++#define TALITOS_HAS_EUS_SEC_1_1		0x5e
++#define TALITOS_HAS_EUS_SEC_1_2         0x4d
+ #define TALITOS_HAS_EUS_SEC_2_0		0x7f
+ #define TALITOS_HAS_EUS_SEC_2_01	0x7f
+ #define TALITOS_HAS_EUS_SEC_2_1		0xff
++#define TALITOS_HAS_EUS_SEC_2_2		0x4c
+ #define TALITOS_HAS_EUS_SEC_2_4		0x7f
+ 
+ /*
+  *  descriptor-types-mask : The bitmask representing what descriptors
+- *  are available. Descriptor type information should be encoded
+- *  following the SEC's Descriptor Header Dword DESC_TYPE field
++ *  are available. Descriptor type information should be encoded 
++ *  following the SEC's Descriptor Header Dword DESC_TYPE field 
+  *  documentation, i.e. as follows:
+  *
+  *    bit 0  = set if SEC supports the aesu_ctr_nonsnoop desc. type
+@@ -127,38 +134,97 @@
+ #define TALITOS_HAS_DT_COMMON_NONSNOOP		(1<<2)
+ 
+ /* the corresponding masks for each SEC version */
++#define TALITOS_HAS_DESCTYPES_SEC_1_1   0x33003334
+ #define TALITOS_HAS_DESCTYPES_SEC_2_0	0x01010ebf
+ #define TALITOS_HAS_DESCTYPES_SEC_2_1	0x012b0ebf
++#define TALITOS_HAS_DESCTYPES_SEC_2_2	0x0122003f
+ 
+-/*
++/* 
+  * a TALITOS_xxx_HI address points to the low data bits (32-63) of the register
+  */
+-
++#ifdef FSL_SEC11_MCF547X_8X
+ /* global register offset addresses */
+-#define TALITOS_ID		0x1020
+-#define TALITOS_ID_HI		0x1024
+-#define TALITOS_MCR		0x1030		/* master control register */
+-#define TALITOS_MCR_HI		0x1034		/* master control register */
+-#define TALITOS_MCR_SWR		0x1
++#define TALITOS_EUACR           0x1000          /* EU Assaginment controller register is useless*/
++#define TALITOS_EUACR_HI        0x1004		/* EU Assaginment controller register is useless*/
++
+ #define TALITOS_IMR		0x1008		/* interrupt mask register */
+-#define TALITOS_IMR_ALL		0x00010fff	/* enable all interrupts mask */
+-#define TALITOS_IMR_ERRONLY	0x00010aaa	/* enable error interrupts */
++#define TALITOS_IMR_ALL		0xf8000000	/* enable all interrupts mask */
++#define TALITOS_IMR_ERRONLY	0xa8000000	/* enable error interrupts */
++#define TALITOS_IMR_DONEONLY    0x50000000      /* enable done interrupts */
+ #define TALITOS_IMR_HI		0x100C		/* interrupt mask register */
+-#define TALITOS_IMR_HI_ALL	0x00323333	/* enable all interrupts mask */
+-#define TALITOS_IMR_HI_ERRONLY	0x00222222	/* enable error interrupts */
++#define TALITOS_IMR_HI_ALL	0x03333340	/* enable all channel interrupts mask */
++#define TALITOS_IMR_HI_ERRONLY	0x00222240	/* enable error interrupts */
++#define TALITOS_IMR_HI_DONEONLY 0x00111100      /* enable done interrupts */
++
+ #define TALITOS_ISR		0x1010		/* interrupt status register */
+-#define TALITOS_ISR_ERROR	0x00010faa	/* errors mask */
+-#define TALITOS_ISR_DONE	0x00000055	/* channel(s) done mask */
++#define TALITOS_ISR_ERROR	0xa8000000	/* errors mask */
++#define TALITOS_ISR_DONE	0x50000000	/* channel(s) done mask */
+ #define TALITOS_ISR_HI		0x1014		/* interrupt status register */
++
+ #define TALITOS_ICR		0x1018		/* interrupt clear register */
+ #define TALITOS_ICR_HI		0x101C		/* interrupt clear register */
+-#define TALITOS_MDEU_ISR	0x6030		/* mdeu interrupt status register */
+-#define TALITOS_MDEU_ISR_HI	0x6034		/* mdeu interrupt status register */
+ 
+-#define TALITOS_MDEU_ICR	0x6038		/* mdeu interrupt status register */
+-#define TALITOS_MDEU_ICR_HI	0x603c		/* mdeu interrupt control register */
++#define TALITOS_ID              0x1020
++#define TALITOS_ID_HI           0x1024
++
++#define TALITOS_EUASR           0x1028          /* EU Assaginment status register is useless*/
++#define TALITOS_EUASR_HI        0x102C          /* EU Assaginment status register is useless*/
++
++#define TALITOS_MCR             0x1030          /* master control register */
++#define TALITOS_MCR_HI          0x1038          /* master control register */
++#define TALITOS_MCR_SWR         0x01000000
++#else
++/* global register offset addresses */
++#define TALITOS_EUACR           0x1000          /* EU Assaginment controller register*/
++#define TALITOS_EUACR_HI        0x1004          /* EU Assaginment controller register*/
++#define TALITOS_IMR             0x1008          /* interrupt mask register */
++#define TALITOS_IMR_ALL         0x00010fff      /* enable all interrupts mask */
++#define TALITOS_IMR_ERRONLY     0x00010aaa      /* enable error interrupts */
++#define TALITOS_IMR_HI          0x100C          /* interrupt mask register */
++#define TALITOS_IMR_HI_ALL      0x00020000      /* enable all channel interrupts mask */
++#define TALITOS_IMR_HI_ERRONLY  0x00222222      /* enable error interrupts */
++#define TALITOS_ISR             0x1010          /* interrupt status register */
++#define TALITOS_ISR_ERROR       0x00010faa      /* errors mask */
++#define TALITOS_ISR_DONE        0x00000055      /* channel(s) done mask */
++#define TALITOS_ISR_HI          0x1014          /* interrupt status register */
++#define TALITOS_ICR             0x1018          /* interrupt clear register */
++#define TALITOS_ICR_HI          0x101C          /* interrupt clear register */
++#define TALITOS_ID              0x1020
++#define TALITOS_ID_HI           0x1024
++#define TALITOS_EUASR           0x1028          /* EU Assaginment status register*/
++#define TALITOS_EUASR_HI        0x102C          /* EU Assaginment status register*/
++#define TALITOS_MCR             0x1030          /* master control register */
++#define TALITOS_MCR_HI          0x1038          /* master control register */
++#define TALITOS_MCR_SWR         0x1
++#endif
++/*
++ * In fact, both ocf sec2 driver and sec1.1 driver of 2.6.10-mcf547x do not static assignment any EU to any channel
++ * so the TALITOS_EUACR and TALITOS_EUASR are not used in driver.
++ */
++#ifdef FSL_SEC11_MCF547X_8X
++/* channel register address stride */
++#define TALITOS_CH_OFFSET       0x1000
++
++/* channel register offset addresses and bits */
++#define TALITOS_CH_CCCR         0x200c  /* Crypto-Channel Config Register */
++#define TALITOS_CH_CCCR_RESET   0x1     /* Channel Reset bit */
++#define TALITOS_CH_CCCR_CDWE    0x10    /* Channel done writeback enable bit */
++#define TALITOS_CH_CCCR_NE      0x8     /* Fetch Next Descriptor Enable bit */
++#define TALITOS_CH_CCCR_NT      0x4     /* Notification type bit */
++#define TALITOS_CH_CCCR_CDIE    0x2     /* Channel Done Interrupt Enable bit */
++
++#define TALITOS_CH_CCPSR        0x2014  /* Crypto-Channel Pointer Status Reg */
++#define TALITOS_CH_CCPSR_HI     0x2010  /* Crypto-Channel Pointer Status Reg */
+ 
++#define TALITOS_CH_FF           0x204c  /* Fetch FIFO */
++#define TALITOS_CH_FF_HI        0x2048  /* Fetch FIFO is useless in MCF547X and MCF548X*/
+ 
++#define TALITOS_CH_CDPR         0x2044  /* Crypto-Channel Pointer Status Reg */
++#define TALITOS_CH_CDPR_HI      0x2044  /* Crypto-Channel Pointer Status Reg ?????????????????*/
++
++#define TALITOS_CH_DESCBUF      0x2080  /* (thru 11bf) Crypto-Channel 
++                                         * Descriptor Buffer (debug) 0x2080-0x20BF*/
++#else
+ /* channel register address stride */
+ #define TALITOS_CH_OFFSET	0x100
+ 
+@@ -175,49 +241,135 @@
+ #define TALITOS_CH_FF_HI	0x114c	/* Fetch FIFO's FETCH_ADRS */
+ #define TALITOS_CH_CDPR		0x1140	/* Crypto-Channel Pointer Status Reg */
+ #define TALITOS_CH_CDPR_HI	0x1144	/* Crypto-Channel Pointer Status Reg */
+-#define TALITOS_CH_DESCBUF	0x1180	/* (thru 11bf) Crypto-Channel
++#define TALITOS_CH_DESCBUF	0x1180	/* (thru 11bf) Crypto-Channel 
+ 					 * Descriptor Buffer (debug) */
++#endif
+ 
+ /* execution unit register offset addresses and bits */
+-#define TALITOS_DEUSR		0x2028	/* DEU status register */
+-#define TALITOS_DEUSR_HI	0x202c	/* DEU status register */
+-#define TALITOS_DEUISR		0x2030	/* DEU interrupt status register */
+-#define TALITOS_DEUISR_HI	0x2034	/* DEU interrupt status register */
+-#define TALITOS_DEUICR		0x2038	/* DEU interrupt control register */
+-#define TALITOS_DEUICR_HI	0x203c	/* DEU interrupt control register */
+-#define TALITOS_AESUISR		0x4030	/* AESU interrupt status register */
+-#define TALITOS_AESUISR_HI	0x4034	/* AESU interrupt status register */
+-#define TALITOS_AESUICR		0x4038	/* AESU interrupt control register */
+-#define TALITOS_AESUICR_HI	0x403c	/* AESU interrupt control register */
+-#define TALITOS_MDEUISR		0x6030	/* MDEU interrupt status register */
+-#define TALITOS_MDEUISR_HI	0x6034	/* MDEU interrupt status register */
+-#define TALITOS_RNGSR		0xa028	/* RNG status register */
+-#define TALITOS_RNGSR_HI	0xa02c	/* RNG status register */
+-#define TALITOS_RNGSR_HI_RD	0x1	/* RNG Reset done */
++#ifdef FSL_SEC11_MCF547X_8X
++#define TALITOS_DEURCR          0xa018  /* DEU reset control register */
++#define TALITOS_DEURCR_RESET    0x01000000  /* DEU reset bit */
++#define TALITOS_DEUSR		0xa028	/* DEU status register */
++#define TALITOS_DEUSR_RESET     0x01000000  /* DEU Reset status bit */
++#define TALITOS_DEUSR_HI	0xa02c	/* DEU status register is useless in MCF547X_548X*/
++#define TALITOS_DEUISR		0xa030	/* DEU interrupt status register */
++#define TALITOS_DEUISR_HI	0xa034	/* DEU interrupt status register is useless in MCF547X_548X**/
++#define TALITOS_DEUICR		0xa038	/* DEU interrupt control register */
++#define TALITOS_DEUICR_MASK     0xf63f0000  /* DEU interrupt control mask*/
++#define TALITOS_DEUICR_HI	0xa03c	/* DEU interrupt control register is useless in MCF547X_548X**/
++
++#define TALITOS_AESURCR         0x12018  /* AESU reset control register */
++#define TALITOS_AESURCR_RESET   0x01000000  /* AESU reset bit */
++#define TALITOS_AESUSR          0x12028  /* AESU status register */
++#define TALITOS_AESUSR_RESET    0x01000000  /* AESU Reset status bit */
++#define TALITOS_AESUSR_HI       0x1202c  /* AESU status register is useless in MCF547X_548X*/
++#define TALITOS_AESUISR         0x12030  /* AESU interrupt status register */
++#define TALITOS_AESUISR_HI      0x12034  /* AESU interrupt status register is useless in MCF547X_548X**/
++#define TALITOS_AESUICR         0x12038  /* AESU interrupt control register */
++#define TALITOS_AESUICR_MASK    0xf61f0000  /* AESU interrupt control mask*/
++#define TALITOS_AESUICR_HI      0x1203c  /* AESU interrupt control register is useless in MCF547X_548X**/
++
++#define TALITOS_MDEURCR         0xc018  /* MDEU reset control register */
++#define TALITOS_MDEURCR_RESET   0x01000000  /* MDEU reset bit */
++#define TALITOS_MDEUSR          0xc028  /* MDEU status register */
++#define TALITOS_MDEUSR_RESET    0x01000000  /* MDEU Reset status bit */
++#define TALITOS_MDEUSR_HI       0xc02c  /* MDEU status register is useless in MCF547X_548X*/
++#define TALITOS_MDEUISR         0xc030  /* MDEU interrupt status register */
++#define TALITOS_MDEUISR_HI      0xc034  /* MDEU interrupt status register is useless in MCF547X_548X**/
++#define TALITOS_MDEUICR         0xc038  /* MDEU interrupt control register */
++#define TALITOS_MDEUICR_MASK    0xc41f0000  /* MDEU interrupt control mask*/
++#define TALITOS_MDEUICR_HI      0xc03c  /* MDEU interrupt control register is useless in MCF547X_548X**/
++
++#define TALITOS_AFEURCR         0x8018  /* AFEU reset control register */
++#define TALITOS_AFEURCR_RESET   0x01000000  /* AFEU reset bit */
++#define TALITOS_AFEUSR          0x8028  /* AFEU status register */
++#define TALITOS_AFEUSR_RESET    0x01000000  /* AFEU Reset status bit */
++#define TALITOS_AFEUSR_HI       0x802c  /* AFEU status register is useless in MCF547X_548X*/
++#define TALITOS_AFEUISR         0x8030  /* AFEU interrupt status register */
++#define TALITOS_AFEUISR_HI      0x8034  /* AFEU interrupt status register is useless in MCF547X_548X**/
++#define TALITOS_AFEUICR         0x8038  /* AFEU interrupt control register */
++#define TALITOS_AFEUICR_MASK    0xf61f0000  /* AFEU interrupt control mask*/
++#define TALITOS_AFEUICR_HI      0x803c  /* AFEU interrupt control register is useless in MCF547X_548X**/
++
++#define TALITOS_RNGRCR          0xe018  /* RNG Reset control register */
++#define TALITOS_RNGRCR_HI       0xe01c  /* RNG Reset control register is useless in MCF547X_548X*/
++#define TALITOS_RNGRCR_SR       0x01000000      /* RNG RNGRCR:Software Reset */
++#define TALITOS_RNGSR		0xe028	/* RNG status register */
++#define TALITOS_RNGSR_HI	0xe02c	/* RNG status register is useless in MCF547X_548X*/
++#define TALITOS_RNGSR_RD	0x01000000	/* RNG Reset done */
+ #define TALITOS_RNGSR_HI_OFL	0xff0000/* number of dwords in RNG output FIFO*/
+-#define TALITOS_RNGDSR		0xa010	/* RNG data size register */
+-#define TALITOS_RNGDSR_HI	0xa014	/* RNG data size register */
+-#define TALITOS_RNG_FIFO	0xa800	/* RNG FIFO - pool of random numbers */
+-#define TALITOS_RNGISR		0xa030	/* RNG Interrupt status register */
+-#define TALITOS_RNGISR_HI	0xa034	/* RNG Interrupt status register */
+-#define TALITOS_RNGRCR		0xa018	/* RNG Reset control register */
+-#define TALITOS_RNGRCR_HI	0xa01c	/* RNG Reset control register */
+-#define TALITOS_RNGRCR_HI_SR	0x1	/* RNG RNGRCR:Software Reset */
++#define TALITOS_RNGDSR		0xe010	/* RNG data size register */
++#define TALITOS_RNGDSR_HI	0xe014	/* RNG data size register is useless in MCF547X_548X*/
++#define TALITOS_RNG_FIFO	0xe800	/* RNG FIFO - pool of random numbers */
++#define TALITOS_RNGISR		0xe030	/* RNG Interrupt status register */
++#define TALITOS_RNGISR_HI	0xe034	/* RNG Interrupt status register is useless in MCF547X_548X */
++#define TALITOS_RNGICR          0xe038  /* RNG interrupt control register */
++#define TALITOS_RNGICR_MASK     0xc2100000  /* RNG interrupt control mask*/
++#define TALITOS_RNGICR_HI       0xe03c  /* RNG interrupt control register is useless in MCF547X_548X**/
++#else
++#define TALITOS_DEUSR           0x2028  /* DEU status register */
++#define TALITOS_DEUSR_HI        0x202c  /* DEU status register */
++#define TALITOS_DEUISR          0x2030  /* DEU interrupt status register */
++#define TALITOS_DEUISR_HI       0x2034  /* DEU interrupt status register */
++#define TALITOS_DEUICR          0x2038  /* DEU interrupt control register */
++#define TALITOS_DEUICR_HI       0x203c  /* DEU interrupt control register */
++#define TALITOS_AESUISR         0x4030  /* AESU interrupt status register */
++#define TALITOS_AESUISR_HI      0x4034  /* AESU interrupt status register */
++#define TALITOS_AESUICR         0x4038  /* AESU interrupt control register */
++#define TALITOS_AESUICR_HI      0x403c  /* AESU interrupt control register */
++#define TALITOS_MDEUISR         0x6030  /* MDEU interrupt status register */
++#define TALITOS_MDEUISR_HI      0x6034  /* MDEU interrupt status register */
++#define TALITOS_RNGSR           0xa028  /* RNG status register */
++#define TALITOS_RNGSR_HI        0xa02c  /* RNG status register */
++#define TALITOS_RNGSR_HI_RD     0x1     /* RNG Reset done */
++#define TALITOS_RNGSR_HI_OFL    0xff0000/* number of dwords in RNG output FIFO*/
++#define TALITOS_RNGDSR          0xa010  /* RNG data size register */
++#define TALITOS_RNGDSR_HI       0xa014  /* RNG data size register */
++#define TALITOS_RNG_FIFO        0xa800  /* RNG FIFO - pool of random numbers */
++#define TALITOS_RNGISR          0xa030  /* RNG Interrupt status register */
++#define TALITOS_RNGISR_HI       0xa034  /* RNG Interrupt status register */
++#define TALITOS_RNGRCR          0xa018  /* RNG Reset control register */
++#define TALITOS_RNGRCR_HI       0xa01c  /* RNG Reset control register */
++#define TALITOS_RNGRCR_HI_SR    0x1     /* RNG RNGRCR:Software Reset */
++#endif
+ 
++#ifdef FSL_SEC11_MCF547X_8X
+ /* descriptor pointer entry */
+ struct talitos_desc_ptr {
+-	u16	len;		/* length */
+-	u8	extent;		/* jump (to s/g link table) and extent */
+-	u8	res;		/* reserved */
+-	u32	ptr;		/* pointer */
++        u32     len;
++        u32     ptr;            /* pointer */
++
+ };
+ 
+ /* descriptor */
+ struct talitos_desc {
+ 	u32	hdr;				/* header */
+-	u32	res;				/* reserved */
+ 	struct talitos_desc_ptr		ptr[7];	/* ptr/len pair array */
++	u32     next_hdr;
+ };
++#else
++/* descriptor pointer entry */
++struct talitos_desc_ptr {
++        u16     len;            /* length */
++        u8      extent;         /* jump (to s/g link table) and extent */
++        u8      res;            /* reserved */
++        u32     ptr;            /* pointer */
++};
++
++/* descriptor */
++struct talitos_desc {
++        u32     hdr;                            /* header */
++        u32     res;                            /* reserved */
++        struct talitos_desc_ptr         ptr[7]; /* ptr/len pair array */
++};
++#endif
++
++/***************************RC4*******************/
++#define ARC4_SEC_MIN_KEY_SIZE   5
++#define ARC4_SEC_MAX_KEY_SIZE   16
++#define ARC4_SEC_CONTEXT_LEN    259
++#define   SEC_ALG_AFEU_KEY              0x10200050
++#define   SEC_ALG_AFEU_CONTEXT          0x10700050
+ 
+ /* talitos descriptor header (hdr) bits */
+ 
+@@ -282,3 +434,4 @@ struct talitos_desc {
+ 
+ #define TALITOS_HDR_DONE_BITS	0xff000000
+ 
++#define	DPRINTF(a...)	if (debug) { printk(DRV_NAME ": " a); }
+diff --git a/crypto/ocf/talitos/talitos_soft.h b/crypto/ocf/talitos/talitos_soft.h
+index baddb79..032554c 100644
+--- a/crypto/ocf/talitos/talitos_soft.h
++++ b/crypto/ocf/talitos/talitos_soft.h
+@@ -31,7 +31,8 @@
+  * paired descriptor and associated crypto operation
+  */
+ struct desc_cryptop_pair {
+-	struct list_head	desc_list;     	/* for tasklet design */
++	struct list_head 	desc_list;      /* AK for tasklet design */
++	spinlock_t  		desc_lock;      /* AK for protecting header */
+ 	struct talitos_desc	cf_desc;	/* descriptor ptr */
+ 	struct cryptop		*cf_crp;	/* cryptop ptr */
+ };
+@@ -41,7 +42,7 @@ struct desc_cryptop_pair {
+  */
+ struct talitos_softc {
+ 	struct platform_device	*sc_dev;	/* device backpointer */
+-	ocf_iomem_t		sc_base_addr;
++	/*ocf_iomem_t*/void __iomem		*sc_base_addr;
+ 	int			sc_irq;
+ 	int			sc_num;		/* if we have multiple chips */
+ 	int32_t			sc_cid;		/* crypto tag */
+@@ -52,12 +53,8 @@ struct talitos_softc {
+ 	int			sc_chfifo_len;	/* channel fetch fifo len */
+ 	int			sc_exec_units;	/* execution units mask */
+ 	int			sc_desc_types;	/* descriptor types mask */
+-	int			sc_needwakeup;
+-	/*
+-	 * mutual exclusion for intra-channel resources, e.g. fetch fifos
+-	 * the last entry is a meta-channel lock used by the channel scheduler
+-	 */
+-	spinlock_t		*sc_chnfifolock;
++	int			sc_needwakeup;  /* AK added */
++	int			sc_rc4_first;   /*Shrek added*/
+ 	/* sc_chnlastalgo contains last algorithm for that channel */
+ 	int			*sc_chnlastalg;
+ 	/* sc_chnfifo holds pending descriptor--crypto operation pairs */
+@@ -75,4 +72,12 @@ struct talitos_session {
+ 
+ #define	TALITOS_SESSION(sid)	((sid) & 0x0fffffff)
+ #define	TALITOS_SID(crd, sesn)	(((crd) << 28) | ((sesn) & 0x0fffffff))
++
++/* AK added the following */
++//#define  TALITOS_SMALL_PACKET_IMPROVE
++//#define  TALITOS_SMALL_PACKET_IMPROVE_NEW
++//#define  TALITOS_INTERRUPT_COALESCE
++//#define  TALITOS_KERNEL_TIMER
++//#define TALITOS_BASELINE
+ #define TALITOS_TASKLET
++
+diff --git a/include/opencrypto/crypto.h b/include/opencrypto/crypto.h
+index bd3b8ec..a1293f7 100644
+--- a/include/opencrypto/crypto.h
++++ b/include/opencrypto/crypto.h
+@@ -104,6 +104,9 @@ struct cryptodesc {
+ 	int		crd_inject;	/* Where to inject results, if applicable */
+ 	int		crd_flags;
+ 
++#define CRD_ARC4_FIRST     0x200
++#define CRD_ARC4_NEXT      0x400
++
+ #define	CRD_F_ENCRYPT		0x01	/* Set when doing encryption */
+ #define	CRD_F_IV_PRESENT	0x02	/* When encrypting, IV is already in
+ 					   place, so don't copy. */
+-- 
+1.5.6
+

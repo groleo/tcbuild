@@ -1,0 +1,1418 @@
+From 5de0646a8dad834acf25ff8905f27e378e4bbf87 Mon Sep 17 00:00:00 2001
+From: Kurt Mahan <kmahan@freescale.com>
+Date: Thu, 15 May 2008 13:29:46 -0600
+Subject: [PATCH] Add SEC1.1 device driver for MCF547x and MCF548x.
+
+LTIBName: m547x-8x-sec11-1
+Signed-off-by: Kurt Mahan <kmahan@freescale.com>
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ drivers/misc/Kconfig             |   13 +
+ drivers/misc/Makefile            |    1 +
+ drivers/misc/mcf_sec.c           | 1132 ++++++++++++++++++++++++++++++++++++++
+ include/asm-m68k/m5485sec.h      |  173 ++++++
+ include/asm-m68k/mcf_sec_ioctl.h |   37 ++
+ 5 files changed, 1356 insertions(+), 0 deletions(-)
+ create mode 100644 drivers/misc/mcf_sec.c
+ create mode 100644 include/asm-m68k/m5485sec.h
+ create mode 100644 include/asm-m68k/mcf_sec_ioctl.h
+
+diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
+index 962817e..155257c 100644
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -12,6 +12,19 @@ menuconfig MISC_DEVICES
+ 	  If you say N, all options in this submenu will be skipped and disabled.
+ 
+ if MISC_DEVICES
++config COLDFIRE_SEC
++	tristate "Security Encryption Controller (SEC) support"
++	depends on CFV4E
++	default n
++	help
++	  This enables CryptoAPI support for the Security Encryption Controller
++	  found on the MCF547x/548x processors. If you want to use it, say Y.
++
++config SEC_DEVICE
++	bool "Enable SEC device"
++	depends on COLDFIRE_SEC
++	help
++	  This option enables the SEC device for userland applications
+ 
+ config ATMEL_PWM
+ 	tristate "Atmel AT32/AT91 PWM support"
+diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
+index 3b12f5d..74fd0ec 100644
+--- a/drivers/misc/Makefile
++++ b/drivers/misc/Makefile
+@@ -3,6 +3,7 @@
+ #
+ obj- := misc.o	# Dummy rule to force built-in.o to be made
+ 
++obj-$(CONFIG_COLDFIRE_SEC)      += mcf_sec.o
+ obj-$(CONFIG_IBM_ASM)		+= ibmasm/
+ obj-$(CONFIG_HDPU_FEATURES)	+= hdpuftrs/
+ obj-$(CONFIG_MSI_LAPTOP)     += msi-laptop.o
+diff --git a/drivers/misc/mcf_sec.c b/drivers/misc/mcf_sec.c
+new file mode 100644
+index 0000000..2e9ed18
+--- /dev/null
++++ b/drivers/misc/mcf_sec.c
+@@ -0,0 +1,1132 @@
++/*
++ * drivers/misc/mcf_sec.c
++ *
++ * Coldfire M547x/M548x SEC
++ *
++ * Copyright (c) 2008 Freescale Semiconductor, Inc.
++ */
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/errno.h>
++#include <linux/sched.h>
++#include <linux/module.h>
++#include <linux/interrupt.h>
++#include <asm/coldfire.h>
++#include <asm/irq.h>
++#include <asm/m5485sram.h>
++#include <asm/m5485sim.h>
++#include <asm/m5485sec.h>
++#include <linux/fcntl.h>
++
++#include <linux/dma-mapping.h>
++#include <linux/fs.h>
++#include <linux/workqueue.h>
++/*#include <linux/devfs_fs_kernel.h>*/
++#include <asm/ioctl.h>
++#include <asm/mcf_sec_ioctl.h>
++#include <asm/uaccess.h>
++#include <asm/io.h>
++
++
++#define VERSION "0.20"
++MODULE_DESCRIPTION("Security Encryption Controller driver ver " VERSION);
++
++irqreturn_t sec_interrupt_handler(int irq, void *dev_id);
++int __init sec_init(void);
++void __exit sec_cleanup(void);
++
++/* Pointer to the SEC descriptor heap */
++static struct sec_internal_descriptor *sec_descriptors;
++
++/* Number of the descriptors */
++static int sec_descriptors_num;
++
++/* Global variables of the first channel */
++static struct sec_descriptor *sec_desc_ch0_first;
++/* First descriptor pointer 	*/
++static struct sec_descriptor *sec_desc_ch0_last;
++/* Last descriptor pointer 	*/
++static int sec_reset_flag_ch0;
++/* Reset flag */
++DECLARE_WAIT_QUEUE_HEAD(sec_queue_ch0);
++/* Wait queue of the channel	*/
++
++/* Global variables of the second channel */
++static struct sec_descriptor *sec_desc_ch1_first;
++/* First descriptor pointer	*/
++static struct sec_descriptor *sec_desc_ch1_last;
++/* Last descriptor pointer	*/
++static int sec_reset_flag_ch1;
++/* Reset flag*/
++DECLARE_WAIT_QUEUE_HEAD(sec_queue_ch1);
++/* Wait queue of the channel	*/
++
++spinlock_t sec_lock;
++
++/* Internal descriptor structure  */
++struct sec_internal_descriptor{
++	struct sec_descriptor secindesc_desc;
++	int secindesc_use_flag;
++};
++
++#ifdef CONFIG_SEC_DEVICE
++void sec_device_init(void);
++void sec_device_exit(void);
++int sec_open(struct inode *, struct file *);
++int sec_release(struct inode *, struct file *);
++int sec_ioctl(struct inode *, struct file *, unsigned int, unsigned long);
++
++/* File operations' structure*/
++static const struct file_operations sec_ops = {
++	.owner =		THIS_MODULE,
++	.ioctl =		sec_ioctl,
++	.open =			sec_open,
++	.release =		sec_release
++};
++#endif
++
++subsys_initcall(sec_init);
++module_exit(sec_cleanup);
++
++/************************************************************************
++* NAME: sec_init
++*
++* DESCRIPTION: This function performs the initialization of the SEC.
++*
++* RETURNS: If no error occurs, this function returns zero. Otherwise,
++*          it returns the error code.
++*************************************************************************/
++int __init sec_init(void)
++{
++	int i;
++	unsigned long time;
++
++	printk(KERN_INFO "ColdFire internal SEC "
++			  "driver version %s\n", VERSION);
++	sec_desc_ch0_first = NULL;
++	sec_desc_ch1_first = NULL;
++	sec_reset_flag_ch0 = 0;
++	sec_descriptors = NULL;
++	sec_descriptors_num = 0;
++	sec_desc_ch0_last = NULL;
++	sec_desc_ch1_last = NULL;
++	sec_reset_flag_ch1 = 0;
++
++	if (request_irq(64 + ISC_SEC, sec_interrupt_handler,
++		IRQF_DISABLED, "SEC", NULL)){
++		printk(KERN_ERR "Cannot allocate SEC IRQ (37)\n");
++		return -EBUSY;
++	}
++
++	spin_lock_init(&sec_lock);
++
++	/*
++	 * Allocate the memory for descriptors
++	 * Descriptors must be in the system memory
++	*/
++	sec_descriptors = (struct sec_internal_descriptor *)
++				(SYS_SRAM_SEC_START);
++	sec_descriptors_num = SEC_DESC_NUM;
++
++	/* Clear descriptor headers */
++	for (i = 0; i < sec_descriptors_num; i++)
++		sec_descriptors[i].secindesc_use_flag = 0;
++
++	/* Reset SEC  */
++	time = jiffies;
++
++	SEC_SMCR = SEC_SMCR_RESET;
++	while (SEC_SMCR & SEC_SMCR_RESET)
++		if (jiffies - time > SEC_INIT_TIMEOUT)
++			goto ERRORS;
++
++	SEC_SIMR_U = SEC_SIMR_MASK_U;
++	SEC_SIMR_L = SEC_SIMR_MASK_L;
++
++	/* Reset channels */
++	SEC_CC0_CR = SEC_CC_CR_RESET;
++	while (SEC_CC0_CR & SEC_CC_CR_RESET)
++		if (jiffies - time > SEC_INIT_TIMEOUT)
++			goto ERRORS;
++
++	SEC_CC1_CR = SEC_CC_CR_RESET;
++	while (SEC_CC1_CR & SEC_CC_CR_RESET)
++		if (jiffies - time > SEC_INIT_TIMEOUT)
++			goto ERRORS;
++
++	SEC_CC0_CR = SEC_CC_CR_CONFIGURATION;
++	SEC_CC1_CR = SEC_CC_CR_CONFIGURATION;
++
++	/* Reset AFEU */
++	SEC_AFEU_AFRCR = SEC_AFEU_AFRCR_RESET;
++	while (!(SEC_AFEU_AFSR & SEC_AFEU_AFSR_RD))
++		if (jiffies - time > SEC_INIT_TIMEOUT)
++			goto ERRORS;
++
++	SEC_AFEU_AFIMR = SEC_AFEU_AFIMR_MASK;
++
++	/* Reset DEU */
++	SEC_DEU_DRCR = SEC_DEU_DRCR_RESET;
++	while (!(SEC_DEU_DSR & SEC_DEU_DSR_RD))
++		if (jiffies - time > SEC_INIT_TIMEOUT)
++			goto ERRORS;
++
++	SEC_DEU_DIMR = SEC_DEU_DIMR_MASK;
++
++	/* Reset MDEU */
++	SEC_MDEU_MDRCR = SEC_MDEU_MDRCR_RESET;
++	while (!(SEC_MDEU_MDSR & SEC_MDEU_MDSR_RD))
++		if (jiffies - time > SEC_INIT_TIMEOUT)
++			goto ERRORS;
++
++	SEC_MDEU_MDIMR = SEC_MDEU_MDIMR_MASK;
++
++	/* Reset RNG */
++	SEC_RNG_RNGRCR = SEC_RNG_RNGRCR_RESET;
++	while (!(SEC_RNG_RNGSR & SEC_RNG_RNGSR_RD))
++		if (jiffies - time > SEC_INIT_TIMEOUT)
++			goto ERRORS;
++
++	SEC_RNG_RNGIMR = SEC_RNG_RNGIMR_MASK;
++
++	/* Reset AESU */
++	SEC_AESU_AESRCR = SEC_AESU_AESRCR_RESET;
++	while (!(SEC_AESU_AESSR & SEC_AESU_AESSR_RD))
++		if (jiffies - time > SEC_INIT_TIMEOUT)
++			goto ERRORS;
++
++	SEC_AESU_AESIMR = SEC_AESU_AESIMR_MASK;
++
++#ifdef CONFIG_SEC_DEVICE
++	sec_device_init();
++#endif
++	printk(KERN_INFO "ColdFire internal SEC driver init ok\n");
++
++	return 0;
++
++ERRORS:
++
++	free_irq(64 + ISC_SEC, NULL);
++	return -ETIME;
++
++}
++
++/************************************************************************
++* NAME: sec_cleanup
++*
++* DESCRIPTION: This function releases the interrupt
++*************************************************************************/
++void __exit sec_cleanup()
++{
++	free_irq(64 + ISC_SEC, NULL);
++#ifdef CONFIG_SEC_DEVICE
++	sec_device_exit();
++#endif
++}
++
++/************************************************************************
++* NAME: sec_execute
++*
++* DESCRIPTION: This function performs the the data processing using SEC.
++*
++* RETURNS: If no error occurs, this function returns zero. Otherwise,
++*          it returns the error code.
++*************************************************************************/
++int sec_execute(int channel, struct sec_descriptor *desc, int timeout)
++{
++	if (desc->secdesc_ptrnext) {
++		/* This function doesn't process the input chain */
++		printk(KERN_DEBUG "%s secdes_ptrnext error\n", __FUNCTION__);
++		return -EINVAL;
++	}
++
++	switch (channel) {
++	case 0:
++
++		spin_lock_irq(sec_lock);
++
++		if (sec_reset_flag_ch0) {
++			/*
++			 * If channel reset occures, return.
++			 * Otherwise, set the channel configuration and continue
++			 */
++			if (SEC_CC0_CR & SEC_CC_CR_RESET) {
++				spin_unlock_irq(sec_lock);
++				return -EBUSY;
++			}
++			sec_reset_flag_ch0 = 0;
++			SEC_CC0_CR = SEC_CC_CR_CONFIGURATION;
++		}
++		/* Add the descriptor to the list */
++		if (sec_desc_ch0_first)
++			sec_desc_ch0_last =
++				sec_desc_ch0_last->secdesc_ptrnext = desc;
++		else
++			sec_desc_ch0_last = sec_desc_ch0_first = desc;
++
++		/*
++		 * If data processing is stopped,
++		 * add the new list of the descriptors to the channel
++		 */
++		if ((SEC_CC0_PSR_L & 0xFF) == 0x7) {
++			SEC_CC0_FR = /*(unsigned long) sec_desc_ch0_first;*/
++				(unsigned long)dma_map_single(NULL,
++					sec_desc_ch0_first,
++					sizeof(*sec_desc_ch0_first),
++					DMA_TO_DEVICE);
++			sec_desc_ch0_first = NULL;
++		}
++		spin_unlock_irq(sec_lock);
++
++		break;
++
++	case 1:
++
++		spin_lock_irq(sec_lock);
++
++		if (sec_reset_flag_ch1) {
++			/*
++			 * If channel reset occures, return.
++			 * Otherwise, set the channel configuration and continue
++			 */
++			if (SEC_CC1_CR & SEC_CC_CR_RESET) {
++				spin_unlock_irq(sec_lock);
++				return -EBUSY;
++			}
++			sec_reset_flag_ch1 = 0;
++			SEC_CC1_CR = SEC_CC_CR_CONFIGURATION;
++		}
++		/* Add the descriptor to the list */
++		if (sec_desc_ch1_first)
++			sec_desc_ch1_last =
++				sec_desc_ch1_last->secdesc_ptrnext = desc;
++		else
++			sec_desc_ch1_last = sec_desc_ch1_first = desc;
++
++		/*
++		 * If data processing is stopped,
++		 * add the new list of the descriptors to the channel
++		 */
++		if ((SEC_CC1_PSR_L & 0xFF) == 0x7) {
++			SEC_CC1_FR =
++			/*virt_to_phys((unsigned long) sec_desc_ch1_first);*/
++				(unsigned long)dma_map_single(NULL,
++						sec_desc_ch1_first,
++						sizeof(*sec_desc_ch1_first),
++						DMA_TO_DEVICE);
++			sec_desc_ch1_first = NULL;
++		}
++
++		spin_unlock_irq(sec_lock);
++
++		break;
++
++	default:
++		return -EINVAL;
++	}
++
++	/* If this function is called in blocking mode, wait */
++	if (timeout) {
++		/*
++		 * The call of this function
++		 * must be nonblocking in interrupt
++		 */
++		if (in_interrupt())
++			return -EWOULDBLOCK;
++
++		while (timeout) {
++			if (channel == 0)
++				timeout = interruptible_sleep_on_timeout(
++						&sec_queue_ch0, timeout);
++			else
++				timeout = interruptible_sleep_on_timeout(
++						&sec_queue_ch1, timeout);
++
++			if ((desc->secdesc_header & 0xFF000000)
++				== SEC_DESCHEAD_ERROR)
++				return -EINVAL;
++
++			if ((desc->secdesc_header & 0xFF000000)
++				== SEC_DESCHEAD_COMPLETED)
++				return 0;
++
++
++		}
++		return -EWOULDBLOCK;
++	}
++
++	return 0;
++
++}
++
++/************************************************************************
++* NAME: sec_desc_alloc
++*
++* DESCRIPTION: This function performs the descriptor allocation. The
++*              descriptors must be in the system memory.
++*
++* RETURNS: This function returns the poiner to the descriptor or NULL.
++*************************************************************************/
++struct sec_descriptor *sec_desc_alloc(void)
++{
++	int i;
++	struct sec_descriptor *result = NULL;
++
++	for (i = 0; i < sec_descriptors_num; i++) {
++		if (!sec_descriptors[i].secindesc_use_flag) {
++			sec_descriptors[i].secindesc_use_flag = 1;
++			result = &sec_descriptors[i].secindesc_desc;
++			break;
++		}
++	}
++
++	return result;
++}
++
++/************************************************************************
++* NAME: sec_desc_free
++*
++* DESCRIPTION: This function releases the descriptor.
++*************************************************************************/
++inline void sec_desc_free(struct sec_descriptor *desc)
++{
++	((struct sec_internal_descriptor *) desc)->secindesc_use_flag = 0;
++}
++
++/************************************************************************
++* NAME: sec_interrupt_handler
++*
++* DESCRIPTION: This is the SEC interrupt handler.
++*
++*************************************************************************/
++irqreturn_t sec_interrupt_handler(int irq, void *dev_id)
++{
++	unsigned long sisr_u;
++	struct sec_descriptor *tempptr;
++
++	sisr_u = SEC_SISR_U;
++
++	SEC_SICR_L = SEC_SISR_L;
++	SEC_SICR_U = SEC_SISR_U;
++
++
++	/* Reset channel */
++	if (sisr_u & SEC_CC_PSR_U_ERR_CH0) {
++		printk(KERN_DEBUG "%s channel 0 error\n", __FUNCTION__);
++		tempptr = (struct sec_descriptor *) SEC_CC0_CDPR;
++
++		SEC_CC0_CR = SEC_CC_CR_RESET;
++
++		if (tempptr)
++			tempptr->secdesc_header = SEC_DESCHEAD_ERROR;
++
++		while (sec_desc_ch0_first) {
++			sec_desc_ch0_first->secdesc_header =
++				SEC_DESCHEAD_ERROR;
++			sec_desc_ch0_first =
++				sec_desc_ch0_first->secdesc_ptrnext;
++		}
++		sec_desc_ch0_first = sec_desc_ch0_last = NULL;
++		sec_reset_flag_ch0 = 1;
++		wake_up(&sec_queue_ch0);
++
++	} else{
++		/*
++		 * If data processing is stopped,
++		 * add the new list of the descriptors to the channel
++		 */
++		if ((SEC_CC0_PSR_L & 0xFF) == 0x7 && sec_desc_ch0_first) {
++			SEC_CC0_FR = /*(unsigned long) sec_desc_ch0_first;*/
++				(unsigned long)dma_map_single(NULL,
++					sec_desc_ch0_first,
++					sizeof(*sec_desc_ch0_first),
++					DMA_TO_DEVICE);
++			sec_desc_ch0_first = NULL;
++		}
++
++		if (sisr_u & SEC_CC_PSR_U_DN_CH0)
++			wake_up_interruptible(&sec_queue_ch0);
++
++	}
++
++	/* Reset channel */
++	if (sisr_u & SEC_CC_PSR_U_ERR_CH1) {
++		printk(KERN_DEBUG "%s channel 1 error\n", __FUNCTION__);
++		tempptr = (struct sec_descriptor *) SEC_CC1_CDPR;
++
++		SEC_CC1_CR = SEC_CC_CR_RESET;
++
++		if (tempptr)
++			tempptr->secdesc_header = SEC_DESCHEAD_ERROR;
++
++		while (sec_desc_ch1_first) {
++			sec_desc_ch1_first->secdesc_header =
++					SEC_DESCHEAD_ERROR;
++			sec_desc_ch1_first =
++				sec_desc_ch1_first->secdesc_ptrnext;
++		}
++		sec_desc_ch1_first = sec_desc_ch1_last = NULL;
++		sec_reset_flag_ch1 = 1;
++		wake_up(&sec_queue_ch1);
++	} else {
++		/*
++		 * If data processing is stopped,
++		 * add the new list of the descriptors to the channel
++		 */
++		if ((SEC_CC1_PSR_L & 0xFF) == 0x7 && sec_desc_ch1_first) {
++			SEC_CC1_FR =
++			/*virt_to_phys((unsigned long) sec_desc_ch1_first);*/
++				(unsigned long)dma_map_single(NULL,
++					sec_desc_ch1_first,
++					sizeof(*sec_desc_ch1_first),
++					DMA_TO_DEVICE);
++			sec_desc_ch1_first = NULL;
++		}
++
++		if (sisr_u & SEC_CC_PSR_U_DN_CH1)
++			wake_up(&sec_queue_ch1);
++
++	}
++	return 0;
++}
++
++/************************************************************************
++* NAME: sec_nonblock_execute
++*
++* DESCRIPTION: This function performs the the data processing using SEC in
++*		in nonblocking mode.
++*
++* RETURNS: If no error occurs, this function returns zero. Otherwise,
++*          it returns the error code.
++*
++*************************************************************************/
++int sec_nonblock_execute(struct sec_descriptor *desc)
++{
++
++	int error;
++
++	desc->secdesc_ptrnext = NULL;
++	printk(KERN_DEBUG "%s: head %x\n", __FUNCTION__, desc->secdesc_header);
++	if (in_atomic()) {
++		/* Nonblocking mode */
++		error = sec_execute(0, desc, 0);
++		if (error  == 0) {
++			/* Wait until the operation is completed
++			   We have to perform a busy wait here
++			   Ususally it's faster than the execution
++			   of software algorithms
++			*/
++			while ((desc->secdesc_header & 0xFF000000) !=
++					SEC_DESCHEAD_COMPLETED) {
++				if ((desc->secdesc_header & 0xFF000000) ==
++					SEC_DESCHEAD_ERROR) {
++					printk(KERN_DEBUG "%s "
++						"err 0\n", __FUNCTION__);
++					return -EINVAL;
++				}
++			}
++
++			return 0;
++		}
++	} else {
++		/* Nonblocking mode */
++		error = sec_execute(1, desc, 0);
++		if (error == 0) {
++			/*Wait until the operation is completed
++			  We can lose some SEC interrupts.
++			  Therefore the nonblocking mode with scheduling
++			  is faster than the blocking mode
++			*/
++			while ((desc->secdesc_header & 0xFF000000) !=
++					SEC_DESCHEAD_COMPLETED) {
++				if ((desc->secdesc_header & 0xFF000000) ==
++					SEC_DESCHEAD_ERROR) {
++					printk(KERN_DEBUG "%s "
++						"err 1\n", __FUNCTION__);
++					return -EINVAL;
++				}
++
++				schedule();
++			}
++
++			return 0;
++		}
++	}
++
++
++	return error;
++}
++
++
++#ifdef CONFIG_SEC_DEVICE
++
++void sec_device_init()
++{
++	int ret;
++#ifdef CONFIG_DEVFS_FS
++	devfs_mk_cdev(MKDEV(SEC_MAJOR, 0), S_IFCHR|S_IRUSR|S_IWUSR,
++			SEC_DEVICE_NAME, 0);
++	printk(KERN_INFO "mk char dev :major %x\n", SEC_MAJOR);
++#endif
++	ret = register_chrdev(SEC_MAJOR, SEC_DEVICE_NAME, &sec_ops);
++	if (ret < 0) {
++		printk(KERN_DEBUG "%s device failed with %d\n",
++			"Sorry, registering the character", ret);
++		return;
++	}
++	printk(KERN_INFO "MCF547x/8x SEC device driver installed\n");
++}
++
++
++void sec_device_exit()
++{
++	unregister_chrdev(SEC_MAJOR, SEC_DEVICE_NAME);
++}
++
++
++int sec_open(struct inode *in, struct file *f)
++{
++	struct sec_device_data *dev;
++	struct sec_descriptor *desc;
++
++	desc = sec_desc_alloc();
++
++	if (!desc)
++		return -ENOMEM;
++
++
++
++	/*dev = kmalloc(sizeof(struct sec_device_data), GFP_DMA);*/
++	dev = kmalloc(sizeof(struct sec_device_data), GFP_KERNEL);
++	if (!dev) {
++		sec_desc_free(desc);
++		return -ENOMEM;
++	}
++
++	dev->secdev_desc = desc;
++	f->private_data = (void *)dev;
++
++	printk(KERN_INFO "%s ok\n", __FUNCTION__);
++	return 0;
++}
++
++int sec_release(struct inode *in, struct file *f)
++{
++	struct sec_device_data *dev = (struct sec_device_data *)f->private_data;
++	sec_desc_free(dev->secdev_desc);
++	kfree(dev);
++	return 0;
++}
++
++
++/************************************************************************
++* NAME: sec_ioctl
++*
++* DESCRIPTION: This function performs the data encryption or decryption
++*              using algorithm that is pointed by cmd.*
++*
++* RETURNS: If no error occurs, this function returns zero. Otherwise,
++*          it returns the error code.
++*
++*************************************************************************/
++int sec_ioctl(struct inode *in, struct file *f,
++	      unsigned int cmd, unsigned long arg)
++{
++	struct sec_device_data *dev = (struct sec_device_data *)f->private_data;
++	struct sec_dev_desc dev_desc;
++	int error = 0;
++	int len, max_len, i;
++	char vec [SEC_DEV_VECTOR_LEN];
++	unsigned long header;
++	int arc4_flag = 0;
++
++	if (!arg) {
++		printk(KERN_DEBUG "\n%s:cmd %d ,"
++			"arg error\n", __FUNCTION__, cmd);
++		return -EINVAL;
++	}
++
++	memset(dev->secdev_desc, 0, sizeof(struct sec_descriptor));
++
++	copy_from_user((void *)&dev_desc, (void *)arg,
++			sizeof(struct sec_dev_desc));
++	/*printk("\n keylen %d,\n",dev_desc.sec_keylen);*/
++	switch (cmd) {
++	case SECIOCS_AES_CBC_ENC:
++	case SECIOCS_AES_CBC_DEC:
++		if ((dev_desc.sec_keylen != 16 && dev_desc.sec_keylen != 24 &&
++			dev_desc.sec_keylen != 32) || !dev_desc.sec_in ||
++			!dev_desc.sec_out || !dev_desc.sec_key ||
++			!dev_desc.sec_vec) {
++			printk(KERN_DEBUG "%s: SECIOCS_AES_CBC error. "
++					  "cmd %x,keylen %x. %x %x\n",
++				__FUNCTION__, cmd, dev_desc.sec_keylen,
++				SECIOCS_AES_CBC_DEC, SECIOCS_AES_CBC_ENC);
++			return -EINVAL;
++		}
++
++
++
++		dev->secdev_desc->secdesc_key_len = dev_desc.sec_keylen;
++		dev->secdev_desc->secdesc_key_ptr =
++				/*virt_to_phys(dev->secdev_key);*/
++				(unsigned char *)dma_map_single(NULL,
++					dev->secdev_key,
++					SEC_DEV_KEY_LEN,
++					DMA_TO_DEVICE);
++		dev->secdev_desc->secdesc_data_in_ptr =
++				/*virt_to_phys(dev->secdev_inbuf);*/
++				(unsigned char *)dma_map_single(NULL,
++					dev->secdev_inbuf,
++					SEC_DEV_BUF,
++					DMA_TO_DEVICE);
++		dev->secdev_desc->secdesc_data_out_ptr =
++				/*virt_to_phys(dev->secdev_outbuf);*/
++				(unsigned char *)dma_map_single(NULL,
++					dev->secdev_outbuf,
++					SEC_DEV_BUF,
++					DMA_TO_DEVICE);
++
++		copy_from_user((void *)dev->secdev_key, dev_desc.sec_key,
++				dev_desc.sec_keylen);
++
++		copy_from_user((void *)vec, dev_desc.sec_vec,
++				SEC_AES_BLCK_LEN);
++
++		len = dev_desc.sec_len;
++
++		while (len) {
++
++			if (len > SEC_DEV_BUF)
++				max_len = SEC_DEV_BUF;
++			else
++				max_len = len;
++
++
++			copy_from_user((void *)dev->secdev_inbuf,
++				(void *)((unsigned long)dev_desc.sec_in
++					+ dev_desc.sec_len - len),
++				max_len);
++
++			if (cmd == SECIOCS_AES_CBC_ENC) {
++				for (i = 0; i < SEC_AES_BLCK_LEN/4; ++i)
++					((int *)dev->secdev_inbuf)[i] ^=
++							((int *)vec)[i];
++
++				dev->secdev_desc->secdesc_header =
++					SEC_ALG_ENCR_AESU_CBC;
++			} else
++				dev->secdev_desc->secdesc_header =
++					SEC_ALG_DECR_AESU_CBC;
++
++
++			dev->secdev_desc->secdesc_data_in_len =
++			  dev->secdev_desc->secdesc_data_out_len = max_len;
++
++
++			error = sec_nonblock_execute(dev->secdev_desc);
++			if (error != 0)
++				break;
++
++			if (cmd == SECIOCS_AES_CBC_DEC) {
++				for (i = 0; i < SEC_AES_BLCK_LEN/4; ++i)
++					((int *)dev->secdev_outbuf)[i] ^=
++						((int *)vec)[i];
++
++				memcpy(vec, &((char *)dev->secdev_inbuf)
++					[max_len - SEC_AES_BLCK_LEN],
++					SEC_AES_BLCK_LEN);
++			} else
++				memcpy(vec,  &((char *)dev->secdev_outbuf)
++					[max_len - SEC_AES_BLCK_LEN],
++					SEC_AES_BLCK_LEN);
++
++			copy_to_user((void *)((unsigned long)dev_desc.sec_out
++				+ dev_desc.sec_len - len),
++				(void *)dev->secdev_outbuf, max_len);
++
++			len -= max_len;
++		}
++		copy_to_user(dev_desc.sec_vec, (void *)vec, SEC_AES_BLCK_LEN);
++
++		return error;
++
++	case SECIOCS_ARC4_KEY:
++		/*printk("\nARC4_KEY: keylen %d\n",dev_desc.sec_keylen);*/
++		if (dev_desc.sec_keylen < 5 || dev_desc.sec_keylen > 16 ||
++			!dev_desc.sec_in || !dev_desc.sec_out ||
++			!dev_desc.sec_key || !dev_desc.sec_vec) {
++			printk(KERN_DEBUG "\n%s: ARC4_KEY error. keylen %x\n",
++				__FUNCTION__, dev_desc.sec_keylen);
++			return -EINVAL;
++		}
++		dev->secdev_desc->secdesc_key_len = dev_desc.sec_keylen;
++		dev->secdev_desc->secdesc_key_ptr =
++			/*virt_to_phys(dev->secdev_key);*/
++			(unsigned char *)dma_map_single(NULL,
++							dev->secdev_key,
++							SEC_DEV_KEY_LEN,
++							DMA_TO_DEVICE);
++		copy_from_user((void *)dev->secdev_key, dev_desc.sec_key,
++				dev_desc.sec_keylen);
++
++		dev->secdev_desc->secdesc_header = SEC_ALG_AFEU_KEY;
++
++		arc4_flag = 1;
++
++		break;
++
++	case SECIOCS_ARC4_CON:
++		/*printk("\nARC4_CON: keylen %d\n",dev_desc.sec_keylen);*/
++		if (!dev_desc.sec_vec || !dev_desc.sec_in ||
++			!dev_desc.sec_out || !dev_desc.sec_key)
++			return -EINVAL;
++
++		copy_from_user((void *)dev->secdev_iv, dev_desc.sec_vec, 259);
++		dev->secdev_desc->secdesc_iv_in_ptr =
++			/*virt_to_phys(dev->secdev_iv);*/
++			(unsigned char *)dma_map_single(NULL,
++							dev->secdev_iv,
++							SEC_DEV_VECTOR_LEN,
++							DMA_TO_DEVICE);
++		dev->secdev_desc->secdesc_iv_in_len = 259;
++
++		dev->secdev_desc->secdesc_header = SEC_ALG_AFEU_CONTEXT;
++
++		break;
++
++	case SECIOCS_DES_CBC_ENC:
++		if (dev_desc.sec_keylen != 8 || !dev_desc.sec_in ||
++			!dev_desc.sec_out || !dev_desc.sec_key ||
++			!dev_desc.sec_vec) {
++			printk(KERN_DEBUG "%s: SECIOCS_DES_CBC error. "
++					  "cmd %x,keylen %x. %x\n",
++				__FUNCTION__, cmd, dev_desc.sec_keylen,
++				SECIOCS_AES_CBC_ENC);
++			return -EINVAL;
++		}
++
++		header = SEC_ALG_ENCR_DES_CBC_SINGLE;
++		printk(KERN_DEBUG "SECIOCS_DES_CBC_ENC\n");
++		break;
++	case SECIOCS_DES_CBC_DEC:
++		if (dev_desc.sec_keylen != 8 || !dev_desc.sec_in ||
++			!dev_desc.sec_out || !dev_desc.sec_key ||
++			!dev_desc.sec_vec)
++			return -EINVAL;
++
++		header = SEC_ALG_DECR_DES_CBC_SINGLE;
++		printk(KERN_DEBUG "SECIOCS_DES_CBC_DEC\n");
++		break;
++	case SECIOCS_3DES_CBC_ENC:
++		if (dev_desc.sec_keylen != 24 || !dev_desc.sec_in ||
++			!dev_desc.sec_out || !dev_desc.sec_key ||
++			!dev_desc.sec_vec)
++			return -EINVAL;
++
++		header = SEC_ALG_ENCR_DES_CBC_TRIPLE;
++		printk(KERN_DEBUG "SECIOCS_3DES_CBC_ENC\n");
++		break;
++	case SECIOCS_3DES_CBC_DEC:
++		if (dev_desc.sec_keylen != 24 || !dev_desc.sec_in ||
++			!dev_desc.sec_out || !dev_desc.sec_key ||
++			!dev_desc.sec_vec)
++			return -EINVAL;
++
++		header = SEC_ALG_DECR_DES_CBC_TRIPLE;
++		printk(KERN_DEBUG "SECIOCS_3DES_CBC_DEC\n");
++		break;
++	case SECIOCS_3DES_ECB_ENC:
++		if (dev_desc.sec_keylen != 24 || !dev_desc.sec_in ||
++			!dev_desc.sec_out ||
++			!dev_desc.sec_key)
++			return -EINVAL;
++
++		header = SEC_ALG_ENCR_DES_ECB_TRIPLE;
++		printk(KERN_DEBUG "SECIOCS_3DES_ECB_ENC\n");
++		break;
++	case SECIOCS_3DES_ECB_DEC:
++		if (dev_desc.sec_keylen != 24 || !dev_desc.sec_in ||
++			!dev_desc.sec_out ||
++			!dev_desc.sec_key)
++			return -EINVAL;
++
++		header = SEC_ALG_DECR_DES_ECB_TRIPLE;
++		printk(KERN_DEBUG "SECIOCS_3DES_ECB_DEC\n");
++		break;
++	case SECIOCS_DES_ECB_ENC:
++		if (dev_desc.sec_keylen != 8 || !dev_desc.sec_in ||
++			!dev_desc.sec_out ||
++			!dev_desc.sec_key)
++			return -EINVAL;
++
++		header = SEC_ALG_ENCR_DES_ECB_SINGLE;
++		/*printk("SECIOCS_DES_ECB_ENC\n");*/
++		break;
++	case SECIOCS_DES_ECB_DEC:
++		if (dev_desc.sec_keylen != 8 || !dev_desc.sec_in ||
++			!dev_desc.sec_out || !dev_desc.sec_key)
++			return -EINVAL;
++
++		header = SEC_ALG_DECR_DES_ECB_SINGLE;
++		/*printk("SECIOCS_DES_ECB_DEC\n");*/
++		break;
++
++	case SECIOCS_AES_ECB_ENC:
++		if ((dev_desc.sec_keylen != 16 && dev_desc.sec_keylen != 24
++			&& dev_desc.sec_keylen != 32) || !dev_desc.sec_in ||
++			!dev_desc.sec_out || !dev_desc.sec_key)
++			return -EINVAL;
++
++		header = SEC_ALG_ENCR_AESU_ECB;
++
++		break;
++	case SECIOCS_AES_ECB_DEC:
++		if ((dev_desc.sec_keylen != 16 && dev_desc.sec_keylen != 24
++			&& dev_desc.sec_keylen != 32) || !dev_desc.sec_in ||
++			!dev_desc.sec_out || !dev_desc.sec_key)
++			return -EINVAL;
++
++		header = SEC_ALG_DECR_AESU_ECB;
++
++		break;
++
++
++
++
++	default:
++		printk(KERN_DEBUG "\n%s do not "
++				"support the cmd\n", __FUNCTION__);
++		return -EINVAL;
++	}
++
++	switch (cmd) {
++	case SECIOCS_DES_CBC_ENC:
++	case SECIOCS_DES_CBC_DEC:
++	case SECIOCS_3DES_CBC_ENC:
++	case SECIOCS_3DES_CBC_DEC:
++
++		/*printk("\n%s :DES 3DES CBC mode\n",__FUNCTION__);*/
++		dev->secdev_desc->secdesc_key_len = dev_desc.sec_keylen;
++		dev->secdev_desc->secdesc_key_ptr =
++			/*virt_to_phys(dev->secdev_key);*/
++			(unsigned char *)dma_map_single(NULL,
++							dev->secdev_key,
++							SEC_DEV_KEY_LEN,
++							DMA_TO_DEVICE);
++		dev->secdev_desc->secdesc_data_in_ptr =
++			/*virt_to_phys(dev->secdev_inbuf);*/
++			(unsigned char *)dma_map_single(NULL,
++							dev->secdev_inbuf,
++							SEC_DEV_BUF,
++							DMA_TO_DEVICE);
++		dev->secdev_desc->secdesc_data_out_ptr =
++			/*virt_to_phys(dev->secdev_outbuf);*/
++			(unsigned char *)dma_map_single(NULL,
++							dev->secdev_outbuf,
++							SEC_DEV_BUF,
++							DMA_TO_DEVICE);
++		dev->secdev_desc->secdesc_iv_in_ptr =
++			/*virt_to_phys(dev->secdev_iv);*/
++			(unsigned char *)dma_map_single(NULL,
++							dev->secdev_iv,
++							SEC_DEV_VECTOR_LEN,
++							DMA_TO_DEVICE);
++		dev->secdev_desc->secdesc_iv_out_ptr =
++			/*virt_to_phys(dev->secdev_ov);*/
++			(unsigned char *)dma_map_single(NULL,
++							dev->secdev_ov,
++							SEC_DEV_VECTOR_LEN,
++							DMA_TO_DEVICE);
++		dev->secdev_desc->secdesc_iv_in_len =
++			dev->secdev_desc->secdesc_iv_out_len
++			= SEC_DES_BLCK_LEN;
++
++		copy_from_user((void *)dev->secdev_key, dev_desc.sec_key,
++				dev_desc.sec_keylen);
++
++		len = dev_desc.sec_len;
++
++		while (len) {
++
++			if (len > SEC_DEV_BUF)
++				max_len = SEC_DEV_BUF;
++			else
++				max_len = len;
++
++			copy_from_user((void *)dev->secdev_inbuf,
++				(void *)((unsigned long)dev_desc.sec_in +
++					dev_desc.sec_len - len), max_len);
++
++			copy_from_user((void *)dev->secdev_iv, dev_desc.sec_vec,
++					SEC_DES_BLCK_LEN);
++			printk(KERN_DEBUG "iv: %x %x %x %x \n",
++					*(dev->secdev_iv+0),
++					*(dev->secdev_iv+1),
++					*(dev->secdev_iv+2),
++					*(dev->secdev_iv+3));
++			dev->secdev_desc->secdesc_data_in_len =
++				dev->secdev_desc->secdesc_data_out_len
++				= max_len;
++
++			dev->secdev_desc->secdesc_header = header;
++
++			error = sec_nonblock_execute(dev->secdev_desc);
++			if (error != 0)
++				break;
++
++			copy_to_user(dev_desc.sec_vec,
++					(void *)dev->secdev_ov,
++					SEC_DES_BLCK_LEN);
++
++			copy_to_user((void *)((unsigned long)dev_desc.sec_out +
++						dev_desc.sec_len - len),
++					(void *)dev->secdev_outbuf, max_len);
++
++			len -= max_len;
++		}
++		break;
++
++	case SECIOCS_3DES_ECB_ENC:
++	case SECIOCS_3DES_ECB_DEC:
++	case SECIOCS_DES_ECB_ENC:
++	case SECIOCS_DES_ECB_DEC:
++	case SECIOCS_AES_ECB_ENC:
++	case SECIOCS_AES_ECB_DEC:
++
++		/*printk("\n%s ECB mode\n",__FUNCTION__);*/
++		dev->secdev_desc->secdesc_key_len = dev_desc.sec_keylen;
++		dev->secdev_desc->secdesc_key_ptr =
++			/*virt_to_phys(dev->secdev_key);*/
++		     (unsigned char *)dma_map_single(NULL,
++						dev->secdev_key,
++						SEC_DEV_KEY_LEN,
++						DMA_TO_DEVICE);
++		dev->secdev_desc->secdesc_data_in_ptr =
++			/*virt_to_phys(dev->secdev_inbuf);*/
++			(unsigned char *)dma_map_single(NULL,
++							dev->secdev_inbuf,
++							SEC_DEV_BUF,
++							DMA_TO_DEVICE);
++		dev->secdev_desc->secdesc_data_out_ptr =
++			/*virt_to_phys(dev->secdev_outbuf);*/
++			(unsigned char *)dma_map_single(NULL,
++							dev->secdev_outbuf,
++							SEC_DEV_BUF,
++							DMA_TO_DEVICE);
++		copy_from_user((void *)dev->secdev_key, dev_desc.sec_key,
++				dev_desc.sec_keylen);
++
++		len = dev_desc.sec_len;
++
++		while (len) {
++
++			if (len > SEC_DEV_BUF)
++				max_len = SEC_DEV_BUF;
++			else
++				max_len = len;
++
++			copy_from_user((void *)dev->secdev_inbuf,
++					(void *)((unsigned long)dev_desc.sec_in
++						    + dev_desc.sec_len - len),
++					max_len);
++
++			dev->secdev_desc->secdesc_data_in_len =
++				dev->secdev_desc->secdesc_data_out_len
++				= max_len;
++
++			dev->secdev_desc->secdesc_header = header;
++
++			error = sec_nonblock_execute(dev->secdev_desc);
++			if (error != 0)
++				break;
++			/*printk("\n%s: in %x, out %x, key %x\n", __FUNCTION__,
++				*(dev->secdev_inbuf),*(dev->secdev_outbuf),
++				*(dev->secdev_key));*/
++			copy_to_user((void *)((unsigned long)dev_desc.sec_out
++						+ dev_desc.sec_len - len),
++				     (void *)dev->secdev_outbuf, max_len);
++
++			len -= max_len;
++		}
++		break;
++
++	case SECIOCS_ARC4_KEY:
++	case SECIOCS_ARC4_CON:
++		dev->secdev_desc->secdesc_data_in_ptr =
++			(unsigned char *)dma_map_single(NULL,
++							dev->secdev_inbuf,
++							SEC_DEV_BUF,
++							DMA_TO_DEVICE);
++		dev->secdev_desc->secdesc_data_out_ptr =
++			(unsigned char *)dma_map_single(NULL,
++							dev->secdev_outbuf,
++							SEC_DEV_BUF,
++							DMA_TO_DEVICE);
++		dev->secdev_desc->secdesc_iv_out_ptr =
++			(unsigned char *)dma_map_single(NULL,
++							dev->secdev_ov,
++							SEC_DEV_VECTOR_LEN,
++							DMA_TO_DEVICE);
++		dev->secdev_desc->secdesc_iv_out_len = 259;
++
++		len = dev_desc.sec_len;
++
++		while (1) {
++			if (len > SEC_DEV_BUF)
++				max_len = SEC_DEV_BUF;
++			else
++				max_len = len;
++
++			copy_from_user((void *)dev->secdev_inbuf,
++					(void *)((unsigned long)dev_desc.sec_in
++						 + dev_desc.sec_len - len),
++					max_len);
++
++			dev->secdev_desc->secdesc_data_in_len =
++				dev->secdev_desc->secdesc_data_out_len =
++				max_len;
++
++			error = sec_nonblock_execute(dev->secdev_desc);
++			if (error != 0)
++				break;
++
++			copy_to_user((void *)((unsigned long)dev_desc.sec_out
++					+ dev_desc.sec_len - len),
++				      (void *)dev->secdev_outbuf, max_len);
++
++			len -= max_len;
++
++			if (!len)
++				break;
++
++			memcpy(dev->secdev_iv, dev->secdev_ov, 259);
++
++			dev->secdev_desc->secdesc_header = SEC_ALG_AFEU_CONTEXT;
++
++			if (arc4_flag) {
++				arc4_flag = 0;
++
++				dev->secdev_desc->secdesc_iv_in_ptr =
++					(unsigned char *)dma_map_single(NULL,
++							dev->secdev_iv,
++							SEC_DEV_VECTOR_LEN,
++							DMA_TO_DEVICE);
++				dev->secdev_desc->secdesc_iv_in_len = 259;
++				dev->secdev_desc->secdesc_key_len = 0;
++				dev->secdev_desc->secdesc_key_ptr = NULL;
++			}
++
++
++		}
++
++		copy_to_user(dev_desc.sec_vec, (void *)dev->secdev_ov, 259);
++
++		break;
++	}
++
++	return error;
++}
++#endif
++
++
+diff --git a/include/asm-m68k/m5485sec.h b/include/asm-m68k/m5485sec.h
+new file mode 100644
+index 0000000..bae3b54
+--- /dev/null
++++ b/include/asm-m68k/m5485sec.h
+@@ -0,0 +1,173 @@
++#ifndef M5485SEC_H
++#define M5484SEC_H
++
++#define   SEC_EUACR_U                   MCF_REG32(0x21000)
++#define   SEC_EUACR_L                   MCF_REG32(0x21004)
++#define   SEC_EUASR_U                   MCF_REG32(0x21028)
++#define   SEC_EUASR_L                   MCF_REG32(0x2102C)
++#define   SEC_SMCR                      MCF_REG32(0x21030)
++#define   SEC_SISR_U                    MCF_REG32(0x21010)
++#define   SEC_SISR_L                    MCF_REG32(0x21014)
++#define   SEC_SICR_U                    MCF_REG32(0x21018)
++#define   SEC_SICR_L                    MCF_REG32(0x2101C)
++#define   SEC_SIMR_U                    MCF_REG32(0x21008)
++#define   SEC_SIMR_L                    MCF_REG32(0x2100C)
++#define   SEC_SID                       MCF_REG32(0x21020)
++
++#define   SEC_SMCR_RESET                0x01000000
++#define   SEC_SIMR_MASK_U               0x00000000
++#define   SEC_SIMR_MASK_L               0x03333340
++
++#define   SEC_CC0_FR                    MCF_REG32(0x2204C)
++#define   SEC_CC0_CR                    MCF_REG32(0x2200C)
++#define   SEC_CC0_CDPR                  MCF_REG32(0x22044)
++#define   SEC_CC0_PSR_U                 MCF_REG32(0x22010)
++#define   SEC_CC0_PSR_L                 MCF_REG32(0x22014)
++#define   SEC_CC1_FR                    MCF_REG32(0x2304C)
++#define   SEC_CC1_CR                    MCF_REG32(0x2300C)
++#define   SEC_CC1_CDPR                  MCF_REG32(0x23044)
++#define   SEC_CC1_PSR_U                 MCF_REG32(0x23010)
++#define   SEC_CC1_PSR_L                 MCF_REG32(0x23014)
++
++#define   SEC_CC_CR_RESET               0x00000001
++#define   SEC_CC_CR_CONFIGURATION       0x0000001E
++#define   SEC_CC_PSR_U_ERR_CH0          0x20000000
++#define   SEC_CC_PSR_U_ERR_CH1          0x80000000
++#define   SEC_CC_PSR_U_DN_CH0           0x10000000
++#define   SEC_CC_PSR_U_DN_CH1           0x40000000
++
++#define   SEC_DEU_DRCR                  MCF_REG32(0x2A018)
++#define   SEC_DEU_DSR                   MCF_REG32(0x2A028)
++#define   SEC_DEU_DISR                  MCF_REG32(0x2A030)
++#define   SEC_DEU_DIMR                  MCF_REG32(0x2A038)
++
++#define   SEC_DEU_DRCR_RESET            0x01000000
++#define   SEC_DEU_DSR_RD                0x01000000
++#define   SEC_DEU_DIMR_MASK             0xF63F0000
++
++#define   SEC_AFEU_AFRCR                MCF_REG32(0x28018)
++#define   SEC_AFEU_AFSR                 MCF_REG32(0x28028)
++#define   SEC_AFEU_AFISR                MCF_REG32(0x28030)
++#define   SEC_AFEU_AFIMR                MCF_REG32(0x28038)
++
++#define   SEC_AFEU_AFRCR_RESET          0x01000000
++#define   SEC_AFEU_AFSR_RD              0x01000000
++#define   SEC_AFEU_AFIMR_MASK           0xF61F0000
++
++
++#define   SEC_MDEU_MDRCR                MCF_REG32(0x2C018)
++#define   SEC_MDEU_MDSR                 MCF_REG32(0x2C028)
++#define   SEC_MDEU_MDISR                MCF_REG32(0x2C030)
++#define   SEC_MDEU_MDIMR                MCF_REG32(0x2C038)
++
++#define   SEC_MDEU_MDRCR_RESET          0x01000000
++#define   SEC_MDEU_MDSR_RD              0x01000000
++#define   SEC_MDEU_MDIMR_MASK           0xC41F0000
++
++
++#define   SEC_RNG_RNGRCR                MCF_REG32(0x2E018)
++#define   SEC_RNG_RNGSR                 MCF_REG32(0x2E028)
++#define   SEC_RNG_RNGISR                MCF_REG32(0x2E030)
++#define   SEC_RNG_RNGIMR                MCF_REG32(0x2E038)
++
++#define   SEC_RNG_RNGRCR_RESET          0x01000000
++#define   SEC_RNG_RNGSR_RD              0x01000000
++#define   SEC_RNG_RNGIMR_MASK           0xC2100000
++
++#define   SEC_AESU_AESRCR               MCF_REG32(0x32018)
++#define   SEC_AESU_AESSR                MCF_REG32(0x32028)
++#define   SEC_AESU_AESISR               MCF_REG32(0x32030)
++#define   SEC_AESU_AESIMR               MCF_REG32(0x32038)
++
++#define   SEC_AESU_AESRCR_RESET         0x01000000
++#define   SEC_AESU_AESSR_RD             0x01000000
++#define   SEC_AESU_AESIMR_MASK          0xF61F0000
++
++
++#define   SEC_DESC_NUM                  20
++#define   SEC_CHANNEL_NUMBER            2
++#define   SEC_MAX_BUF_SIZE              32*1024
++#define   SEC_INIT_TIMEOUT              1*HZ
++#define   SEC_INTERRUPT                 37
++
++/* Header descriptor values*/
++#define   SEC_ALG_ENCR_DES_ECB_SINGLE   0x20100010
++#define   SEC_ALG_DECR_DES_ECB_SINGLE   0x20000010
++#define   SEC_ALG_ENCR_DES_ECB_TRIPLE   0x20300010
++#define   SEC_ALG_DECR_DES_ECB_TRIPLE   0x20200010
++#define   SEC_ALG_ENCR_DES_CBC_SINGLE   0x20500010
++#define   SEC_ALG_DECR_DES_CBC_SINGLE   0x20400010
++#define   SEC_ALG_ENCR_DES_CBC_TRIPLE   0x20700010
++#define   SEC_ALG_DECR_DES_CBC_TRIPLE   0x20600010
++
++#define   SEC_ALG_MDEU_SHA256           0x30500010
++#define   SEC_ALG_MDEU_MD5              0x30600010
++#define   SEC_ALG_MDEU_SHA              0x30400010
++#define   SEC_ALG_MDEU_SHA256_HMAC      0x31D00010
++#define   SEC_ALG_MDEU_MD5_HMAC         0x31E00010
++#define   SEC_ALG_MDEU_SHA_HMAC         0x31C00010
++
++#define   SEC_ALG_RNG                   0x40000010
++
++
++#define   SEC_ALG_AFEU_KEY              0x10200050
++#define   SEC_ALG_AFEU_CONTEXT          0x10700050
++
++#define   SEC_ALG_ENCR_AESU_CBC         0x60300010
++#define   SEC_ALG_DECR_AESU_CBC         0x60200010
++#define   SEC_ALG_ENCR_AESU_ECB         0x60100010
++#define   SEC_ALG_DECR_AESU_ECB         0x60000010
++#define   SEC_ALG_AESU_CTR              0x60600010
++
++
++
++#define   SEC_DESCHEAD_ERROR            0xFE000000
++#define   SEC_DESCHEAD_COMPLETED        0xFF000000
++
++#define SEC_DEVICE_NAME                 "cfsec"
++
++/*!!! This number must be changed*/
++#define SEC_MAJOR                       130
++
++#define SEC_DEV_BUF                         1024
++#define SEC_DEV_KEY_LEN                     64
++#define SEC_DEV_VECTOR_LEN                  259
++
++#define SEC_AES_BLCK_LEN                   16
++#define SEC_DES_BLCK_LEN                   8
++
++
++/* Descriptor structure of SEC*/
++struct sec_descriptor {
++	volatile unsigned long secdesc_header;
++	unsigned long secdesc_len1;
++	void *secdesc_ptr1;
++	unsigned long secdesc_iv_in_len;
++	void *secdesc_iv_in_ptr;
++	unsigned long secdesc_key_len;
++	void *secdesc_key_ptr;
++	unsigned long secdesc_data_in_len;
++	void *secdesc_data_in_ptr;
++	unsigned long secdesc_data_out_len;
++	void *secdesc_data_out_ptr;
++	unsigned long secdesc_iv_out_len;
++	void *secdesc_iv_out_ptr;
++	unsigned long secdesc_len7;
++	void *secdesc_ptr7;
++	void *secdesc_ptrnext;
++};
++
++struct sec_device_data {
++	unsigned char secdev_inbuf[SEC_DEV_BUF];
++	unsigned char secdev_outbuf[SEC_DEV_BUF];
++	unsigned char secdev_key[SEC_DEV_KEY_LEN];
++	unsigned char secdev_iv[SEC_DEV_VECTOR_LEN];
++	unsigned char secdev_ov[SEC_DEV_VECTOR_LEN];
++	struct sec_descriptor *secdev_desc;
++};
++
++struct sec_descriptor *sec_desc_alloc(void);
++inline void sec_desc_free(struct sec_descriptor *desc);
++int sec_execute(int channel, struct sec_descriptor *desc, int timeout);
++int sec_nonblock_execute(struct sec_descriptor *desc);
++#endif
+diff --git a/include/asm-m68k/mcf_sec_ioctl.h b/include/asm-m68k/mcf_sec_ioctl.h
+new file mode 100644
+index 0000000..06d7f93
+--- /dev/null
++++ b/include/asm-m68k/mcf_sec_ioctl.h
+@@ -0,0 +1,37 @@
++#ifndef _SEC_H_
++#define _SEC_H_
++
++#define SEC_IOC_MAGIC 		130
++
++
++#define SECIOCS_AES_CBC_ENC 		_IO(SEC_IOC_MAGIC, 1)
++#define SECIOCS_AES_CBC_DEC 		_IO(SEC_IOC_MAGIC, 2)
++
++#define SECIOCS_DES_CBC_ENC 		_IO(SEC_IOC_MAGIC, 3)
++#define SECIOCS_DES_CBC_DEC 		_IO(SEC_IOC_MAGIC, 4)
++
++#define SECIOCS_3DES_CBC_ENC 		_IO(SEC_IOC_MAGIC, 5)
++#define SECIOCS_3DES_CBC_DEC 		_IO(SEC_IOC_MAGIC, 6)
++
++#define SECIOCS_3DES_ECB_ENC 		_IO(SEC_IOC_MAGIC, 7)
++#define SECIOCS_3DES_ECB_DEC 		_IO(SEC_IOC_MAGIC, 8)
++
++#define SECIOCS_DES_ECB_ENC 		_IO(SEC_IOC_MAGIC, 9)
++#define SECIOCS_DES_ECB_DEC 		_IO(SEC_IOC_MAGIC, 10)
++
++#define SECIOCS_AES_ECB_ENC 		_IO(SEC_IOC_MAGIC, 11)
++#define SECIOCS_AES_ECB_DEC 		_IO(SEC_IOC_MAGIC, 12)
++
++#define SECIOCS_ARC4_KEY 		_IO(SEC_IOC_MAGIC, 13)
++#define SECIOCS_ARC4_CON 		_IO(SEC_IOC_MAGIC, 14)
++
++struct sec_dev_desc{
++	void *sec_in;
++	void *sec_out;
++	void *sec_vec;
++	void *sec_key;
++	int   sec_keylen;
++	int   sec_len;
++};
++#endif /* _SEC_H_ */
++
+-- 
+1.5.6
+

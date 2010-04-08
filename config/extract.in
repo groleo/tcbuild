@@ -1,0 +1,23 @@
+# Options specific to extracting packages
+
+menu "Extracting"
+
+config FORCE_EXTRACT
+    bool
+    prompt "Force extractions"
+    default n
+    help
+      Force extraction of already exctracted tarballs.
+      
+      Usefull if you suspect a previous extract did not complete (eg. broken
+      tarball), or you added a new set of patches for this component.
+
+config ONLY_EXTRACT
+    bool
+    prompt "Stop after extracting tarballs"
+    default n
+    help
+      Exit after unpacking and patching tarballs.
+      
+      Usefull to look at the code before doing the build itself.
+endmenu

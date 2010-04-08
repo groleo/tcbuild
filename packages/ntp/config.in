@@ -1,0 +1,35 @@
+config NTP
+    string
+
+choice
+    bool
+    prompt "Version"
+
+
+config NTP_V_4_2_4p6
+    bool
+    prompt "4.2.4p6"
+
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+
+config NTP_V_snapshot
+    bool
+    prompt "latest snapshot (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+config NTP_V_specific_date
+    bool
+    prompt "<specific date> (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+endchoice
+
+config NTP_VERSION
+    string
+    prompt "Enter date (YYYYMMDD)" if NTP_V_specific_date
+    default "snapshot" if NTP_V_snapshot
+    default "4.2.4p6" if NTP_V_4_2_4p6
+
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!

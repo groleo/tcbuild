@@ -1,0 +1,281 @@
+# Options specific to downloading packages
+
+menu "Downloading"
+
+config FORBID_DOWNLOAD
+    bool
+    prompt "Forbid downloads"
+    default n
+    help
+      Normally, will try to download missing tarballs (or
+      checkout from CVS/SVN...).
+      If you do not have network connectivity when you run chainbuilder,
+      and some files are missing, it can be a long time before chainbuilder
+      fails.
+
+      Saying 'y' here will prevent chainbuilder from downloading missing
+      files, thus failing early so that you don't get stuck.
+
+if ! FORBID_DOWNLOAD
+
+config FORCE_DOWNLOAD
+    bool
+    prompt "Force downloads"
+    default n
+    help
+      Force downloading tarballs, even if one already exists.
+
+      Usefull if you suspect a tarball to be damaged.
+
+menuconfig USE_PROXY
+    bool
+    prompt "Use a proxy"
+    default n
+    help
+      Say 'Y' here if you need to use a proxy to connect to the internet.
+
+      You can then choose between an HTTP or a SOCKS 4/5 proxy.
+
+      **** NOTE ****
+      The settings below may not cover all possible proxy configurations!
+      You'd be better off setting proxy in the environment!
+
+if USE_PROXY
+
+choice
+    bool
+    prompt "Proxy type"
+
+config PROXY_TYPE_HTTP
+    bool
+    prompt "HTTP proxy"
+    help
+      Use an HTTP proxy to connect to to the internet.
+      Only the http and ftp protocols will be tunneled through this
+      proxy.
+
+      Alternatively to setting this option, you can set and export the
+      following variables in your environment:
+        ftp_proxy=http://user:passwd@proxy.server:port/
+        http_proxy=http://user:passwd@proxy.server:port/
+        https_proxy=http://user:passwd@proxy.server:port/
+
+# Haha! Here is an interesting feature/bug of mconf!
+# The following config entries will be shown out-side the
+# choice menu!
+# To add a third entry in the choice menu, add it after the
+# if...endif conditional below, and so on for a fourth entry...
+if PROXY_TYPE_HTTP
+
+config PROXY_HOST
+    string
+    prompt "hostname/IP"
+
+config PROXY_PORT
+    int
+    prompt "port"
+    default 8080
+
+config PROXY_USER
+    string
+    prompt "user name"
+
+config PROXY_PASS
+    string
+    prompt "password"
+
+endif # USE_HTTP_PROXY
+
+config PROXY_TYPE_SOCKS
+    bool
+    prompt "SOCKS 4/5 proxy"
+    help
+      Use a Socks 4/5 proxy to connect to the internet.
+      All protocols can get tunneled through this kind of proxy (your
+      proxy configuration may not allow all protocols, but chances are
+      that protocols needed by chainbuilder are allowed).
+
+      Alternatively to setting this option, you can configure tsocks
+      system-wide, and set and export the following variable in your
+      environment:
+        LD_PRELOAD=/path/to/your/tsocks-library.so
+
+      This option makes use of the tsocks library. You will have to have tsocks
+      installed on your system, of course.
+
+      If you think you do not know what tsocks is, or how to configure it,
+      chances are that you do not need to set this option.
+
+if PROXY_TYPE_SOCKS
+
+choice
+    bool
+    prompt "type"
+    default PROXY_TYPE_SOCKS_SYS
+
+config PROXY_TYPE_SOCKS_SYS
+    bool
+    prompt "Use system settings"
+    help
+      Use that if tsocks is already configured on your system.
+
+config PROXY_TYPE_SOCKS_AUTO
+    bool
+    prompt "Auto"
+    help
+      chainbuilder will attempt to guess what type of SOCKS version
+      the proxy speaks.
+
+config PROXY_TYPE_SOCKS_4
+    bool
+    prompt "SOCKS 4"
+
+config PROXY_TYPE_SOCKS_5
+    bool
+    prompt "SOCKS 5"
+
+endchoice
+
+if ! PROXY_TYPE_SOCKS_SYS
+
+config PROXY_HOST
+    string
+    prompt "hostname/IP"
+
+config PROXY_PORT
+    int
+    prompt "port"
+    default 1080
+
+config PROXY_USER
+    string
+    prompt "user name"
+
+config PROXY_PASS
+    string
+    prompt "password"
+
+endif # ! PROXY_TYPE_SOCKS_SYS
+
+endif # USE_SOCKS_PROXY
+
+endchoice
+
+endif # USE_PROXY
+
+config PROXY_TYPE
+    string
+    default "none"      if ! USE_PROXY
+    default "http"      if PROXY_TYPE_HTTP
+    default "sockssys"  if PROXY_TYPE_SOCKS_SYS
+    default "socksauto" if PROXY_TYPE_SOCKS_AUTO
+    default "socks4"    if PROXY_TYPE_SOCKS_4
+    default "socks5"    if PROXY_TYPE_SOCKS_5
+
+menuconfig USE_MIRROR
+    bool
+    prompt "Use Mirror"
+    default n
+    help
+      If you have a machine on your LAN that mirrors some of the needed
+      tarballs, you can say 'Y' here, and configure adequate values in
+      the following options.
+
+      Tarballs will be be preferably fetched from the LAN mirror, and if
+      not found there, standard places will be searched for.
+
+      Obviously, nothing prevents you from using a mirror that is in fact
+      *not* on your LAN, for example on another subnet of your company's
+      network, or a mirror on the Internet.
+
+      I (Yann E. MORIN) have set up such a mirror to host snapshots of
+      some components, when those snapshots are volatile on the upstream
+      servers. The mirror is *slow*, because it is hosted behind an ADSL
+      line. For the time being, I haven't set up bandwidth limitations,
+      but should the mirror be abused, I will. Please avoid using my
+      machine when you can...
+      The mirror is available as (fill in those values in the fields
+      below):
+        host name: ymorin.is-a-geek.org
+        base dir : /mirrors
+
+if USE_MIRROR
+
+config PREFER_MIRROR
+    bool
+    prompt "Prefer the mirror"
+    default n
+    help
+      Say 'Y' here if you prefer the LAN miror over the upstream sources.
+
+config MIRROR_BASE_URL
+    string
+    prompt "Base URL"
+    default "ftp://10.32.0.120"
+    help
+      This is the base directory searched for for tarballs. If you enter
+      /mirror, then the search is performed in the following directories
+      on the server:
+        /mirror/<name>/
+        /mirror/
+
+      where <name> is replaced with the actual package name.
+
+config MIRROR_LS_R
+    bool
+#    prompt "Use ls-lR et al."
+    depends on EXPERIMENTAL
+    default n
+    help
+      If the tarball was not found at the above location, see if the server
+      has a ls-lr.gz (or similar) file, and use that file to see if the
+      tarball is listed somewhere in that file.
+
+      Common file names looked for are:
+        ls-lrRt.txt     (used at ftp.gnu.org)
+        find.txt        (ditto)
+        ls-lR
+
+endif # USE_MIRROR
+
+config DOWNLOAD_RETRIES
+    int
+    prompt "retries"
+    default 2
+
+config CONNECT_TIMEOUT
+    int
+    prompt "connection timeout"
+    default 15
+    help
+      From the curl manual:
+        Maximum time in seconds that you allow the connection to the server to take.
+
+      The scenario is as follows;
+        - some enterprise networks have firewalls that prohibit FTP traffic, while
+          still allowing HTTP
+        - most download sites have http:// equivalent for the ftp:// URL
+        - after this number of seconds, it is considered that the connection could
+          not be established, and the next URL in the list is tried, until we reach
+          an URL that will go through the firewall, most probably an http:// URL.
+
+      If you have a slow network, you'd better set this value higher than the default
+      10s. If you know a firewall is blocking connections, but your network is globally
+      fast, you can try to lower this value to jump more quickly to allowed URLs. YMMV.
+
+      Note that this value applies equally to wget if you have that installed.
+
+      Of course, you'd be better off to use a proxy, as offered by the previous
+      option.
+
+config ONLY_DOWNLOAD
+    bool
+    prompt "Stop after downloading tarballs"
+    default n
+    help
+      Only download the tarballs. Exit once it done.
+
+      Usefull to pre-retrieve the tarballs before going off-line.
+
+endif # ! FORBID_DOWNLOAD
+endmenu

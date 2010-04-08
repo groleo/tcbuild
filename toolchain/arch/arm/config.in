@@ -1,0 +1,206 @@
+# ARM specific configuration file
+
+config ARCH_arm
+    select ARCH_SUPPORTS_BOTH_ENDIAN
+    select ARCH_DEFAULT_LE
+    select ARCH_SUPPORT_ARCH
+    select ARCH_SUPPORT_CPU
+    select ARCH_SUPPORT_TUNE
+    select ARCH_SUPPORT_FPU
+    help
+      The ARM architecture, as defined by:
+        http://www.arm.com/
+
+config ARCH_ARM_EABI
+    bool
+    prompt "Use EABI"
+    default n
+    help
+      Set up the toolchain so that it generates EABI-compliant binaries.
+
+config ARCH_ARM_ABI_OK
+    bool
+    default y
+    depends on ! ARCH_ARM_EABI
+    select ARCH_SUPPORT_ABI
+
+choice
+    bool
+    prompt "CPU Type"
+
+config ARCH_arm_arm1
+    bool
+    prompt "arm1"
+
+config ARCH_arm_arm2
+    bool
+    prompt "arm2"
+
+config ARCH_arm_arm250
+    bool
+    prompt "arm250"
+
+config ARCH_arm_arm3
+    bool
+    prompt "arm3"
+
+config ARCH_arm_arm6
+    bool
+    prompt "arm6"
+
+config ARCH_arm_arm600
+    bool
+    prompt "arm600"
+
+config ARCH_arm_arm610
+    bool
+    prompt "arm610"
+
+config ARCH_arm_arm620
+    bool
+    prompt "arm620"
+
+config ARCH_arm_arm7
+    bool
+    prompt "arm7"
+
+config ARCH_arm_arm70
+    bool
+    prompt "arm70"
+
+config ARCH_arm_arm700
+    bool
+    prompt "arm700"
+
+config ARCH_arm_arm700i
+    bool
+    prompt "arm700i"
+
+config ARCH_arm_arm710
+    bool
+    prompt "arm710"
+
+config ARCH_arm_arm7100
+    bool
+    prompt "arm7100"
+
+config ARCH_arm_arm710c
+    bool
+    prompt "arm710c"
+
+config ARCH_arm_arm710t
+    bool
+    prompt "arm710t"
+
+config ARCH_arm_arm720
+    bool
+    prompt "arm720"
+
+config ARCH_arm_arm720t
+    bool
+    prompt "arm720t"
+
+config ARCH_arm_arm740t
+    bool
+    prompt "arm740t"
+
+config ARCH_arm_arm7500
+    bool
+    prompt "arm7500"
+
+config ARCH_arm_arm7500fe
+    bool
+    prompt "arm7500fe"
+
+config ARCH_arm_arm7d
+    bool
+    prompt "arm7d"
+
+config ARCH_arm_arm7di
+    bool
+    prompt "arm7di"
+
+config ARCH_arm_arm7dm
+    bool
+    prompt "arm7dm"
+
+config ARCH_arm_arm7dmi
+    bool
+    prompt "arm7dmi"
+
+config ARCH_arm_arm7m
+    bool
+    prompt "arm7m"
+
+config ARCH_arm_arm7tdmi
+    bool
+    prompt "arm7tdmi"
+
+config ARCH_arm_arm8
+    bool
+    prompt "arm8"
+
+config ARCH_arm_arm810
+    bool
+    prompt "arm810"
+
+config ARCH_arm_arm9
+    bool
+    prompt "arm9"
+
+config ARCH_arm_arm920
+    bool
+    prompt "arm920"
+
+config ARCH_arm_arm940
+    bool
+    prompt "arm940"
+
+config ARCH_arm_arm9tdmi
+    bool
+    prompt "arm9tdmi"
+
+config ARCH_arm_strongarm
+    bool
+    prompt "strongarm"
+
+endchoice
+
+
+########
+config ARCH_CPU
+    string
+    default "arm1" if ARCH_arm_arm1
+    default "arm2" if ARCH_arm_arm2
+    default "arm250" if ARCH_arm_arm250
+    default "arm3" if ARCH_arm_arm3
+    default "arm6" if ARCH_arm_arm6
+    default "arm600" if ARCH_arm_arm600
+    default "arm610" if ARCH_arm_arm610
+    default "arm620" if ARCH_arm_arm620
+    default "arm7" if ARCH_arm_arm7
+    default "arm70" if ARCH_arm_arm70
+    default "arm700" if ARCH_arm_arm700
+    default "arm700i" if ARCH_arm_arm700i
+    default "arm710" if ARCH_arm_arm710
+    default "arm7100" if ARCH_arm_arm7100
+    default "arm710c" if ARCH_arm_arm710c
+    default "arm710t" if ARCH_arm_arm710t
+    default "arm720" if ARCH_arm_arm720
+    default "arm720t" if ARCH_arm_arm720t
+    default "arm740t" if ARCH_arm_arm740t
+    default "arm7500" if ARCH_arm_arm7500
+    default "arm7500fe" if ARCH_arm_arm7500fe
+    default "arm7d" if ARCH_arm_arm7d
+    default "arm7di" if ARCH_arm_arm7di
+    default "arm7dm" if ARCH_arm_arm7dm
+    default "arm7dmi" if ARCH_arm_arm7dmi
+    default "arm7m" if ARCH_arm_arm7m
+    default "arm7tdmi" if ARCH_arm_arm7tdmi
+    default "arm8" if ARCH_arm_arm8
+    default "arm810" if ARCH_arm_arm810
+    default "arm9" if ARCH_arm_arm9
+    default "arm920" if ARCH_arm_arm920
+    default "arm940" if ARCH_arm_arm940
+    default "arm9tdmi" if ARCH_arm_arm9tdmi
+    default "strongarm" if ARCH_arm_strongarm

@@ -1,0 +1,35 @@
+From e527a06c5fa43e4f7a771de1f62b6f211e6202bc Mon Sep 17 00:00:00 2001
+From: Kurt Mahan <kmahan@freescale.com>
+Date: Mon, 10 Nov 2008 16:57:05 -0700
+Subject: [PATCH] Update copyright dates to include 2006.
+
+Signed-off-by: Duck Schmid <duck@freescale.com>
+---
+ drivers/usb/otg/fsl_otg.c |    2 +-
+ drivers/usb/otg/fsl_otg.h |    2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/usb/otg/fsl_otg.c b/drivers/usb/otg/fsl_otg.c
+index 4d939e8..77634a8 100644
+--- a/drivers/usb/otg/fsl_otg.c
++++ b/drivers/usb/otg/fsl_otg.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2007,2008 Freescale semiconductor, Inc.
++ * Copyright (C) 2005-2008 Freescale Semiconductor, Inc.
+  *
+  * Author: Li Yang <LeoLi@freescale.com>
+  *         Jerry Huang <Chang-Ming.Huang@freescale.com>
+diff --git a/drivers/usb/otg/fsl_otg.h b/drivers/usb/otg/fsl_otg.h
+index d389ba5..6077ca2 100644
+--- a/drivers/usb/otg/fsl_otg.h
++++ b/drivers/usb/otg/fsl_otg.h
+@@ -1,4 +1,4 @@
+-/* Copyright (C) 2007,2008 Freescale Semiconductor, Inc.
++/* Copyright (C) 2005-2008 Freescale Semiconductor, Inc.
+  *
+  * This program is free software; you can redistribute  it and/or modify it
+  * under  the terms of  the GNU General  Public License as published by the
+-- 
+1.6.0.1
+

@@ -1,0 +1,23 @@
+diff -urp minicom-2.3.orig/src/minicom.c minicom-2.3/src/minicom.c
+--- minicom-2.3.orig/src/minicom.c	2008-02-24 20:46:09.000000000 +0100
++++ minicom-2.3/src/minicom.c	2008-02-24 20:48:03.000000000 +0100
+@@ -31,7 +31,6 @@
+ RCSID(PKG_VER "$Id: minicom-2.3-wchar.patch,v 1.2 2009/04/14 07:19:41 mariusn Exp $")
+ 
+ #include <getopt.h>
+-#include <wchar.h>
+ #include <wctype.h>
+ 
+ #define EXTERN
+Only in minicom-2.3/src: minicom.c.wchar
+diff -urp minicom-2.3.orig/src/window.c minicom-2.3/src/window.c
+--- minicom-2.3.orig/src/window.c	2008-02-24 21:06:29.000000000 +0100
++++ minicom-2.3/src/window.c	2008-02-24 21:06:42.000000000 +0100
+@@ -27,7 +27,6 @@ RCSID("$Id: window.c,v 1.21 2008-02-06 2
+ 
+ #include <limits.h>
+ #include <stdarg.h>
+-#include <wchar.h>
+ #ifdef HAVE_TERMCAP_H
+ #  include <termcap.h>
+ #elif defined (HAVE_NCURSES_TERMCAP_H)

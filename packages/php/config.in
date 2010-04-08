@@ -1,0 +1,35 @@
+config PHP
+    string
+
+choice
+    bool
+    prompt "Version"
+
+
+config PHP_V_5_2_10
+    bool
+    prompt "5.2.10"
+
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+
+config PHP_V_snapshot
+    bool
+    prompt "latest snapshot (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+config PHP_V_specific_date
+    bool
+    prompt "<specific date> (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+endchoice
+
+config PHP_VERSION
+    string
+    prompt "Enter date (YYYYMMDD)" if PHP_V_specific_date
+    default "snapshot" if PHP_V_snapshot
+    default "5.2.10" if PHP_V_5_2_10
+
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!

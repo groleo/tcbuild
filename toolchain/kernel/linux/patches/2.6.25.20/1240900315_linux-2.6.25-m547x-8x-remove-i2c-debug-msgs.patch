@@ -1,0 +1,113 @@
+--- a/drivers/i2c/busses/i2c-mcf548x.c	2009-05-26 16:57:52.000000000 +0300
++++ b/drivers/i2c/busses/i2c-mcf548x.c	2009-05-26 16:59:08.000000000 +0300
+@@ -259,8 +259,9 @@
+ 	MCF_I2CR |= MCF_I2CR_MTX;
+ 
+ 	for (i = 0; i < count; ++i) {
+-		printk(KERN_DEBUG "i2c-algo-mcf: %s i2c_write: writing %2.2X\n",
++		/*printk(KERN_DEBUG "i2c-algo-mcf: %s i2c_write: writing %2.2X\n",
+ 		      i2c_adap->name, buf[i]&0xff);
++		*/
+ 		ret = i2c_outb(i2c_adap, buf[i]);
+ 		if (ret < 0)
+ 			return ret;
+@@ -300,8 +301,9 @@
+ 		if (wait_xfer_done(adap)) {
+ 			i2c_stop(adap);
+ 			wait_for_bb(adap);
+-			printk(KERN_DEBUG
++			/*printk(KERN_DEBUG
+ 			    "i2c-algo-mcf: mcf_readbytes timed out.\n");
++			*/
+ 			return (-1);
+ 		}
+ 
+@@ -312,7 +314,7 @@
+ 	if (wait_xfer_done(adap)) {
+ 		i2c_stop(adap);
+ 		wait_for_bb(adap);
+-		printk(KERN_DEBUG "i2c-algo-mcf: mcf_readbytes timed out.\n");
++		/*printk(KERN_DEBUG "i2c-algo-mcf: mcf_readbytes timed out.\n");*/
+ 		return (-1);
+ 	}
+ 
+@@ -322,7 +324,7 @@
+ 	if (wait_xfer_done(adap)) {
+ 		i2c_stop(adap);
+ 		wait_for_bb(adap);
+-		printk(KERN_DEBUG "i2c-algo-mcf: mcf_readbytes timed out.\n");
++		/*printk(KERN_DEBUG "i2c-algo-mcf: mcf_readbytes timed out.\n");*/
+ 		return (-1);
+ 	}
+ 
+@@ -403,11 +405,11 @@
+ 
+ 		pmsg = &msgs[i];
+ 
+-		printk(KERN_DEBUG "i2c-algo-mcf: Doing %s %d bytes "
++		/*printk(KERN_DEBUG "i2c-algo-mcf: Doing %s %d bytes "
+ 			"to 0x%02x - %d of %d messages\n",
+ 			pmsg->flags & I2C_M_RD ? "read" : "write",
+ 			pmsg->len, pmsg->addr, i + 1, num);
+-
++		*/
+ 		/* Send START */
+ 		/*if (i == 0)*/
+ 			i2c_start(adap);
+@@ -428,20 +430,22 @@
+ 		if (!i2c_getack(adap)) {
+ 			i2c_stop(adap);
+ 			wait_for_bb(adap);
+-			printk(KERN_DEBUG "i2c-algo-mcf: No ack after "
++			/*printk(KERN_DEBUG "i2c-algo-mcf: No ack after "
+ 				    "send address in mcf_xfer\n");
++			*/
+ 			return (-EREMOTEIO);
+ 		}
+ 
+-		printk(KERN_DEBUG "i2c-algo-mcf: Msg %d, "
++		/*printk(KERN_DEBUG "i2c-algo-mcf: Msg %d, "
+ 				  "addr = 0x%x, flags = 0x%x, len = %d\n",
+ 				i, msgs[i].addr, msgs[i].flags, msgs[i].len);
++		*/
+ 		/* Read */
+ 		if (pmsg->flags & I2C_M_RD) {
+ 			/* read bytes into buffer*/
+ 			ret = mcf_readbytes(i2c_adap, pmsg->buf, pmsg->len,
+ 						(i + 1 == num));
+-
++#if 0
+ 			if (ret != pmsg->len) {
+ 				printk(KERN_DEBUG "i2c-algo-mcf: fail: "
+ 					    "only read %d bytes.\n", ret);
+@@ -449,16 +453,19 @@
+ 				printk(KERN_DEBUG "i2c-algo-mcf: "
+ 						  "read %d bytes.\n", ret);
+ 			}
++#endif
+ 		} else {
+ 			/* write bytes into buffer*/
+ 			ret = mcf_sendbytes(i2c_adap, pmsg->buf, pmsg->len,
+ 						(i + 1 == num));
+ 			if (ret != pmsg->len) {
+-				printk(KERN_DEBUG "i2c-algo-mcf: fail: "
++				/*printk(KERN_DEBUG "i2c-algo-mcf: fail: "
+ 					    "only wrote %d bytes.\n", ret);
++				*/
+ 			} else {
+-				printk(KERN_DEBUG "i2c-algo-mcf: wrote"
++				/*printk(KERN_DEBUG "i2c-algo-mcf: wrote"
+ 					"%d bytes.\n", ret);
++				*/
+ 			}
+ 		}
+ 	MCF_I2CR = 0;
+@@ -530,7 +537,7 @@
+ 	/************************************************************/
+ 	i2c = kzalloc(sizeof(*i2c), GFP_KERNEL);
+ 	if (!i2c) {
+-		printk(KERN_ERR "%s kzalloc coldfire_i2c faile\n",
++		printk(KERN_ERR "%s kzalloc coldfire_i2c failed\n",
+ 				__FUNCTION__);
+ 		return -ENOMEM;
+ 	}

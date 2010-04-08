@@ -1,0 +1,35 @@
+config NANO
+    string
+
+choice
+    bool
+    prompt "Version"
+
+
+config NANO_V_2_0_9
+    bool
+    prompt "2.0.9"
+
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+
+config NANO_V_snapshot
+    bool
+    prompt "latest snapshot (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+config NANO_V_specific_date
+    bool
+    prompt "<specific date> (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+endchoice
+
+config NANO_VERSION
+    string
+    prompt "Enter date (YYYYMMDD)" if NANO_V_specific_date
+    default "snapshot" if NANO_V_snapshot
+    default "2.0.9" if NANO_V_2_0_9
+
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!

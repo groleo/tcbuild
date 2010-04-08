@@ -1,0 +1,35 @@
+config PPP
+    string
+
+choice
+    bool
+    prompt "Version"
+
+
+config PPP_V_2_4_4
+    bool
+    prompt "2.4.4"
+
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+
+config PPP_V_snapshot
+    bool
+    prompt "latest snapshot (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+config PPP_V_specific_date
+    bool
+    prompt "<specific date> (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+endchoice
+
+config PPP_VERSION
+    string
+    prompt "Enter date (YYYYMMDD)" if PPP_V_specific_date
+    default "snapshot" if PPP_V_snapshot
+    default "2.4.4" if PPP_V_2_4_4
+
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!

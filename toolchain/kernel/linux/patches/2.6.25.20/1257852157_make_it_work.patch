@@ -1,0 +1,85 @@
+diff -ruN linux-2.6.25.20/drivers/pci/probe.c linux-2.6.25.20.working/drivers/pci/probe.c
+--- linux-2.6.25.20/drivers/pci/probe.c	2008-11-10 20:50:34.000000000 +0200
++++ linux-2.6.25.20.working/drivers/pci/probe.c	2009-11-09 18:51:59.406284847 +0200
+@@ -186,6 +186,13 @@
+ 	unsigned int pos, reg, next;
+ 	u32 l, sz;
+ 	struct resource *res;
++	u16 orig_cmd;
++
++	if ((dev->class >> 8) != PCI_CLASS_BRIDGE_HOST) {
++		pci_read_config_word(dev, PCI_COMMAND, &orig_cmd);
++		pci_write_config_word(dev, PCI_COMMAND,
++			orig_cmd & ~(PCI_COMMAND_MEMORY | PCI_COMMAND_IO));
++	}
+ 
+ 	for(pos=0; pos<howmany; pos = next) {
+ 		u64 l64;
+@@ -284,6 +291,10 @@
+ 			}
+ 		}
+ 	}
++
++	if ((dev->class >> 8) != PCI_CLASS_BRIDGE_HOST)
++		pci_write_config_word(dev, PCI_COMMAND, orig_cmd);
++
+ }
+ 
+ void __devinit pci_read_bridge_bases(struct pci_bus *child)
+@@ -485,7 +496,7 @@
+ 		 pci_name(dev), buses & 0xffffff, pass);
+ 
+ 	/* Disable MasterAbortMode during probing to avoid reporting
+-	   of bus errors (in some architectures) */ 
++	   of bus errors (in some architectures) */
+ 	pci_read_config_word(dev, PCI_BRIDGE_CONTROL, &bctl);
+ 	pci_write_config_word(dev, PCI_BRIDGE_CONTROL,
+ 			      bctl & ~PCI_BRIDGE_CTL_MASTER_ABORT);
+@@ -561,7 +572,7 @@
+ 			buses &= ~0xff000000;
+ 			buses |= CARDBUS_LATENCY_TIMER << 24;
+ 		}
+-			
++
+ 		/*
+ 		 * We need to blast all three values with a single write.
+ 		 */
+@@ -669,7 +680,7 @@
+  * pci_setup_device - fill in class and map information of a device
+  * @dev: the device structure to fill
+  *
+- * Initialize the device structure with information about the device's 
++ * Initialize the device structure with information about the device's
+  * vendor,class,memory and IO-space addresses,IRQ lines etc.
+  * Called at initialisation of the PCI subsystem and by CardBus services.
+  * Returns 0 on success and -1 if unknown type of device (not normal, bridge
+@@ -740,7 +751,7 @@
+ 			goto bad;
+ 		/* The PCI-to-PCI bridge spec requires that subtractive
+ 		   decoding (i.e. transparent) bridge must have programming
+-		   interface code of 0x01. */ 
++		   interface code of 0x01. */
+ 		pci_read_irq(dev);
+ 		dev->transparent = ((dev->class & 0xff) == 1);
+ 		pci_read_bases(dev, 2, PCI_ROM_ADDRESS1);
+diff -ruN linux-2.6.25.20/fs/jffs2/background.c linux-2.6.25.20.working/fs/jffs2/background.c
+--- linux-2.6.25.20/fs/jffs2/background.c	2008-11-10 20:50:34.000000000 +0200
++++ linux-2.6.25.20.working/fs/jffs2/background.c	2009-11-09 09:03:50.751689025 +0200
+@@ -102,6 +102,17 @@
+ 		   with read_inode() is much preferable to having the GC thread
+ 		   get there first. */
+ 		yield();
++		/* Problem - immediately after bootup, the GCD spends a lot
++		 * of time in places like jffs2_kill_fragtree(); so much so
++		 * that userspace processes (like gdm and X) are starved
++		 * despite plenty of cond_resched()s and renicing.  Yield()
++		 * doesn't help, either (presumably because userspace and GCD
++		 * are generally competing for a higher latency resource -
++		 * disk).
++		 * This forces the GCD to slow the hell down.   Pulling an
++		 * inode in with read_inode() is much preferable to having
++		 * the GC thread get there first. */
++		schedule_timeout_interruptible(msecs_to_jiffies(50));
+ 
+ 		/* Put_super will send a SIGKILL and then wait on the sem.
+ 		 */

@@ -1,0 +1,257 @@
+--- a/arch/m68k/lib/uaccess.c	2009-10-09 14:01:59.096618833 +0300
++++ b/arch/m68k/lib/uaccess.c	2009-10-09 13:48:01.000000000 +0300
+@@ -60,6 +60,7 @@
+ }
+ EXPORT_SYMBOL(__generic_copy_from_user);
+ 
++
+ unsigned long __generic_copy_to_user(void __user *to, const void *from,
+ 				     unsigned long n)
+ {
+@@ -226,108 +227,155 @@
+ 
+ #include <asm/cf_uaccess.h>
+ 
++/*Returns number of bytes that could not be copied. On success, this will be zero. */
+ unsigned long __generic_copy_from_user(void *to, const void *from,
+ 		unsigned long n)
+ {
+-    unsigned long tmp;
+-    __asm__ __volatile__
+-	("   tstl %2\n"
+-	 "   jeq 2f\n"
+-	 "1: movel (%1)+,%3\n"
+-	 "   movel %3,(%0)+\n"
+-	 "   subql #1,%2\n"
+-	 "   jne 1b\n"
+-	 "2: movel %4,%2\n"
+-	 "   bclr #1,%2\n"
+-	 "   jeq 4f\n"
+-	 "3: movew (%1)+,%3\n"
+-	 "   movew %3,(%0)+\n"
+-	 "4: bclr #0,%2\n"
+-	 "   jeq 6f\n"
+-	 "5: moveb (%1)+,%3\n"
+-	 "   moveb %3,(%0)+\n"
+-	 "6:\n"
+-	 ".section .fixup,\"ax\"\n"
+-	 "   .even\n"
+-	 "7: movel %2,%%d0\n"
+-	 "71:clrl (%0)+\n"
+-	 "   subql #1,%%d0\n"
+-	 "   jne 71b\n"
+-	 "   lsll #2,%2\n"
+-	 "   addl %4,%2\n"
+-	 "   btst #1,%4\n"
+-	 "   jne 81f\n"
+-	 "   btst #0,%4\n"
+-	 "   jne 91f\n"
+-	 "   jra 6b\n"
+-	 "8: addql #2,%2\n"
+-	 "81:clrw (%0)+\n"
+-	 "   btst #0,%4\n"
+-	 "   jne 91f\n"
+-	 "   jra 6b\n"
+-	 "9: addql #1,%2\n"
+-	 "91:clrb (%0)+\n"
+-	 "   jra 6b\n"
+-	 ".previous\n"
+-	 ".section __ex_table,\"a\"\n"
+-	 "   .align 4\n"
+-	 "   .long 1b,7b\n"
+-	 "   .long 3b,8b\n"
+-	 "   .long 5b,9b\n"
++	unsigned long regs[14];
++	/* %2 refers to n */
++	/* %3-%9/%10-%12 refers to regs*/
++    asm volatile("\n"
++	 "1: cmpi.l #40,%2\n"			/*  %2 ? 40( 10regs * 4bytes)	*/
++	 "   jlt 2f\n"				/*  IF (%2-40) < 0 GOTO 2f; ELSE*/
++	 "10:movem.l (%1),%3-%9/%10-%12\n"	/*  move *from to regs		*/
++	 "11:movem.l %3-%9/%10-%12,(%0)\n"	/*  move regs to *to		*/
++	 "12:lea.l (10*4,%0),%0\n"		/*  to = to+40			*/
++	 "   lea.l (10*4,%1),%1\n"		/*  from = from + 40		*/
++	 "   subi.l #40,%2\n"			/*  n -= 40			*/
++	 "   jra 1b\n"				/*  one more iteration		*/
++	 "2: cmpi.l #4, %2\n"			/*  Can  copy in 4 bytes chunks?*/
++	 "   jlt 3f\n"				/*	No, THEN GOTO 3f	*/
++	 "20:move.l (%1),%3\n"			/*  move *from to reg		*/
++	 "21:move.l %3,(%0)\n"			/*  move reg to *to		*/
++	 "22:lea.l (4,%0),%0\n"			/*  to = to + 4			*/
++	 "   lea.l (4,%1),%1\n"			/*  from = from + 4		*/
++	 "   subq.l #4,%2\n"			/*  n -= 4			*/
++	 "   jra 2b\n"				/*  one more iteration		*/
++	 "3: cmpi.l #2, %2\n"			/* Can copy in 2 bytes chunks?	*/
++	 "   jlt 4f\n"				/*	No, THEN GOTO 4f	*/
++	 "30:move.w (%1),%3\n"			/*  move *from to reg;		*/
++	 "31:move.w %3,(%0)\n"			/*  move reg to *to;		*/
++	 "32:lea.l (2,%0),%0\n"			/*  to = to+2			*/
++	 "   lea.l (2,%1),%1\n"			/*  from = from + 2		*/
++	 "   subq.l #2,%2\n"			/*  n -= 2			*/
++	 "   jra 3b\n"				/*	one more iteration	*/
++	 "4: tst.l %2\n"			/* IF n==0 THEN			*/
++	 "   jeq 5f\n"				/*	GOTO 5f			*/
++	 "40:move.b (%1),%3\n"			/*  move *from to reg		*/
++	 "41:move.b %3,(%0)\n"			/*  move reg to *to		*/
++	 "42:lea.l (1,%0),%0\n"			/*  to = to+4			*/
++	 "   lea.l (1,%1),%1\n"			/*  from = from + 4		*/
++	 "   subq.l #1,%2\n"			/*  n--				*/
++	 "   jra 4b\n"				/*	THEN GOTO 5f		*/
++	 "5:\n"					/* return ***********************/
++	 ".section .fixup,\"ax\"\n"		/* Exception treating routines.	*/
++	 "   .even\n"				/********************************/
++	 "6:  jra 2b\n"				/*  return			*/
++	 "7:  jra 3b\n"				/*  return			*/
++	 "8:  jra 4b\n"				/*  return			*/
++	 "9: move.l %2, %3\n"			/* Clear the remaining bytes	*/
++	 "   clr.b (%0)+\n"			/**/
++	 "  subq.l #1,%3\n"			/**/
++	 "  jne 9b\n"				/**/
++	 "  jra 5b\n"				/*  return			*/
++	 ".previous\n"				/********************************/
++	 ".section __ex_table,\"a\"\n"		/* Exception Table		*/
++	 "   .align 4\n"			/*  Force loop on 0-mod-4 address*/
++	 "   .long 10b, 6b\n"			/**/
++	 "   .long 11b, 6b\n"			/**/
++	 "   .long 12b, 6b\n"			/**/
++
++	 "   .long 20b, 7b\n"			/**/
++	 "   .long 21b, 7b\n"			/**/
++	 "   .long 22b, 7b\n"			/**/
++
++	 "   .long 30b, 8b\n"			/**/
++	 "   .long 31b, 8b\n"			/**/
++	 "   .long 32b, 8b\n"			/**/
++
++	 "   .long 40b, 9b\n"			/**/
++	 "   .long 41b, 9b\n"			/**/
++	 "   .long 42b, 9b\n"			/**/
+ 	 ".previous"
+-	 : "=a"(to), "=a"(from), "=d"(n), "=&d"(tmp)
+-	 : "d"(n & 3), "0"(to), "1"(from), "2"(n/4)
+-	 : "d0", "memory");
++	 : "=a"(to), "=a"(from), "=&d"(n)
++	   , "=&d"(regs[0]), "=&d"(regs[1]), "=&d"(regs[2]), "=&d"(regs[3]), "=&d"(regs[4]), "=&d"(regs[5])
++	   , "=&d"(regs[6]), "=&a"(regs[7]), "=&a"(regs[8]), "=&a"(regs[9])
++	 : "0"(to), "1"(from), "2"(n)
++	 : "memory");
+     return n;
+ }
+ EXPORT_SYMBOL(__generic_copy_from_user);
+ 
+-
+-unsigned long __generic_copy_to_user(void *to, const void *from,
++/*Returns number of bytes that could not be copied. On success, this will be zero. */
++unsigned long __generic_copy_to_user(void __user *to, const void *from,
+ 		unsigned long n)
+ {
+-    unsigned long tmp;
+-    __asm__ __volatile__
+-	("   tstl %2\n"
+-	 "   jeq 3f\n"
+-	 "1: movel (%1)+,%3\n"
+-	 "22:movel %3,(%0)+\n"
+-	 "2: subql #1,%2\n"
+-	 "   jne 1b\n"
+-	 "3: movel %4,%2\n"
+-	 "   bclr #1,%2\n"
+-	 "   jeq 4f\n"
+-	 "   movew (%1)+,%3\n"
+-	 "24:movew %3,(%0)+\n"
+-	 "4: bclr #0,%2\n"
+-	 "   jeq 5f\n"
+-	 "   moveb (%1)+,%3\n"
+-	 "25:moveb %3,(%0)+\n"
+-	 "5:\n"
+-	 ".section .fixup,\"ax\"\n"
+-	 "   .even\n"
+-	 "60:addql #1,%2\n"
+-	 "6: lsll #2,%2\n"
+-	 "   addl %4,%2\n"
+-	 "   jra 5b\n"
+-	 "7: addql #2,%2\n"
+-	 "   jra 5b\n"
+-	 "8: addql #1,%2\n"
+-	 "   jra 5b\n"
+-	 ".previous\n"
+-	 ".section __ex_table,\"a\"\n"
+-	 "   .align 4\n"
+-	 "   .long 1b,60b\n"
+-	 "   .long 22b,6b\n"
+-	 "   .long 2b,6b\n"
+-	 "   .long 24b,7b\n"
+-	 "   .long 3b,60b\n"
+-	 "   .long 4b,7b\n"
+-	 "   .long 25b,8b\n"
+-	 "   .long 5b,8b\n"
++	unsigned long regs[14];
++	/* %2 refers to n */
++	/* %3-%9/%10-%12 refers to regs*/
++    asm volatile("\n"
++	 "1: cmpi.l #40,%2\n"			/*  %2-20 (5regs * 4bytes)	*/
++	 "   jlt 2f\n"				/*  IF (%2-20) < 0 GOTO 2f,ELSE	*/
++	 "10:movem.l (%1),%3-%9/%10-%12\n"	/*  move *from to %3-%7		*/
++	 "11:movem.l %3-%9/%10-%12,(%0)\n"	/*  move %3-%7 to *to		*/
++	 "12:lea.l (10*4,%0),%0\n"		/*  to = to+20			*/
++	 "   lea.l (10*4,%1),%1\n"		/*  from = from + 20		*/
++	 "   subi.l #40,%2\n"			/*  %2 = %2-20			*/
++	 "   jra 1b\n"				/*  one more iteration		*/
++	 "2: cmpi.l #4, %2\n"			/**/
++	 "   jlt 3f\n"				/*	THEN GOTO 3f		*/
++	 "20:move.l (%1),%3\n"			/*  move *from to %3,from++	*/
++	 "21:move.l %3,(%0)\n"			/*  move %3 to *to,to++		*/
++	 "22:lea.l (4,%0),%0\n"			/*  to = to+4			*/
++	 "   lea.l (4,%1),%1\n"			/*  from = from + 4		*/
++	 "   subq.l #4,%2\n"			/*  n--				*/
++	 "   jra 2b\n"				/*  IF n != 0 THEN GOTO 1b	*/
++	 "3: cmpi.l #2, %2\n"			/**/
++	 "   jlt 4f\n"				/*	THEN GOTO 4f		*/
++	 "30:move.w (%1),%3\n"			/*  move *from to %3; from++	*/
++	 "31:move.w %3,(%0)\n"			/*  move %3 to *to; to++	*/
++	 "32:lea.l (2,%0),%0\n"			/*  to = to+4			*/
++	 "   lea.l (2,%1),%1\n"			/*  from = from + 4		*/
++	 "   subq.l #2,%2\n"			/*  n--				*/
++	 "   jra 3b\n"				/*	THEN GOTO 5f		*/
++	 "4: tst.l %2\n"
++	 "   jeq 5f\n"				/*	THEN GOTO 4f		*/
++	 "40:move.b (%1),%3\n"			/*  move *from to %3,from	*/
++	 "41:move.b %3,(%0)\n"			/*  move %3 to *to,to		*/
++	 "42:lea.l (1,%0),%0\n"			/*  to = to+4			*/
++	 "   lea.l (1,%1),%1\n"			/*  from = from + 4		*/
++	 "   subq.l #1,%2\n"			/*  n--				*/
++	 "   jra 4b\n"				/*	THEN GOTO 5f		*/
++	 "5:\n"					/* return ***********************/
++	 " .section .fixup,\"ax\"\n"		/* Exception treating routines.	*/
++	 "   .even\n"				/********************************/
++	 "6:  jra 2b\n"				/*  return			*/
++	 "7:  jra 3b\n"				/*  return			*/
++	 "8:  jra 4b\n"				/*  return			*/
++	 "9:  jra 5b\n"				/*  return			*/
++	 ".previous\n"				/********************************/
++	 ".section __ex_table,\"a\"\n"		/* Exception Table		*/
++	 "   .align 4\n"			/*  Force loop on 0-mod-4 address*/
++	 "   .long 10b, 6b\n"			/**/
++	 "   .long 11b, 6b\n"			/**/
++	 "   .long 12b, 6b\n"			/**/
++
++	 "   .long 20b, 7b\n"			/**/
++	 "   .long 21b, 7b\n"			/**/
++	 "   .long 22b, 7b\n"			/**/
++
++	 "   .long 30b, 8b\n"			/**/
++	 "   .long 31b, 8b\n"			/**/
++	 "   .long 32b, 8b\n"			/**/
++
++	 "   .long 40b, 9b\n"			/**/
++	 "   .long 41b, 9b\n"			/**/
++	 "   .long 42b, 9b\n"			/**/
+ 	 ".previous"
+-	 : "=a"(to), "=a"(from), "=d"(n), "=&d"(tmp)
+-	 : "r"(n & 3), "0"(to), "1"(from), "2"(n / 4)
++	 : "=a"(to), "=a"(from), "=&d"(n)
++	   , "=&d"(regs[0]), "=&d"(regs[1]), "=&d"(regs[2]), "=&d"(regs[3]), "=&d"(regs[4]), "=&d"(regs[5])
++	   , "=&d"(regs[6]), "=&a"(regs[7]), "=&a"(regs[8]), "=&a"(regs[9])
++	 : "0"(to), "1"(from), "2"(n)
+ 	 : "memory");
+     return n;
+ }

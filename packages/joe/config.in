@@ -1,0 +1,35 @@
+config JOE
+    string
+
+choice
+    bool
+    prompt "Version"
+
+
+config JOE_V_3_7
+    bool
+    prompt "3.7"
+
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+
+config JOE_V_snapshot
+    bool
+    prompt "latest snapshot (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+config JOE_V_specific_date
+    bool
+    prompt "<specific date> (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+endchoice
+
+config JOE_VERSION
+    string
+    prompt "Enter date (YYYYMMDD)" if JOE_V_specific_date
+    default "snapshot" if JOE_V_snapshot
+    default "3.7" if JOE_V_3_7
+
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!

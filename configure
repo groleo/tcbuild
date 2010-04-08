@@ -1,0 +1,312 @@
+#! /bin/sh
+
+VERSION=$( cat .version )
+DATE=$( date +%Y%m%d )
+
+# All absolutely required tools, one per line to ease diff.
+# See function 'has_or_abort', below, for syntax
+#  - Hopefully, if gcc is present, then all associated tools will be
+#  - makeinfo for building docs, even if discarded later on
+#  - others obvious... :-/
+#
+# Format of a pattern to check for, one per line:
+#   pattern := var_name : tool_pattern  OR  tool_pattern
+#   tool_pattern := tool_test  OR  tool_pattern || tool_test
+#   tool_test := tool=regexp OR tool
+#   tool := basename of the tool  OR  absolute pathname to the tool
+#   regexp := valid grep(1) extended regular expression, $( tool --version)
+#             will be matched against this regexp.
+#
+# In case a pattern list is given (eg foo || bar || buz), then tests are performed
+# from left to right, stopping at the first matching test (like the shell
+# would parse 'foo || bar || buz' ).
+#
+# Examples:
+#    bash:bash=^GNU bash, version 3\.
+#     - if ${bash} is set and non-null, does nothing
+#     - else ensures that bash exists in the PATH, and that $( bash --version )
+#       matches the regexp '^GNU bash, version 3\.'
+#       - if so, then sets bash="$( which bash )"
+#    autoconf=(GNU Autoconf) || autoconf2.50
+#     - does not look at an existing variable
+#     - ensures that:
+#         - 'autoconf' is to be found in the PATH, and that $( autoconf --version )
+#           matches the regexp '(GNU Autoconf)' (which btw is the signature of
+#           autoconf >= 2.50),
+#       OR that:
+#         - 'autoconf2.50' is to be found in the PATH
+#
+TOOLS_TO_CHECK='
+automake
+awk
+bash:bash=^GNU bash, version [34]\.
+bison
+bzip2
+cat
+wget
+cut
+cvs
+flex
+gcc
+git-apply
+gzip
+install:install=GNU coreutils
+libtool=\(GNU libtool.*\) (2[[:digit:]]*\.|1\.6[[:digit:]]*\.|1\.5\.[2-9][[:digit:]]+)
+make:make=^GNU Make
+makeinfo
+mkimage
+mkfs.jffs2
+patch
+sort
+svn
+tar
+xargs
+zcat
+'
+
+PREFIX_DEFAULT=/usr/local
+PATH=/usr/lib/git-core:$PATH
+BINDIR_set=
+LIBDIR_set=
+DOCDIR_set=
+MANDIR_set=
+LOCAL_set=
+
+do_quit=
+
+# Simply print the error message, and exit. Obvious, he?
+do_error() {
+    echo "${@}"
+    exit 1
+}
+
+# A small function to test for existence of various tools
+# Usage: has_or_abort test_pattern (see top of file, TOOLS_TO_CHECK, for
+#                                   complete pattern format)
+has_or_abort() {
+    local save_IFS
+    local var_name
+    local var_value
+    local tool_pattern
+    local field
+
+    var_name="$( echo "${1}" |"${sed}" -r -e 's/^(([^=:]+):.+|[^:=]+=.+|[^:=]+)$/\2/;' )"
+    field="${var_name:+2}"
+    field="${field:-1}"
+    tool_pattern="$( echo "${1}" |cut -d : -f ${field}- |"${sed}" -r -e 's/ *\|\| */\n/g;' )"
+
+    save_IFS="${IFS}"
+    # Set IFS to \n only
+    IFS='
+'
+    for item in ${tool_pattern}; do
+        case "${item}" in
+            *=*)
+                tool="${item%%=*}"
+                regexp="${item#*=}"
+                ;;
+            *)  tool="${item}"
+                regexp=
+                ;;
+        esac
+
+        printf "Checking for '${tool}'... "
+        if [ -n "${var_name}" ]; then
+            eval var_value='"${'"${var_name}"'}"'
+            if [ -n "${var_value}" ]; then
+                echo "${var_value} (cached)"
+                return 0
+            fi
+        fi
+        where=$( which "${tool}" 2>/dev/null )
+        if [ -z "${where}" ]; then
+            echo "not found"
+            where=
+            continue
+        elif [ -n "${regexp}" ]; then
+            tool_version=$( ${tool} --version 2>&1 )
+            str=$( echo "${tool_version}" |"${grep}" -E "${regexp}" |head -n 1 )
+            if [ -z "${str}" ]; then
+                echo "not found"
+                where=""
+                continue
+            fi
+        fi
+        break
+    done
+    if [ -z "${where}" ]; then
+        for item in ${tool_pattern}; do
+            case "${item}" in
+                *=*)
+                    tool="${item%%=*}"
+                    regexp="${item#*=}"
+                    ;;
+                *)  tool="${item}"
+                    regexp=
+                    ;;
+            esac
+            printf "  could not find '${tool}'"
+            [ -n "${regexp}" ] && printf " matching regexp '${regexp}'"
+            echo
+        done
+        echo "Either you are missing entirely the needed tool,"
+        echo "or the version you have is too old."
+        if [ -n "${var_name}" ]; then
+            echo "You can give the path to this tool using: --with-${var_name}=PATH"
+        fi
+        # FORCE can be set in the environment
+        [ -z "${FORCE}" ] && do_error "Bailing out..."
+    else
+        echo "${where}"
+        if [ -n "${var_name}" ]; then
+            eval ${var_name}='"'"${where}"'"'
+        fi
+	echo "export `echo ${tool} | tr '[\.,\-]' '_'`=${where}" >> mk/_paths.mk
+    fi
+    IFS="${save_IFS}"
+    return 0
+}
+
+# Given an option string and the following argument,
+# echoes the value of the option.
+# If --var=val => echoes val and returns 0, meaning second arg was not consumed
+# If --var val => echoes val and returns non null, meaning second arg was used
+get_optval(){
+    case "$1" in
+        --*=?*)
+            echo "${1#*=}"
+            return 0
+            ;;
+        *)
+            echo "${2}"
+            return 1
+            ;;
+    esac
+}
+
+# The set_xxx functions will set the corresponding configuration variable
+# They return 0 if second arg was not consumed, and non-zero if it was consumed.
+set_prefix() {
+    PREFIX="$( get_optval "$1" "$2" )"
+}
+set_bindir() {
+    BINDIR_set=1
+    BINDIR="$( get_optval "$1" "$2" )"
+}
+set_libdir() {
+    LIBDIR_set=1
+    LIBDIR="$( get_optval "$1" "$2" )"
+}
+set_docdir() {
+    DOCDIR_set=1
+    DOCDIR="$( get_optval "$1" "$2" )"
+}
+set_mandir() {
+    MANDIR_set=1
+    MANDIR="$( get_optval "$1" "$2" )"
+}
+set_tool() {
+    local var_name="${1%%=*}"
+    var_name="${var_name#--with-}"
+    eval ${var_name}="\$( get_optval "$1" "$2" )"
+}
+
+
+#---------------------------------------------------------------------
+# Some sanity checks, now
+
+# We check for grep and sed manually, because they are used in has_or_abort
+printf "Checking for 'grep'... "
+if [ -n "${grep}" ]; then
+    echo "${grep} (cached)"
+else
+    grep="$( which grep 2>/dev/null )"
+    if [ -z "${grep}" ]; then
+        echo "not found"
+    else
+        echo "${grep}"
+        printf "Checking whether '${grep}' supports -E... "
+        if echo 'foo' |"${grep}" -E 'foo' >/dev/null 2>&1; then
+            echo "yes"
+        else
+            echo "no"
+            grep=
+        fi
+    fi
+fi
+if [ -z "${grep}" ]; then
+    echo "Either you are missing entirely the needed tool,"
+    echo "or the version you have is too old."
+    echo "You can give the path to this tool using: --with-grep=PATH"
+    do_error "Bailing out..."
+fi
+
+printf "Checking for 'sed'... "
+if [ -n "${sed}" ]; then
+    echo "${sed} (cached)"
+else
+    sed="$( which sed 2>/dev/null )"
+    if [ -z "${sed}" ]; then
+        echo "not found"
+    else
+        echo "${sed}"
+        printf "Checking whether '${sed}' supports -i and -e... "
+        touch .ct-ng.sed.test
+        if "${sed}" -r -i -e 's/foo/bar/' .ct-ng.sed.test >/dev/null 2>&1; then
+            echo "yes"
+        else
+            echo "no"
+            sed=
+        fi
+        rm -f .ct-ng.sed.test
+    fi
+fi
+if [ -z "${sed}" ]; then
+    echo "Either you are missing entirely the needed tool,"
+    echo "or the version you have is too old."
+    echo "You can give the path to this tool using: --with-sed=PATH"
+    do_error "Bailing out..."
+fi
+echo "export sed=${sed}" >> mk/_paths.mk
+echo "export grep=${grep}" >> mk/_paths.mk
+
+# Check the existence of absolutely required tools
+save_IFS="${IFS}"
+IFS='
+'
+for tool in ${TOOLS_TO_CHECK}; do
+    has_or_abort "${tool}"
+done
+IFS="${save_IFS}"
+
+#---------------------------------------------------------------------
+# Compute the version string
+
+# If this version is a svn snapshot, try to get the revision number
+# If we can't get the revision number, use date
+printf "Computing version string... "
+case "${VERSION}" in
+    *+svn|svn)
+        REVISION="$( LC_ALL=C svnversion )"
+        case "${REVISION}" in
+            exported)
+                VERSION="${VERSION}_unknown@$( date +%Y%m%d.%H%M%S )";;
+            *)
+                URL="$( LC_ALL=C svn info 2>/dev/null   \
+                                 |egrep 'URL: '         \
+                                 |cut -d ' ' -f 2-      \
+                      )"
+                ROOT="$( LC_ALL=C svn info 2>/dev/null      \
+                         |"${grep}" '^Repository Root: '    \
+                         |cut -d ' ' -f 3-                  \
+                       )"
+                VERSION="${VERSION}${URL#${ROOT}}@${REVISION}"
+                ;;
+        esac
+        # Arrange to have no / in the directory name, no need to create an
+        # arbitrarily deep directory structure
+        VERSION="$( echo "${VERSION}" |"${sed}" -r -e 's|/+|_|g;' )"
+        ;;
+esac
+echo "${VERSION}"
+

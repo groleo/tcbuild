@@ -1,0 +1,97 @@
+From 758119b7b51c3435fd15816406dc2be66a3bc648 Mon Sep 17 00:00:00 2001
+From: Kurt Mahan <kmahan@freescale.com>
+Date: Tue, 16 Sep 2008 23:31:06 -0600
+Subject: [PATCH] Add missing symbol exports.
+
+Signed-off-by: Kurt Mahan <kmahan@freescale.com>
+---
+ arch/m68k/coldfire/m547x_8x-dma.c |   10 ++++++++++
+ 1 files changed, 10 insertions(+), 0 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m547x_8x-dma.c b/arch/m68k/coldfire/m547x_8x-dma.c
+index 0f0e1c2..8ade8be 100644
+--- a/arch/m68k/coldfire/m547x_8x-dma.c
++++ b/arch/m68k/coldfire/m547x_8x-dma.c
+@@ -23,6 +23,7 @@
+  * along with this program; if not, write to the Free Software
+  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+  */
++#include <linux/module.h>
+ #include <linux/kernel.h>
+ #include <linux/sched.h>
+ #include <linux/mm.h>
+@@ -290,6 +291,7 @@ int dma_set_initiator(int initiator)
+ 	}
+ 	return 0;
+ }
++EXPORT_SYMBOL(dma_set_initiator);
+ 
+ /**
+  * dma_get_initiator - get the initiator for the given requestor
+@@ -307,6 +309,7 @@ unsigned int dma_get_initiator(int requestor)
+ 	}
+ 	return 0;
+ }
++EXPORT_SYMBOL(dma_get_initiator);
+ 
+ /**
+  * dma_remove_initiator - remove the given initiator from active list
+@@ -323,6 +326,7 @@ void dma_remove_initiator(int requestor)
+ 		}
+ 	}
+ }
++EXPORT_SYMBOL(dma_remove_initiator);
+ 
+ /**
+  * dma_set_channel_fec: find available channel for fec and mark
+@@ -374,6 +378,7 @@ int dma_set_channel(int requestor)
+ 	/* All channels taken */
+ 	return -1;
+ }
++EXPORT_SYMBOL(dma_set_channel);
+ 
+ /**
+  * dma_get_channel - get the channel being initiated by the requestor
+@@ -391,6 +396,7 @@ int dma_get_channel(int requestor)
+ 	}
+ 	return -1;
+ }
++EXPORT_SYMBOL(dma_get_channel);
+ 
+ /**
+  * dma_connect - connect a channel with reference on data
+@@ -407,6 +413,7 @@ int dma_connect(int channel, int address)
+ 	}
+ 	return -1;
+ }
++EXPORT_SYMBOL(dma_connect);
+ 
+ /**
+  * dma_disconnect - disconnect a channel
+@@ -422,6 +429,7 @@ int dma_disconnect(int channel)
+ 	}
+ 	return -1;
+ }
++EXPORT_SYMBOL(dma_disconnect);
+ 
+ /**
+  * dma_remove_channel - remove channel from the active list
+@@ -438,6 +446,7 @@ void dma_remove_channel(int requestor)
+ 		}
+ 	}
+ }
++EXPORT_SYMBOL(dma_remove_channel);
+ 
+ /**
+  * dma_interrupt_handler - dma interrupt handler
+@@ -475,6 +484,7 @@ void dma_remove_channel_by_number(int channel)
+ 	if ((channel < sizeof(used_channel)) && (channel >= 0))
+ 		used_channel[channel] = -1;
+ }
++EXPORT_SYMBOL(dma_remove_channel_by_number);
+ 
+ /**
+  * dma_init - initialize the dma subsystem
+-- 
+1.6.0.1
+

@@ -1,0 +1,88 @@
+From 898b269952d096ce3f990c51b02457c27e16b83c Mon Sep 17 00:00:00 2001
+From: Kurt Mahan <kmahan@freescale.com>
+Date: Sun, 9 Dec 2007 02:25:49 -0700
+Subject: [PATCH] Clean up formatting.
+
+LTIBName: mcfv4e-bitops-cleanup
+Signed-off-by: Kurt Mahan <kmahan@freescale.com>
+---
+ include/asm-m68k/bitops.h |   21 ++++++++++++++-------
+ 1 files changed, 14 insertions(+), 7 deletions(-)
+
+diff --git a/include/asm-m68k/bitops.h b/include/asm-m68k/bitops.h
+index 9888d1b..9617178 100644
+--- a/include/asm-m68k/bitops.h
++++ b/include/asm-m68k/bitops.h
+@@ -436,7 +436,8 @@ static __inline__ int __constant_coldfire_test_and_set_bit(int nr,
+ 	return retval;
+ }
+ #else
+-static __inline__ int __constant_coldfire_test_and_set_bit(int nr,volatile void * vaddr)
++static __inline__ int __constant_coldfire_test_and_set_bit(int nr,
++	volatile void *vaddr)
+ {
+ 	char retval;
+ 	volatile char *p = &((volatile char *)vaddr)[(nr^31) >> 3];
+@@ -474,7 +475,8 @@ static __inline__ void __constant_coldfire_set_bit(int nr,
+ 	     : "+QUd" (*p) : "di" (nr & 7));
+ }
+ #else
+-static __inline__ void __constant_coldfire_set_bit(int nr, volatile void * vaddr)
++static __inline__ void __constant_coldfire_set_bit(int nr,
++	volatile void *vaddr)
+ {
+ 	volatile char *p = &((volatile char *)vaddr)[(nr^31) >> 3];
+ 	__asm__ __volatile__ ("bset %1,(%3)"
+@@ -482,7 +484,8 @@ static __inline__ void __constant_coldfire_set_bit(int nr, volatile void * vaddr
+ }
+ #endif
+ 
+-static __inline__ void __generic_coldfire_set_bit(int nr, volatile void *vaddr)
++static __inline__ void __generic_coldfire_set_bit(int nr,
++	volatile void *vaddr)
+ {
+ 	__asm__ __volatile__ ("bset %1,%0"
+ 	     : "=m" (((volatile char *)vaddr)[(nr^31) >> 3])
+@@ -510,7 +513,8 @@ static __inline__ int __constant_coldfire_test_and_clear_bit(int nr,
+ 	return retval;
+ }
+ #else
+-static __inline__ int __constant_coldfire_test_and_clear_bit(int nr, volatile void *vaddr)
++static __inline__ int __constant_coldfire_test_and_clear_bit(int nr,
++	volatile void *vaddr)
+ {
+ 	char retval;
+ 	volatile char *p = &((volatile char *)vaddr)[(nr^31) >> 3];
+@@ -557,7 +561,8 @@ static __inline__ void __constant_coldfire_clear_bit(int nr,
+ 	     : "+QUd" (*p) : "id" (nr & 7));
+ }
+ #else
+-static __inline__ void __constant_coldfire_clear_bit(int nr, volatile void * vaddr)
++static __inline__ void __constant_coldfire_clear_bit(int nr,
++	volatile void *vaddr)
+ {
+ 	volatile char *p = &((volatile char *)vaddr)[(nr^31) >> 3];
+ 	__asm__ __volatile__ ("bclr %1,(%3)"
+@@ -594,7 +599,8 @@ static __inline__ int __constant_coldfire_test_and_change_bit(int nr,
+ 	return retval;
+ }
+ #else
+-static __inline__ int __constant_coldfire_test_and_change_bit(int nr, volatile void * vaddr)
++static __inline__ int __constant_coldfire_test_and_change_bit(int nr,
++	volatile void *vaddr)
+ {
+ 	char retval;
+ 	volatile char *p = &((volatile char *)vaddr)[(nr^31) >> 3];
+@@ -636,7 +642,8 @@ static __inline__ void __constant_coldfire_change_bit(int nr,
+ 	     : "+QUd" (*p) : "id" (nr & 7));
+ }
+ #else
+-static __inline__ void __constant_coldfire_change_bit(int nr, volatile void * vaddr)
++static __inline__ void __constant_coldfire_change_bit(int nr,
++	volatile void *vaddr)
+ {
+ 	volatile char *p = &((volatile char *)vaddr)[(nr^31) >> 3];
+ 	__asm__ __volatile__ ("bchg %1,(%3)"
+-- 
+1.5.6
+

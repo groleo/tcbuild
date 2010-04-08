@@ -1,0 +1,422 @@
+
+config CC
+    string
+
+config CC_VERSION
+    string
+
+menu "Additional supported languages:"
+config CC_SUPPORT_CXX
+    bool
+
+config CC_SUPPORT_FORTRAN
+    bool
+
+config CC_SUPPORT_JAVA
+    bool
+
+config CC_SUPPORT_ADA
+    bool
+
+config CC_SUPPORT_OBJC
+    bool
+
+config CC_SUPPORT_OBJCXX
+    bool
+
+
+config CC_LANG_CXX
+    bool
+    prompt "C++"
+    default n
+    depends on CC_SUPPORT_CXX
+    help
+      Enable building a C++ compiler.
+
+      Only select this if you know that your specific version of the
+      compiler supports this language.
+
+if ! BARE_METAL
+
+config CC_LANG_FORTRAN
+    bool
+    prompt "Fortran"
+    default n
+    depends on CC_SUPPORT_FORTRAN
+    help
+      Enable building a FORTRAN compiler.
+
+      Only select this if you know that your specific version of the
+      compiler supports this language.
+
+config CC_LANG_JAVA
+    bool
+    prompt "Java"
+    default n
+    depends on CC_SUPPORT_JAVA
+    help
+      Enable building a Java compiler.
+
+      Only select this if you know that your specific version of the
+      compiler supports this language.
+
+config CC_LANG_ADA
+    bool
+    prompt "ADA (EXPERIMENTAL)"
+    default n
+    depends on CC_SUPPORT_ADA
+    depends on EXPERIMENTAL
+    help
+      Enable building an Ada compiler.
+
+      Only select this if you know that your specific version of the
+      compiler supports this language.
+
+config CC_LANG_OBJC
+    bool
+    prompt "Objective-C (EXPERIMENTAL)"
+    default n
+    depends on CC_SUPPORT_OBJC
+    depends on EXPERIMENTAL
+    help
+      Enable building an Objective C compiler.
+
+      Only select this if you know that your specific version of the
+      compiler supports this language.
+
+config CC_LANG_OBJCXX
+    bool
+    prompt "Objective-C++ (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+    default n
+    depends on CC_SUPPORT_OBJCXX
+    help
+      Enable building an Objective C++ compiler.
+
+      Only select this if you know that your specific version of the
+      compiler supports this language.
+
+config CC_LANG_OTHERS
+    string
+    prompt "Other languages (EXPERIMENTAL)"
+    default ""
+    depends on EXPERIMENTAL
+    help
+      Enter here a comma-separated list of languages that you know your compiler
+      supports, besides those listed above.
+
+      Eg. gcc-4.1+ has a toy programming language, treelang. As it is not usefull
+      in real life, it is not available in the selection above.
+
+endif # ! BARE_METAL
+
+endmenu
+# Compiler options
+
+config CC_gcc
+    bool
+    select CC_SUPPORT_CXX
+    select CC_SUPPORT_FORTRAN
+    select CC_SUPPORT_JAVA
+    select CC_SUPPORT_ADA
+    select CC_SUPPORT_OBJC
+    select CC_SUPPORT_OBJCXX
+    help
+      gcc is the full-blown GNU compiler. This is what most people will choose.
+      gcc supports many languages, a powerful code parser, optimised binary
+      output, and lots of other features.
+
+choice
+    bool
+    prompt "Version"
+
+config CC_V_3_2_3
+    bool
+    prompt "3.2.3 (OBSOLETE)"
+    depends on OBSOLETE
+
+config CC_V_3_3_6
+    bool
+    prompt "3.3.6 (OBSOLETE)"
+    depends on OBSOLETE
+
+config CC_V_3_4_6
+    bool
+    prompt "3.4.6 (OBSOLETE)"
+    depends on OBSOLETE
+
+config CC_V_4_0_0
+    bool
+    prompt "4.0.0 (OBSOLETE)"
+    depends on OBSOLETE
+
+config CC_V_4_0_1
+    bool
+    prompt "4.0.1 (OBSOLETE)"
+    depends on OBSOLETE
+
+config CC_V_4_0_2
+    bool
+    prompt "4.0.2 (OBSOLETE)"
+    depends on OBSOLETE
+
+config CC_V_4_0_3
+    bool
+    prompt "4.0.3 (OBSOLETE)"
+    depends on OBSOLETE
+
+config CC_V_4_0_4
+    bool
+    prompt "4.0.4"
+
+config CC_V_4_1_0
+    bool
+    prompt "4.1.0 (OBSOLETE)"
+    depends on OBSOLETE
+
+config CC_V_4_1_1
+    bool
+    prompt "4.1.1 (OBSOLETE)"
+    depends on OBSOLETE
+
+config CC_V_4_1_2
+    bool
+    prompt "4.1.2"
+
+config CC_V_4_2_0
+    bool
+    prompt "4.2.0"
+
+config CC_V_4_2_1
+    bool
+    prompt "4.2.1"
+
+config CC_V_4_2_2
+    bool
+    prompt "4.2.2"
+
+config CC_V_4_2_3
+    bool
+    prompt "4.2.3"
+
+config CC_V_4_2_4
+    bool
+    prompt "4.2.4"
+
+config CC_V_4_3_0
+    bool
+    prompt "4.3.0"
+    select CC_GCC_4_3_or_later
+
+config CC_V_4_3_1
+    bool
+    prompt "4.3.1"
+    select CC_GCC_4_3_or_later
+
+config CC_V_4_3_2
+    bool
+    prompt "4.3.2"
+    select CC_GCC_4_3_or_later
+
+config CC_V_4_3_3
+    bool
+    prompt "4.3.3"
+    select CC_GCC_4_3_or_later
+
+config CC_V_4_4_0
+    bool
+    prompt "4.4.0"
+    select CC_GCC_4_3_or_later
+    select CC_GCC_4_4_or_later
+
+config CC_V_4_4_1
+    bool
+    prompt "4.4.1"
+    select CC_GCC_4_3_or_later
+    select CC_GCC_4_4_or_later
+
+config CC_V_4_3_54
+    bool
+    prompt "4.3-54 CodeSourcery"
+    select CC_GCC_4_3_or_later
+
+
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+config CC_V_snapshot
+    bool
+    prompt "latest snapshot (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+config CC_V_specific_date
+    bool
+    prompt "<specific date> (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+endchoice
+
+config CC_VERSION
+    string
+    prompt "Enter date (YYYYMMDD)" if CC_V_specific_date
+    default "snapshot" if CC_V_snapshot
+    default "3.2.3" if CC_V_3_2_3
+    default "3.3.6" if CC_V_3_3_6
+    default "3.4.6" if CC_V_3_4_6
+    default "4.0.0" if CC_V_4_0_0
+    default "4.0.1" if CC_V_4_0_1
+    default "4.0.2" if CC_V_4_0_2
+    default "4.0.3" if CC_V_4_0_3
+    default "4.0.4" if CC_V_4_0_4
+    default "4.1.0" if CC_V_4_1_0
+    default "4.1.1" if CC_V_4_1_1
+    default "4.1.2" if CC_V_4_1_2
+    default "4.2.0" if CC_V_4_2_0
+    default "4.2.1" if CC_V_4_2_1
+    default "4.2.2" if CC_V_4_2_2
+    default "4.2.3" if CC_V_4_2_3
+    default "4.2.4" if CC_V_4_2_4
+    default "4.3.0" if CC_V_4_3_0
+    default "4.3.1" if CC_V_4_3_1
+    default "4.3.2" if CC_V_4_3_2
+    default "4.3.3" if CC_V_4_3_3
+    default "4.4.0" if CC_V_4_4_0
+    default "4.4.1" if CC_V_4_4_1
+    default "4.3-54" if CC_V_4_3_54
+
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!
+
+config CC_GCC_4_3_or_later
+    bool
+    default n
+
+config USE_SYSROOT
+    bool
+    prompt "Use sysroot'ed toolchain"
+    default y
+    help
+      Use the 'shinny new' sysroot feature of gcc: libraries split between
+      prefix/target/sys-root/lib and prefix/target/sys-root/usr/lib
+      
+      You definitely want to say 'Y' here. Yes you do. I know you do. Say 'Y'.
+
+config SYSROOT_DIR_PREFIX
+    string
+    prompt "sysroot prefix dir (READ HELP)"
+    depends on USE_SYSROOT
+    default ""
+    help
+      *
+      * Unless you realy know you need that, leave it empty!
+      *
+      
+      This string will be interpreted as a directory component to be added
+      to the sysroot path, just before the actual sysroot directory.
+      
+      In fact, the sysroot path is constructed as:
+        ${CT_PREFIX_DIR}/${CT_TARGET}/${CT_SYSROOT_DIR_PREFIX}/sys-root
+
+
+config SHARED_LIBS
+    bool
+    prompt "Build shared libraries"
+    depends on ! BARE_METAL
+    default y
+    help
+      Say 'y' here, unless you don't want shared libraries.
+      
+      You might not want shared libraries if you're building for a target that
+      don't support it (maybe some nommu targets, for example, or bare metal).
+
+
+
+config CC_CXA_ATEXIT
+    bool
+    prompt "Use __cxa_atexit"
+    default y
+    depends on ! BARE_METAL
+    help
+      If you get the missing symbol "__cxa_atexit" when building C++ programs,
+      you might want to try disabling this option.
+
+choice
+    bool
+    prompt "Use sjlj for exceptions"
+    default CC_SJLJ_EXCEPTIONS_CONFIGURE
+    depends on ! BARE_METAL
+
+# This config option is used nowhere in the code on purpose.
+# It only serves as a choice entry to force neither using nor not using sjlj
+config CC_SJLJ_EXCEPTIONS_CONFIGURE
+    bool
+    prompt "Let configure decide"
+    help
+      Let configure decide if setjmp/longjmp should be used to handle
+      exceptions.
+      
+      Choose that if you trust configure to detect the correct settings.
+      This is the default choice.
+
+config CC_SJLJ_EXCEPTIONS_USE
+    bool
+    prompt "Force using sjlj"
+    help
+      Do use setjmp/longjmp for exceptions.
+      This is gcc's --enable-sjlj-exceptions configure switch.
+      
+      Choose that if you want to use setjmp/longjmp to handle exceptions.
+
+config CC_SJLJ_EXCEPTIONS_DONT_USE
+    bool
+    prompt "Force not using sjlj"
+    help
+      Do not use setjmp/longjmp for exceptions.
+      This is gcc's --disable-sjlj-exceptions configure switch.
+      
+      Choose that if you want to not use setjmp/longjmp to handle exceptions.
+
+endchoice
+
+config CC_CORE_EXTRA_CONFIG
+    string
+    prompt "Core gcc extra config"
+    default ""
+    help
+      Extra flags to pass onto ./configure when configuring the core gcc.
+      
+      The core gcc is a stripped down, C-only compiler needed to build
+      the C library. Kinda bootstrap gcc, if you wish.
+
+config CC_EXTRA_CONFIG
+    string
+    prompt "gcc extra config"
+    default ""
+    depends on ! BARE_METAL
+    help
+      Extra flags to pass onto ./configure when configuring gcc.
+
+config CC_PKGVERSION
+    string
+    prompt "gcc ID string"
+    depends on CC_GCC_4_3_or_later
+    default "crosstool-NG-${CT_VERSION}"
+    help
+      Specify a string that identifies your package. You may wish to include
+      a build number or build date. This version string will be included in
+      the output of gcc --version.
+
+      This is passed to the configure flag --with-pkgversion.
+
+config CC_BUGURL
+    string
+    prompt "gcc bug URL"
+    depends on CC_GCC_4_3_or_later
+    default ""
+    help
+      Specify the URL that users should visit if they wish to report a bug.
+
+config CC_LANG_JAVA_USE_ECJ
+    bool
+    default y
+    depends on CC_LANG_JAVA
+    depends on CC_GCC_4_3_or_later

@@ -1,0 +1,412 @@
+diff -ruN a/arch/m68k/Kconfig b/arch/m68k/Kconfig
+--- a/arch/m68k/Kconfig	2009-11-06 10:49:21.000000000 +0200
++++ b/arch/m68k/Kconfig	2009-11-06 10:55:12.210089524 +0200
+@@ -467,6 +467,18 @@
+ 	default 0x00000000 if M54455EVB
+ 	default 0xE0000000 if M547X_8X
+ 
++config DMA_BASE
++        hex
++        depends on COLDFIRE
++        default 0xef000000
++
++config DMA_SIZE
++        hex
++        depends on COLDFIRE
++        default 0x1000000 if M5445X
++        default 0x800000 if M547X_8X
++
++
+ config VDSO
+         bool "Support VDSO page"
+         depends on MMU && M5445X
+diff -ruN a/arch/m68k/coldfire/config.c b/arch/m68k/coldfire/config.c
+--- a/arch/m68k/coldfire/config.c	2009-11-06 10:49:21.000000000 +0200
++++ b/arch/m68k/coldfire/config.c	2009-11-06 10:58:34.502088257 +0200
+@@ -64,6 +64,11 @@
+ static int irq_enable[NR_IRQS];
+ unsigned long num_pages;
+ 
++/* cf dma physical addresses */
++unsigned long cf_dma_base;
++unsigned long cf_dma_end;
++unsigned long cf_dma_size;
++
+ /* ethernet mac addresses from uboot */
+ unsigned char uboot_enet0[6];
+ unsigned char uboot_enet1[6];
+@@ -421,7 +426,28 @@
+ 	availmem += init_bootmem_node(NODE_DATA(0), min_low_pfn,
+ 		base_pfn, max_low_pfn);
+ 	availmem = PAGE_ALIGN(availmem);
++
++        printk(KERN_INFO "** availmem=0x%lx  pa(am)=0x%lx\n",
++                        availmem, __pa(availmem));
++        printk(KERN_INFO "** mstart=0x%lx  mend=0x%lx\n",
++                        memory_start, memory_end);
++        printk(KERN_INFO "bpfn=0x%lx minpfn=0x%lx maxpfn=0x%lx\n",
++                        base_pfn, min_low_pfn, max_low_pfn);
++
+ 	free_bootmem(__pa(availmem), memory_end - (availmem));
++
++        /* configure physical dma area */
++        cf_dma_base = __pa(PAGE_ALIGN(memory_start));
++        cf_dma_size = CONFIG_DMA_SIZE;
++        cf_dma_end = CONFIG_SDRAM_BASE + cf_dma_size - 1;
++
++        printk(KERN_INFO "dma: phys base=0x%lx  phys end=0x%lx"
++	       "  virt base=0x%x\n",
++               cf_dma_base, cf_dma_end, CONFIG_DMA_BASE);
++
++        printk(KERN_INFO "mdma=0x%x  pa(mdma)=0x%lx\n",
++                        MAX_DMA_ADDRESS, __pa(MAX_DMA_ADDRESS));
++
+ }
+ 
+ void __init config_coldfire(void)
+diff -ruN a/arch/m68k/coldfire/head.S b/arch/m68k/coldfire/head.S
+--- a/arch/m68k/coldfire/head.S	2009-11-06 10:49:20.000000000 +0200
++++ b/arch/m68k/coldfire/head.S	2009-11-06 11:21:01.950088339 +0200
+@@ -5,6 +5,11 @@
+  *    Matt Waddel Matt.Waddel@freescale.com
+  *    Kurt Mahan kmahan@freescale.com
+  *  Copyright Freescale Semiconductor, Inc. 2007, 2008
++ *
++ *  Create DMA memory area (no cache) by
++ *    Lanttor.Guo@freescale.com
++ *
++ *  Copyright (C) 2007-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  *  Phys kernel mapping Copyright Daniel Krueger, SYSTEC electornic GmbH 2008
+  *
+  *  This program is free software; you can redistribute it and/or modify
+@@ -104,9 +109,9 @@
+ #define ACR3_DEFAULT	#0x400FA008   /* SDRAM cached */
+ #elif defined(CONFIG_M547X_8X)
+ #define ACR0_DEFAULT	#0xF00FA048   /* System Regs */
+-#define ACR1_DEFAULT	#0x000FA048   /* SDRAM uncached */
++#define ACR1_DEFAULT	#0x000FA028   /* SDRAM data chache copy-back */
+ #define ACR2_DEFAULT	#0x00000000   /* Not mapped */
+-#define ACR3_DEFAULT	#0x000FA008   /* SDRAM cached */
++#define ACR3_DEFAULT	#0x000FA028   /* SDRAM code cache copy-back */
+ #endif
+ #endif
+ 
+@@ -186,7 +191,6 @@
+ #endif
+ .endm
+ 
+-#if CONFIG_SDRAM_BASE != PAGE_OFFSET
+ /*
+ 	mmu_map  -  creates a new TLB entry
+ 
+@@ -256,7 +260,6 @@
+ 	movew	\temp_data_reg, (MMUOR)
+ 1:	
+ .endm	/* mmu_unmap */
+-#endif /* CONFIG_SDRAM_BASE != PAGE_OFFSET */
+ 
+ /* .text */
+ .section ".text.head","ax"
+@@ -546,6 +549,42 @@
+ #endif
+ #endif /* CONFIG_SDRAM_BASE != PAGE_OFFSET */
+ 
++/* create dma memory mirror TLB mapping */
++#if defined(CONFIG_M547X_8X)
++	mmu_map (CONFIG_DMA_BASE + 0*1024*1024), \
++		(CONFIG_SDRAM_BASE + 0*1024*1024), 0, 0, \
++		MMUTR_SG, MMUDR_SZ1M, MMUDR_DNCP, MMUDR_SP, MMUDR_R, \
++		MMUDR_W, 0, MMUDR_LK, %d0
++	mmu_map (CONFIG_DMA_BASE + 1*1024*1024), \
++		(CONFIG_SDRAM_BASE + 1*1024*1024), 0, 0, \
++		MMUTR_SG, MMUDR_SZ1M, MMUDR_DNCP, MMUDR_SP, MMUDR_R, \
++		MMUDR_W, 0, MMUDR_LK, %d0
++	mmu_map (CONFIG_DMA_BASE + 2*1024*1024), \
++		(CONFIG_SDRAM_BASE + 2*1024*1024), 0, 0, \
++		MMUTR_SG, MMUDR_SZ1M, MMUDR_DNCP, MMUDR_SP, MMUDR_R, \
++		MMUDR_W, 0, MMUDR_LK, %d0
++	mmu_map (CONFIG_DMA_BASE + 3*1024*1024), \
++		(CONFIG_SDRAM_BASE + 3*1024*1024), 0, 0, \
++		MMUTR_SG, MMUDR_SZ1M, MMUDR_DNCP, MMUDR_SP, MMUDR_R, \
++		MMUDR_W, 0, MMUDR_LK, %d0
++	mmu_map (CONFIG_DMA_BASE + 4*1024*1024), \
++		(CONFIG_SDRAM_BASE + 4*1024*1024), 0, 0, \
++		MMUTR_SG, MMUDR_SZ1M, MMUDR_DNCP, MMUDR_SP, MMUDR_R, \
++		MMUDR_W, 0, MMUDR_LK, %d0
++	mmu_map (CONFIG_DMA_BASE + 5*1024*1024), \
++		(CONFIG_SDRAM_BASE + 5*1024*1024), 0, 0, \
++		MMUTR_SG, MMUDR_SZ1M, MMUDR_DNCP, MMUDR_SP, MMUDR_R, \
++		MMUDR_W, 0, MMUDR_LK, %d0
++	mmu_map (CONFIG_DMA_BASE + 6*1024*1024), \
++		(CONFIG_SDRAM_BASE + 6*1024*1024), 0, 0, \
++		MMUTR_SG, MMUDR_SZ1M, MMUDR_DNCP, MMUDR_SP, MMUDR_R, \
++		MMUDR_W, 0, MMUDR_LK, %d0
++	mmu_map (CONFIG_DMA_BASE + 7*1024*1024), \
++		(CONFIG_SDRAM_BASE + 7*1024*1024), 0, 0, \
++		MMUTR_SG, MMUDR_SZ1M, MMUDR_DNCP, MMUDR_SP, MMUDR_R, \
++		MMUDR_W, 0, MMUDR_LK, %d0
++#endif
++
+ 	/* Turn on MMU */
+ 	movel	#(MMUCR_EN),%a0
+ 	movel	%a0,MMUCR
+diff -ruN a/arch/m68k/coldfire/signal.c b/arch/m68k/coldfire/signal.c
+--- a/arch/m68k/coldfire/signal.c	2009-11-06 10:49:20.000000000 +0200
++++ b/arch/m68k/coldfire/signal.c	2009-11-06 11:21:52.130588553 +0200
+@@ -608,9 +608,19 @@
+ 
+ static inline void push_cache(unsigned long vaddr)
+ {
+-#if 0 
+-// JKM -- need to add into the old cpushl cache stuff
+-	cf_cache_push(__pa(vaddr), 8);
++#ifdef CONFIG_M5445X
++        pgd_t *pdir;
++        pmd_t *pmdp;
++        pte_t *ptep;
++        unsigned long paddr;
++
++        pdir = pgd_offset(current->mm, vaddr);
++        pmdp = pmd_offset(pdir, vaddr);
++        ptep = pte_offset_map(pmdp, vaddr);
++        paddr = ((pte_val(*ptep) & PAGE_MASK) | (vaddr & ~PAGE_MASK));
++        cf_icache_flush_range(paddr, paddr + 8);
++#elif CONFIG_M547X_8X
++        flush_icache_range(vaddr, vaddr + 8);
+ #endif
+ }
+ 
+diff -ruN a/arch/m68k/mm/cf-mmu.c b/arch/m68k/mm/cf-mmu.c
+--- a/arch/m68k/mm/cf-mmu.c	2009-11-06 10:49:21.000000000 +0200
++++ b/arch/m68k/mm/cf-mmu.c	2009-11-06 11:23:05.585588603 +0200
+@@ -98,17 +98,17 @@
+ 	pg_dir = swapper_pg_dir;
+ 	memset(swapper_pg_dir, 0, sizeof (swapper_pg_dir));
+ 
+-	size = num_pages * sizeof(pte_t);  
++	size = num_pages * sizeof(pte_t);
+ 	size = (size + PAGE_SIZE) & ~(PAGE_SIZE-1);
+ 	next_pgtable = (unsigned long)alloc_bootmem_pages(size);
+ 
+-	bootmem_end = (next_pgtable + size + PAGE_SIZE) & PAGE_MASK; 
+-	pg_dir += PAGE_OFFSET >> PGDIR_SHIFT; 
++	bootmem_end = (next_pgtable + size + PAGE_SIZE) & PAGE_MASK;
++	pg_dir += PAGE_OFFSET >> PGDIR_SHIFT;
+ 
+ 	address = PAGE_OFFSET;
+-	while (address < (unsigned long)high_memory) 
++	while (address < (unsigned long)high_memory)
+ 	{
+-    		pg_table = (pte_t *)next_pgtable; 
++    		pg_table = (pte_t *)next_pgtable;
+ 	    	next_pgtable += PTRS_PER_PTE * sizeof (pte_t);
+ 		pgd_val(*pg_dir) = (unsigned long) pg_table;
+ 		pg_dir++;
+@@ -124,7 +124,7 @@
+ 			address += PAGE_SIZE;
+ 		}
+ 	}
+-	
++
+ 	current->mm = NULL;
+ 
+ 	/* clear zones */
+@@ -134,10 +134,11 @@
+ 	/* allocate the bottom 32M (0x40x 0x41x) to DMA - head.S marks them NO CACHE */
+ 	/* JKM - this should be changed to allocate from the TOP (0x4f,0x4e) but the
+ 	 * allocator is being a bit challenging */
+-        zones_size[ZONE_DMA] = (32*1024*1024) >> PAGE_SHIFT;
++        zones_size[ZONE_DMA] = CONFIG_DMA_SIZE >> PAGE_SHIFT;
++        zones_size[ZONE_NORMAL] = (((unsigned long)high_memory -
++                                    PAGE_OFFSET) >> PAGE_SHIFT) -
++                                   zones_size[ZONE_DMA];
+ 
+-	/* allocate the rest to NORMAL - head.S marks them CACHE */
+-	zones_size[ZONE_NORMAL] = (((unsigned long)high_memory - PAGE_OFFSET) >> PAGE_SHIFT) - zones_size[0];
+ 
+ 	free_area_init(zones_size);
+ }
+@@ -171,18 +172,18 @@
+ 	    local_irq_restore(flags);
+ 	    return (-1);
+ 	}
+-	    
++
+     	pmd = pmd_offset(pgd, mmuar);
+     	if (pmd_none(*pmd)) {
+ 	    local_irq_restore(flags);
+ 	    return (-1);
+-	}	
+-    
++	}
++
+ 	pte = (KMAPAREA(mmuar)) ? pte_offset_kernel(pmd, mmuar)
+ 	                       : pte_offset_map(pmd, mmuar);
+     	if (pte_none(*pte) || !pte_present(*pte)) {
+ 	    local_irq_restore(flags);
+-	    return (-1);		
++	    return (-1);
+ 	}
+ 
+ 	if (write) {
+@@ -192,7 +193,7 @@
+ 	    }
+     	    set_pte(pte, pte_mkdirty(*pte));
+ 	}
+-	
++
+         set_pte(pte, pte_mkyoung(*pte));
+         asid = cpu_context(mm) & 0xff;
+         if (!pte_dirty(*pte) && !KMAPAREA(mmuar))
+@@ -202,10 +203,10 @@
+                | (((int)(pte->pte) & (int)CF_PAGE_MMUTR_MASK ) >> CF_PAGE_MMUTR_SHIFT)
+                | MMUTR_V;
+ 
+-        *MMUDR = (pte_val(*pte) & PAGE_MASK) 
++        *MMUDR = (pte_val(*pte) & PAGE_MASK)
+ 	       | ((pte->pte) & CF_PAGE_MMUDR_MASK)
+                | MMUDR_SZ8K | MMUDR_X;
+-	    
++
+ 	if ( dtlb )
+     	    *MMUOR = MMUOR_ACC | MMUOR_UAA;
+ 	else
+@@ -214,7 +215,7 @@
+ 	asm("nop");
+ 
+ #ifdef DEBUG
+-	printk("cf_tlb_miss: va=%lx, pa=%lx\n", (mmuar & PAGE_MASK), 
++	printk("cf_tlb_miss: va=%lx, pa=%lx\n", (mmuar & PAGE_MASK),
+ 		  (pte_val(*pte)  & PAGE_MASK));
+ #endif
+ 	local_irq_restore(flags);
+diff -ruN a/include/asm-m68k/cf_pgalloc.h b/include/asm-m68k/cf_pgalloc.h
+--- a/include/asm-m68k/cf_pgalloc.h	2009-11-06 10:49:20.000000000 +0200
++++ b/include/asm-m68k/cf_pgalloc.h	2009-11-06 11:33:14.145588384 +0200
+@@ -16,7 +16,8 @@
+ extern inline pte_t *pte_alloc_one_kernel(struct mm_struct *mm,
+ 	unsigned long address)
+ {
+-	unsigned long page = __get_free_page(GFP_DMA|__GFP_REPEAT);
++	unsigned long page = __get_free_page(GFP_KERNEL|__GFP_REPEAT);
++
+ 
+ 	if (!page)
+ 		return NULL;
+@@ -52,7 +53,7 @@
+ static inline struct page *pte_alloc_one(struct mm_struct *mm,
+ 	unsigned long address)
+ {
+-	struct page *page = alloc_pages(GFP_DMA|__GFP_REPEAT, 0);
++	struct page *page = alloc_pages(GFP_KERNEL|__GFP_REPEAT, 0);
+ 	pte_t *pte;
+ 
+ 	if (!page)
+@@ -90,7 +91,7 @@
+ {
+      pgd_t *new_pgd;
+ 
+-     new_pgd = (pgd_t *)__get_free_page(GFP_DMA | __GFP_NOWARN);
++     new_pgd = (pgd_t *)__get_free_page(GFP_KERNEL | __GFP_NOWARN);
+      if (!new_pgd)
+ 	     return NULL;
+      memcpy(new_pgd, swapper_pg_dir, PAGE_SIZE);
+diff -ruN a/include/asm-m68k/dma.h b/include/asm-m68k/dma.h
+--- a/include/asm-m68k/dma.h	2009-11-06 10:49:19.000000000 +0200
++++ b/include/asm-m68k/dma.h	2009-11-06 11:34:22.501090935 +0200
+@@ -3,7 +3,11 @@
+ 
+ /* it's useless on the m68k, but unfortunately needed by the new
+    bootmem allocator (but this should do it for this) */
++#if defined(CONFIG_M5445X) || defined(CONFIG_M547X_8X)
++#define MAX_DMA_ADDRESS 0xefffffff
++#else
+ #define MAX_DMA_ADDRESS PAGE_OFFSET
++#endif
+ 
+ #ifndef CONFIG_COLDFIRE
+ #define MAX_DMA_CHANNELS 8
+diff -ruN a/include/asm-m68k/page.h b/include/asm-m68k/page.h
+--- a/include/asm-m68k/page.h	2009-11-06 10:49:21.000000000 +0200
++++ b/include/asm-m68k/page.h	2009-11-06 11:39:25.389588605 +0200
+@@ -121,21 +121,51 @@
+ #define WANT_PAGE_VIRTUAL
+ 
+ #if defined(CONFIG_COLDFIRE)
++
++extern unsigned long cf_dma_base;
++extern unsigned long cf_dma_end;
++
+ static inline unsigned long ___pa(void *vaddr)
+ {
+ #if CONFIG_SDRAM_BASE != PAGE_OFFSET
+ 	return (((unsigned long)vaddr & 0x0fffffff) + CONFIG_SDRAM_BASE);
+ #else
++	if ((unsigned long)vaddr >= CONFIG_DMA_BASE &&
++	    (unsigned long)vaddr < (CONFIG_DMA_BASE + CONFIG_DMA_SIZE)) {
++		/* address is in carved out DMA range */
++		return ((unsigned long)vaddr - CONFIG_DMA_BASE)
++			+ CONFIG_SDRAM_BASE;
++        }
++	else if ((unsigned long)vaddr >= PAGE_OFFSET &&
++		 (unsigned long)vaddr < (PAGE_OFFSET + CONFIG_SDRAM_SIZE)) {
++		/* normal mapping */
++		return ((unsigned long)vaddr - PAGE_OFFSET)
++			+ CONFIG_SDRAM_BASE;
++	}
++
+ 	return (unsigned long)vaddr;
+ #endif
+ }
+ #define __pa(vaddr)	___pa((void *)(vaddr))
+ 
++/*
++ * Convert a phys to a virt
++ */
+ static inline void *__va(unsigned long paddr)
+ {
+ #if CONFIG_SDRAM_BASE != PAGE_OFFSET
+ 	return (void *)((paddr & 0x0fffffff) + PAGE_OFFSET);
+ #else
++	if (paddr >= cf_dma_base && paddr <= cf_dma_end) {
++		/* mapped address for DMA */
++		return (void *)((paddr - CONFIG_SDRAM_BASE)
++			+ CONFIG_DMA_BASE);
++	}
++	else if (paddr >= cf_dma_end &&
++		 paddr < (CONFIG_SDRAM_BASE + CONFIG_SDRAM_SIZE)) {
++		/* normal mapping */
++		return (void *)((paddr - CONFIG_SDRAM_BASE) + PAGE_OFFSET);
++	}
+ 	return (void *)paddr;
+ #endif
+ }
+@@ -242,7 +272,16 @@
+ 	((__p) - pgdat->node_mem_map) + pgdat->node_start_pfn;		\
+ })
+ 
++#ifdef CONFIG_COLDFIRE
++#define virt_addr_valid(kaddr)  ( ((void *)(kaddr) >= (void *)PAGE_OFFSET && \
++                                (void *)(kaddr) < high_memory) || \
++                                ((void *)(kaddr) >= (void*)CONFIG_DMA_BASE && \
++                                (void *)(kaddr) < (void*)(CONFIG_DMA_BASE+CONFIG_DMA_SIZE)))
++
++#else
+ #define virt_addr_valid(kaddr)	((void *)(kaddr) >= (void *)PAGE_OFFSET && (void *)(kaddr) < high_memory)
++#endif
++
+ #define pfn_valid(pfn)		virt_addr_valid(pfn_to_virt(pfn))
+ 
+ #endif /* __ASSEMBLY__ */
+diff -ruN a/include/asm-m68k/processor.h b/include/asm-m68k/processor.h
+--- a/include/asm-m68k/processor.h	2009-11-06 10:49:17.000000000 +0200
++++ b/include/asm-m68k/processor.h	2009-11-06 11:40:20.145088408 +0200
+@@ -66,7 +66,7 @@
+ #if !defined(CONFIG_SUN3) && !defined(CONFIG_COLDFIRE)
+ #define TASK_UNMAPPED_BASE     0xC0000000UL
+ #elif defined(CONFIG_COLDFIRE)
+-#define TASK_UNMAPPED_BASE     0x80000000UL
++#define TASK_UNMAPPED_BASE     0x50000000UL
+ #else /* CONFIG_SUN3 */
+ #define TASK_UNMAPPED_BASE	0x0A000000UL
+ #endif

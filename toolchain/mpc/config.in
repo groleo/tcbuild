@@ -1,0 +1,31 @@
+# MPC options
+
+config MPC
+    string
+    default "mpc" if CC_GCC_4_3_or_later
+
+choice
+    bool
+    prompt "MPC version"
+
+config MPC_V_0_8_1
+    bool
+    prompt "0.8.1"
+
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+endchoice
+
+config MPC_VERSION
+    string
+    default "0.8.1" if MPC_V_0_8_1
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!
+
+config MPC_CHECK
+    bool
+    prompt "Check MPC"
+    default y
+    help
+      It is highly recommended that 'make check' is run against the newly built
+      MPC library. See http://gmplib.org/

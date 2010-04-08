@@ -1,0 +1,35 @@
+config LSOF
+    string
+
+choice
+    bool
+    prompt "Version"
+
+
+config LSOF_V_4_81
+    bool
+    prompt "4.81"
+
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+
+config LSOF_V_snapshot
+    bool
+    prompt "latest snapshot (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+config LSOF_V_specific_date
+    bool
+    prompt "<specific date> (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+endchoice
+
+config LSOF_VERSION
+    string
+    prompt "Enter date (YYYYMMDD)" if LSOF_V_specific_date
+    default "snapshot" if LSOF_V_snapshot
+    default "4.81" if LSOF_V_4_81
+
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!

@@ -1,0 +1,44 @@
+config AXTLS
+    string
+
+choice
+    bool
+    prompt "Version"
+
+
+config AXTLS_V_1_2_2
+    bool
+    prompt "1.2.2"
+
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+
+config AXTLS_V_snapshot
+    bool
+    prompt "latest snapshot (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+config AXTLS_V_specific_date
+    bool
+    prompt "<specific date> (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+endchoice
+
+config AXTLS_VERSION
+    string
+    prompt "Enter date (YYYYMMDD)" if AXTLS_V_specific_date
+    default "snapshot" if AXTLS_V_snapshot
+    default "1.2.2" if AXTLS_V_1_2_2
+
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!
+
+config AXTLS_CONFIG_FILE
+    string
+    prompt "Configuration file"
+    default "${CT_PKG_DIR}/axTLS/axTLS.config"
+    help
+      Path to the configuration file.
+      Default is "${CT_PKG_DIR}/axTLS/axTLS.config"
+      You _must_ provide one (for now).

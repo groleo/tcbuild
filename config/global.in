@@ -1,0 +1,31 @@
+# Overall toolchain configuration: paths, jobs, etc...
+
+menu "Chainbuilder Options"
+
+source "config/ct-behave.in"
+source "config/download.in"
+source "config/paths.in"
+source "config/extract.in"
+source "config/build-behave.in"
+source "config/logging.in"
+
+config BASE
+	string
+	default "y"
+config DEVS
+	string
+	default "y"
+config LIBC
+	string
+	default "y"
+config MKFS
+	string
+	default "y"
+config STRIP
+	string
+	default "y"
+config FINISH
+	string
+	default "y"
+
+endmenu

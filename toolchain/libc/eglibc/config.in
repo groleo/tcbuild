@@ -1,0 +1,147 @@
+# eglibc options
+config LIBC
+    string
+
+config LIBC_eglibc
+    bool
+    select LIBC_SUPPORT_LINUXTHREADS
+    help
+      The de-facto standard for embeded linux systems.
+      Highly configurable, thus as feature-rich as you need, without
+      compromising for size.
+
+choice
+    bool
+    prompt "eglibc version"
+
+config LIBC_V_1_9_28_3
+    bool
+    prompt "0.9.28.3"
+
+config LIBC_V_1_9_29
+    bool
+    prompt "0.9.29"
+
+config LIBC_V_1_9_30
+    bool
+    prompt "0.9.30"
+
+config LIBC_V_1_9_30_1
+    bool
+    prompt "0.9.30.1"
+
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+
+config LIBC_V_snapshot
+    bool
+    prompt "latest snapshot (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+config LIBC_V_specific_date
+    bool
+    prompt "<specific date> (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+endchoice
+
+config LIBC_VERSION
+    string
+    prompt "Enter date (YYYYMMDD)" if LIBC_V_specific_date
+    default "snapshot" if LIBC_V_snapshot
+    default "0.9.28" if LIBC_V_0_9_28
+    default "0.9.28.1" if LIBC_V_0_9_28_1
+    default "0.9.28.2" if LIBC_V_0_9_28_2
+    default "0.9.28.3" if LIBC_V_0_9_28_3
+    default "0.9.29" if LIBC_V_0_9_29
+    default "0.9.30" if LIBC_V_0_9_30
+    default "0.9.30.1" if LIBC_V_0_9_30_1
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!
+
+config LIBC_EGLIBC_PARALLEL
+    bool
+    prompt "Build eglibc in //" if LIBC_V_snapshot || LIBC_V_specific_date
+    default n
+    help
+      Build eglibc using parallel jobs.
+      Some 'old' versions won't build in //, but it works starting with
+      0.9.30 release candidates.
+
+choice
+    bool
+    prompt "eglibc verbosity:"
+    default LIBC_EGLIBC_VERBOSITY_0
+
+config LIBC_EGLIBC_VERBOSITY_0
+    bool
+    prompt "Simplified"
+    help
+      Print simplified command lines.
+
+config LIBC_EGLIBC_VERBOSITY_1
+    bool
+    prompt "Full commands"
+    help
+      Print full command lines.
+
+endchoice
+
+config LIBC_EGLIBC_VERBOSITY
+    string
+    default ""      if LIBC_EGLIBC_VERBOSITY_0
+    default "V=1"   if LIBC_EGLIBC_VERBOSITY_1
+
+choice
+    bool
+    prompt "Debug level"
+    default LIBC_EGLIBC_DEBUG_LEVEL_0
+
+config LIBC_EGLIBC_DEBUG_LEVEL_0
+    bool
+    prompt "none"
+
+config LIBC_EGLIBC_DEBUG_LEVEL_1
+    bool
+    prompt "minimal"
+
+config LIBC_EGLIBC_DEBUG_LEVEL_2
+    bool
+    prompt "all"
+
+endchoice
+
+config LIBC_EGLIBC_DEBUG_LEVEL
+    int
+    default 0 if LIBC_EGLIBC_DEBUG_LEVEL_0
+    default 1 if LIBC_EGLIBC_DEBUG_LEVEL_1
+    default 2 if LIBC_EGLIBC_DEBUG_LEVEL_2
+
+config LIBC_EGLIBC_BUILD_CROSS_LDD
+    bool
+    prompt "Build cross-ldd"
+    default y
+    help
+      Say 'y' here to build a cross-ldd to run in the host.
+
+      Building a cross-ldd only works on ELF systems, that is,
+      if you build under Cygwin, you *must* say 'n' here.
+
+config LIBC_EGLIBC_CONFIG_FILE
+    string
+    prompt "Configuration file"
+    default "${CT_TLC_DIR}/libc/eglibc/eglibc.config"
+    help
+      Path to the configuration file.
+      Default is "${CT_TLC_DIR}/libc/eglibc/eglibc.config"
+      You _must_ provide one (for now).
+
+config LIBC_EGLIBC_LOCALES
+    bool
+    prompt "Add support for locales"
+    default n
+    help
+      Say y if you want eglibc to support localisation.
+
+      Note that seems to be broken on recent eglibc releases.
+

@@ -1,0 +1,28 @@
+#! /usr/bin/python
+
+import subprocess
+import re
+import sys
+import os
+
+if len(sys.argv) < 3:
+	print 'No action specified.'
+	sys.exit()
+
+print sys.argv[1]
+subp = subprocess.Popen([sys.argv[1],'--help=short'],stdin=subprocess.PIPE, stdout=subprocess.PIPE,close_fds=True)
+(pout,perr)=subp.communicate()
+
+
+outfile = open(sys.argv[2], 'w')
+outfile.write("mainmenu \""+sys.argv[1]+"\"\n")
+outfile.write("menu \""+sys.argv[1]+"\"\n")
+for line in pout.split('\n'):
+	res=re.match('\s+--([a-zA-Z0-9_\-]*)\s+(.*)', line)
+	if res is not None:
+		outfile.write("config "+res.group(1)+"\n")
+		outfile.write("\tbool \""+res.group(1)+'"\n')
+		outfile.write("\thelp\n\t  "+res.group(2)+"\n\n")
+
+outfile.write("endmenu\n")
+outfile.close()

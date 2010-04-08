@@ -1,0 +1,47 @@
+From 647ad364e65d132b7aa4b628962ec3c581389cc5 Mon Sep 17 00:00:00 2001
+From: Kurt Mahan <kmahan@freescale.com>
+Date: Wed, 3 Dec 2008 10:31:18 -0700
+Subject: [PATCH] Align nfs_data to PAGE_SIZE.
+
+Signed-off-by: Kurt Mahan <kmahan@freescale.com>
+LTIBName: mcfv4e-align-nfsdata
+---
+ fs/nfs/nfsroot.c |   14 ++++++++++++++
+ 1 files changed, 14 insertions(+), 0 deletions(-)
+
+diff --git a/fs/nfs/nfsroot.c b/fs/nfs/nfsroot.c
+index 531379d..cc23755 100644
+--- a/fs/nfs/nfsroot.c
++++ b/fs/nfs/nfsroot.c
+@@ -105,7 +105,17 @@ static __be32 servaddr __initdata = 0;
+ static char nfs_path[NFS_MAXPATHLEN] __initdata = { 0, };
+ 
+ /* NFS-related data */
++#ifdef CONFIG_COLDFIRE
++/* On V4 Coldfire nfs_data is allocated near the end of a page and
++ * the structure crosses a page boundary.  This causes problems in
++ * copy_mount_options.  The solution is to page align it.
++ */
++static struct nfs_mount_data nfs_data
++	__attribute__ ((section(".init.data"), aligned(PAGE_SIZE)))
++	= { 0, };/* NFS mount info */
++#else
+ static struct nfs_mount_data nfs_data __initdata = { 0, };/* NFS mount info */
++#endif
+ static int nfs_port __initdata = 0;		/* Port to connect to for NFS */
+ static int mount_port __initdata = 0;		/* Mount daemon port number */
+ 
+@@ -176,6 +186,10 @@ static int __init root_nfs_parse(char *name, char *buf)
+ 	substring_t args[MAX_OPT_ARGS];
+ 	int option;
+ 
++#ifdef CONFIG_COLDFIRE
++printk(KERN_INFO "**** nfs_data = 0x%p\n", &nfs_data);
++#endif
++
+ 	if (!name)
+ 		return 1;
+ 
+-- 
+1.6.0.1
+

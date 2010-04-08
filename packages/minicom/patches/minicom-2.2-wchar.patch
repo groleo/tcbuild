@@ -1,0 +1,20 @@
+--- minicom-2.2/src/minicom.c.wchar	2007-03-09 13:09:01.000000000 +0100
++++ minicom-2.2/src/minicom.c	2007-03-09 13:09:01.000000000 +0100
+@@ -27,7 +27,6 @@
+ RCSID(PKG_VER "$Id: minicom-2.2-wchar.patch,v 1.2 2009/04/14 07:19:41 mariusn Exp $")
+ 
+ #include <getopt.h>
+-#include <wchar.h>
+ #include <wctype.h>
+ 
+ #define EXTERN
+--- minicom-2.2/src/window.c.wchar	2005-11-06 20:20:57.000000000 +0100
++++ minicom-2.2/src/window.c	2007-03-09 13:09:01.000000000 +0100
+@@ -23,7 +23,6 @@
+ 
+ #include <limits.h>
+ #include <stdarg.h>
+-#include <wchar.h>
+ 
+ #include "port.h"
+ #include "minicom.h"

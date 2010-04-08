@@ -1,0 +1,317 @@
+diff -ruN linux-2.6.25.20/arch/m68k/coldfire/head.S linux-2.6.25.20.last/arch/m68k/coldfire/head.S
+--- linux-2.6.25.20/arch/m68k/coldfire/head.S	2009-11-19 09:04:32.787379895 +0200
++++ linux-2.6.25.20.last/arch/m68k/coldfire/head.S	2009-11-12 15:22:08.618455816 +0200
+@@ -343,6 +343,7 @@
+ 	   change in paging_init(cf-mmu.c) to zones_size[]. */
+ 
+ #if CONFIG_SDRAM_BASE != PAGE_OFFSET
++
+ #if defined(CONFIG_M5445X)
+ 	/* Map 256MB as code */
+ 	mmu_map	(PAGE_OFFSET+0*0x1000000),  (PHYS_OFFSET+0*0x1000000), \
+diff -ruN linux-2.6.25.20/arch/m68k/kernel/bios32_mcf548x.c linux-2.6.25.20.last/arch/m68k/kernel/bios32_mcf548x.c
+--- linux-2.6.25.20/arch/m68k/kernel/bios32_mcf548x.c	2009-11-19 09:04:31.922880072 +0200
++++ linux-2.6.25.20.last/arch/m68k/kernel/bios32_mcf548x.c	2009-11-12 15:49:21.059042617 +0200
+@@ -188,7 +188,7 @@
+ 		 * We've read the base address register back after
+ 		 * writing all ones and so now we must decode it.
+ 		 */
+-	
++
+ 		if (base & PCI_BASE_ADDRESS_SPACE_IO)
+ 		{
+ 			/*
+@@ -457,7 +457,7 @@
+ 			{
+ 				struct resource *r = &dev->resource[i];
+ 				struct resource *pr;
+-				struct pci_bus_info *bus_info = 
++				struct pci_bus_info *bus_info =
+ 					(struct pci_bus_info *) dev->sysdata;
+ 
+ 				if ((r->start == 0) || (r->parent != NULL))
+@@ -594,11 +594,15 @@
+ 	{
+ 		printk("PCI: Probing PCI hardware\n");
+ 		pci_scan_bus(0, bus_info->m68k_pci_ops, bus_info);
++		printk("PCI: Probing PCI hardware1\n");
+ 		pcibios_fixup();
++		printk("PCI: Probing PCI hardware2\n");
+ #ifdef NL_ORIGINAL
+ 		pcibios_claim_resources(pci_root);
++		printk("PCI: Probing PCI hardware3\n");
+ #else
+ 		pcibios_claim_resources(pci_bus_b(pci_root_buses.next));
++		printk("PCI: Probing PCI hardware4\n");
+ #endif
+ 	}
+ 	else
+diff -ruN linux-2.6.25.20/arch/m68k/kernel/head.S linux-2.6.25.20.last/arch/m68k/kernel/head.S
+--- linux-2.6.25.20/arch/m68k/kernel/head.S	2008-11-10 20:50:34.000000000 +0200
++++ linux-2.6.25.20.last/arch/m68k/kernel/head.S	2009-11-17 19:27:57.387793866 +0200
+@@ -2947,6 +2947,7 @@
+ #endif	/* CONFIG_MAC */
+ 
+ #ifdef CONFIG_Q40
++#warning "HEREEEEEEEEEEEEEEEEEEEEEE"
+ 	is_not_q40(2f)
+ /* debug output goes into SRAM, so we don't do it unless requested
+    - check for '%LX$' signature in SRAM   */
+@@ -2966,7 +2967,7 @@
+ 	bne	2f	/*nodbg*/
+ 	/* signature OK */
+ 	lea	%pc@(L(q40_do_debug)),%a1
+-	tas	%a1@
++	bset.b #7,%a1@
+ /*nodbg: q40_do_debug is 0 by default*/
+ 2:
+ #endif
+diff -ruN linux-2.6.25.20/arch/m68k/kernel/sys_m68k.c linux-2.6.25.20.last/arch/m68k/kernel/sys_m68k.c
+--- linux-2.6.25.20/arch/m68k/kernel/sys_m68k.c	2009-11-19 09:04:30.698380116 +0200
++++ linux-2.6.25.20.last/arch/m68k/kernel/sys_m68k.c	2009-11-17 19:06:40.767519683 +0200
+@@ -80,6 +80,14 @@
+ 	unsigned long prot, unsigned long flags,
+ 	unsigned long fd, unsigned long pgoff)
+ {
++	/* Make shift for mmap2 should be 12, no matter the PAGE_SIZE is.
++	   Don't silently break if we're trying to map something we can't.
++	   Original FRV code. */
++	if (pgoff & ((1<<(PAGE_SHIFT-12))-1))
++		return -EINVAL;
++	pgoff >>= (PAGE_SHIFT - 12);
++
++
+ 	return do_mmap2(addr, len, prot, flags, fd, pgoff);
+ }
+ 
+diff -ruN linux-2.6.25.20/arch/m68k/lib/string.c linux-2.6.25.20.last/arch/m68k/lib/string.c
+--- linux-2.6.25.20/arch/m68k/lib/string.c	2009-11-19 09:04:32.743379801 +0200
++++ linux-2.6.25.20.last/arch/m68k/lib/string.c	2009-11-10 17:33:13.000000000 +0200
+@@ -150,69 +150,84 @@
+ #define OPSIZ	(sizeof(op_t))
+ typedef unsigned char byte;
+ 
++
+ void *memset (void *dstpp, int c, size_t len)
+ {
+-  long int dstp = (long int) dstpp;
++	long int dstp = (long int) dstpp;
+ 
+-  if (len >= 8)
+-    {
+-      size_t xlen;
+-      op_t cccc;
+-
+-      cccc = (unsigned char) c;
+-      cccc |= cccc << 8;
+-      cccc |= cccc << 16;
+-      if (OPSIZ > 4)
+-	/* Do the shift in two steps to avoid warning if long has 32 bits.  */
+-	cccc |= (cccc << 16) << 16;
+-
+-      /* There are at least some bytes to set.
+-	 No need to test for LEN == 0 in this alignment loop.  */
+-      while (dstp % OPSIZ != 0)
++	if (len >= 8)
+ 	{
+-	  ((byte *) dstp)[0] = c;
+-	  dstp += 1;
+-	  len -= 1;
+-	}
++		size_t xlen;
++		op_t cccc;
+ 
+-      /* Write 8 `op_t' per iteration until less than 8 `op_t' remain.  */
+-      xlen = len / (OPSIZ * 8);
+-      while (xlen > 0)
+-	{
+-	  ((op_t *) dstp)[0] = cccc;
+-	  ((op_t *) dstp)[1] = cccc;
+-	  ((op_t *) dstp)[2] = cccc;
+-	  ((op_t *) dstp)[3] = cccc;
+-	  ((op_t *) dstp)[4] = cccc;
+-	  ((op_t *) dstp)[5] = cccc;
+-	  ((op_t *) dstp)[6] = cccc;
+-	  ((op_t *) dstp)[7] = cccc;
+-	  dstp += 8 * OPSIZ;
+-	  xlen -= 1;
++		cccc = (unsigned char) c;
++		cccc |= cccc << 8;
++		cccc |= cccc << 16;
++		if (OPSIZ > 4)
++			/* Do the shift in two steps to avoid warning if long has 32 bits.  */
++			cccc |= (cccc << 16) << 16;
++
++		/* There are at least some bytes to set.
++		   No need to test for LEN c0 in this alignment loop.  */
++		while (dstp % OPSIZ != 0)
++		{
++			((byte *) dstp)[0] = c;
++			dstp += 1;
++			len -= 1;
++		}
++
++
++		/* Write 8 `op_t' per iteration until less than 8 `op_t' remain.  */
++		xlen = len / (OPSIZ * 8);
++		if ( xlen > 0 )
++		{
++			asm volatile ("\n"
++				"   lea.l -32(%%sp),%%sp\n"
++				"   movem.l %%d0-%%d7,(%%sp)\n"
++				"   move.l %1,%%d0\n"
++				"   move.l %1,%%d1\n"
++				"   move.l %1,%%d2\n"
++				"   move.l %1,%%d3\n"
++				"   move.l %1,%%d4\n"
++				"   move.l %1,%%d5\n"
++				"   move.l %1,%%d6\n"
++				"   move.l %1,%%d7\n"
++				"1: movem.l %%d0-%%d7,(%0)\n"
++				"   lea.l (8*4,%0),%0\n"
++				"   subq.l #1,%2\n"
++				"   tst.l %2\n"
++				"   jne 1b\n"
++				"   movem.l (%%sp),%%d0-%%d7\n"
++				"   lea.l 32(%%sp),%%sp\n"
++			: "=a"(dstp)
++			: "a"(cccc), "a"(xlen)
++			:"memory");
++			len %= OPSIZ * 8;
++		}
++
++		/* Write 1 `op_t' per iteration until less than OPSIZ bytes remain.  */
++		xlen = len / OPSIZ;
++		while (xlen > 0)
++		{
++			((op_t *) dstp)[0] = cccc;
++			dstp += OPSIZ;
++			xlen -= 1;
++		}
++		len %= OPSIZ;
+ 	}
+-      len %= OPSIZ * 8;
+ 
+-      /* Write 1 `op_t' per iteration until less than OPSIZ bytes remain.  */
+-      xlen = len / OPSIZ;
+-      while (xlen > 0)
++	/* Write the last few bytes.  */
++	while (len > 0)
+ 	{
+-	  ((op_t *) dstp)[0] = cccc;
+-	  dstp += OPSIZ;
+-	  xlen -= 1;
++		((byte *) dstp)[0] = c;
++		dstp += 1;
++		len -= 1;
+ 	}
+-      len %= OPSIZ;
+-    }
+ 
+-  /* Write the last few bytes.  */
+-  while (len > 0)
+-    {
+-      ((byte *) dstp)[0] = c;
+-      dstp += 1;
+-      len -= 1;
+-    }
+-
+-  return dstpp;
++	return dstpp;
+ }
++///////////
++
+ 
+ #if 0
+ 
+diff -ruN linux-2.6.25.20/arch/m68k/mm/cf-mmu.c linux-2.6.25.20.last/arch/m68k/mm/cf-mmu.c
+--- linux-2.6.25.20/arch/m68k/mm/cf-mmu.c	2009-11-19 09:04:32.791380102 +0200
++++ linux-2.6.25.20.last/arch/m68k/mm/cf-mmu.c	2009-11-17 19:08:23.876019363 +0200
+@@ -135,9 +135,7 @@
+ 	/* JKM - this should be changed to allocate from the TOP (0x4f,0x4e) but the
+ 	 * allocator is being a bit challenging */
+         zones_size[ZONE_DMA] = CONFIG_DMA_SIZE >> PAGE_SHIFT;
+-        zones_size[ZONE_NORMAL] = (((unsigned long)high_memory -
+-                                    PAGE_OFFSET) >> PAGE_SHIFT) -
+-                                   zones_size[ZONE_DMA];
++        zones_size[ZONE_NORMAL] = (((unsigned long)high_memory - PAGE_OFFSET) >> PAGE_SHIFT) - zones_size[ZONE_DMA];
+ 
+ 
+ 	free_area_init(zones_size);
+diff -ruN linux-2.6.25.20/include/asm-m68k/cf_548x_cacheflush.h linux-2.6.25.20.last/include/asm-m68k/cf_548x_cacheflush.h
+--- linux-2.6.25.20/include/asm-m68k/cf_548x_cacheflush.h	2009-11-19 09:04:31.663880339 +0200
++++ linux-2.6.25.20.last/include/asm-m68k/cf_548x_cacheflush.h	2009-11-17 19:10:17.879518956 +0200
+@@ -153,7 +153,15 @@
+ 
+ /* Push the page at kernel virtual address and clear the icache */
+ /* RZ: use cpush %bc instead of cpush %dc, cinv %ic */
+-#define flush_page_to_ram(page) __flush_page_to_ram((void *) page_address(page))
++//#define flush_page_to_ram(page) __flush_page_to_ram((void *) page_address(page))
++#define flush_page_to_ram(page)				\
++({							\
++	unsigned long address = page_address(page);	\
++	if ((address >= PAGE_OFFSET) && 		\
++	    (address < PAGE_OFFSET + 8 * 1024 * 1024))	\
++		__flush_page_to_ram((void *) address);	\
++})
++
+ extern inline void __flush_page_to_ram(void *address)
+ {
+   unsigned long set;
+@@ -178,7 +186,7 @@
+                    "\tcpushl %%bc,(%0)" : "=a" (set) : "a" (set));
+     }
+     /* next loop will finish the cache ie pass the hole */
+-    end_set = LAST_ICACHE_ADDR;    
++    end_set = LAST_ICACHE_ADDR;
+   }
+   for (set = start_set; set <= end_set; set += (0x10 - 3)) {
+     asm volatile("cpushl %%bc,(%0)\n"
+@@ -194,8 +202,10 @@
+ /* Use __flush_page_to_ram() for flush_dcache_page all values are same - MW */
+ #define flush_dcache_page(page)			\
+ 	__flush_page_to_ram((void *) page_address(page))
++
+ #define flush_icache_page(vma,pg)		\
+ 	__flush_page_to_ram((void *) page_address(pg))
++
+ #define flush_icache_user_range(adr,len)	do { } while (0)
+ /* NL */
+ #define flush_icache_user_page(vma,page,addr,len)	do { } while (0)
+@@ -224,7 +234,7 @@
+                    "\tcpushl %%ic,(%0)" : "=a" (set) : "a" (set));
+     }
+     /* next loop will finish the cache ie pass the hole */
+-    end_set = LAST_ICACHE_ADDR;    
++    end_set = LAST_ICACHE_ADDR;
+   }
+   for (set = start_set; set <= end_set; set += (0x10 - 3)) {
+     asm volatile("cpushl %%ic,(%0)\n"
+diff -ruN linux-2.6.25.20/include/asm-m68k/page_offset.h linux-2.6.25.20.last/include/asm-m68k/page_offset.h
+--- linux-2.6.25.20/include/asm-m68k/page_offset.h	2009-11-19 09:04:31.639379916 +0200
++++ linux-2.6.25.20.last/include/asm-m68k/page_offset.h	2009-11-12 14:51:48.633057066 +0200
+@@ -3,7 +3,7 @@
+  */
+ #if defined(CONFIG_SUN3)
+ #define PAGE_OFFSET_RAW		0x0E000000
+-
++#error ysbh
+ #elif defined(CONFIG_M5445X) || defined(CONFIG_M547X_8X)
+ #define	PHYS_OFFSET		CONFIG_SDRAM_BASE
+ #define PAGE_OFFSET_RAW		(PHYS_OFFSET)
+diff -ruN linux-2.6.25.20/include/asm-m68k/ucontext.h linux-2.6.25.20.last/include/asm-m68k/ucontext.h
+--- linux-2.6.25.20/include/asm-m68k/ucontext.h	2008-11-10 20:50:34.000000000 +0200
++++ linux-2.6.25.20.last/include/asm-m68k/ucontext.h	2009-11-17 19:12:11.064519688 +0200
+@@ -7,7 +7,11 @@
+ 
+ typedef struct fpregset {
+ 	int f_fpcntl[3];
+-	int f_fpregs[8*3];
++	#ifdef CONFIG_CFV4E
++	        int f_fpregs[8][2];
++	#else
++	        int f_fpregs[8*3];
++	#endif
+ } fpregset_t;
+ 
+ struct mcontext {

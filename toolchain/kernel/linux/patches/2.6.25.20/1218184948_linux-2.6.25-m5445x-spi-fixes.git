@@ -1,0 +1,247 @@
+From 97011a772bbf7a0f3e730b459a6eba199615a109 Mon Sep 17 00:00:00 2001
+From: Kurt Mahan <kmahan@freescale.com>
+Date: Fri, 8 Aug 2008 02:42:28 -0600
+Subject: [PATCH] M5445X SPI Fixes.
+
+LTIBName: m5445x-spi-fixes
+Signed-off-by: Kurt Mahan <kmahan@freescale.com>
+---
+ arch/m68k/coldfire/mcf5445x-devices.c |  179 +++++++++++++++++++++++++++++++-
+ drivers/spi/dspi_mcf.c                |    2 +-
+ 2 files changed, 174 insertions(+), 7 deletions(-)
+
+diff --git a/arch/m68k/coldfire/mcf5445x-devices.c b/arch/m68k/coldfire/mcf5445x-devices.c
+index e65bb03..a252d13 100644
+--- a/arch/m68k/coldfire/mcf5445x-devices.c
++++ b/arch/m68k/coldfire/mcf5445x-devices.c
+@@ -5,7 +5,7 @@
+  *
+  * Based on the Freescale MXC devices.c
+  *
+- * Copyright (c) 2007 Freescale Semiconductor, Inc.
++ * Copyright (c) 2007,2008 Freescale Semiconductor, Inc.
+  *	Kurt Mahan <kmahan@freescale.com>
+  */
+ #include <linux/module.h>
+@@ -13,9 +13,12 @@
+ #include <linux/init.h>
+ #include <linux/platform_device.h>
+ #include <linux/fsl_devices.h>
++#include <linux/spi/spi.h>
+ 
+ #include <asm/coldfire.h>
+ #include <asm/mcfsim.h>
++#include <asm/mcfqspi.h>
++#include <asm/mcfdspi.h>
+ 
+ /* ATA Interrupt */
+ #define IRQ_ATA		(64 + 64 + 54)
+@@ -26,6 +29,169 @@
+ #define ATA_IER		MCF_REG08(BASE_IO_ATA+0x2c)	/* int enable reg */
+ #define ATA_ICR		MCF_REG08(BASE_IO_ATA+0x30)	/* int clear reg */
+ 
++/* DSPI */
++#define M5445X_DSPI_MCR	0xfc05c000			/* base */
++
++#define M5445X_DSPI_IRQ_SOURCE	(31)
++#define M5445X_DSPI_IRQ_VECTOR	(64 + M5445X_DSPI_IRQ_SOURCE)
++
++#define M5445X_AUDIO_IRQ_SOURCE	(49) /* SSI interrupt */
++#define M5445X_AUDIO_IRQ_VECTOR	(128+M5445X_AUDIO_IRQ_SOURCE)
++#define M5445X_AUDIO_IRQ_LEVEL	(4)
++
++/* number of supported SPI selects */
++#define SPI_NUM_CHIPSELECTS	8
++
++#define M5445X_SPI_PAR_VAL	(MCF_GPIO_PAR_DSPI_SCK | 	\
++				 MCF_GPIO_PAR_DSPI_SOUT |	\
++				 MCF_GPIO_PAR_DSPI_SIN |	\
++				 MCF_GPIO_PAR_DSPI_PCS5_PCS5)
++
++#ifdef CONFIG_SPI
++/*
++ * DSPI
++ */
++
++#if defined(CONFIG_SPI_SPIDEV) || defined(CONFIG_SPI_SPIDEV_MODULE)
++static struct coldfire_dspi_chip spidev_chip_info = {
++	.bits_per_word = 8,
++};
++#endif
++
++#if defined(CONFIG_MCF_SSI_AUDIO) || defined(CONFIG_MCF_SSI_AUDIO_MODULE)
++static struct coldfire_dspi_chip ssi_audio_chip_info = {
++	.mode = SPI_MODE_0,
++	.bits_per_word = 16,
++	.void_write_data = 0,
++	.dbr = 0,
++	.pbr = 2,
++	.br = 8,
++	.pcssck = 1,
++	.pasc = 1,
++	.pdt = 1,
++	.cssck = 0,
++	.asc = 1,
++	.dt = 1,
++};
++#endif
++
++#if defined(CONFIG_MMC)
++static struct coldfire_dspi_chip dspi_sd_chip_info = {
++	.mode = SPI_MODE_0,
++	.bits_per_word = 8,
++	.void_write_data = 0xff,
++	.dbr = 0,
++	.pbr = 0,
++	.br = 1,
++	.pcssck = 2,
++	.pasc = 2,
++	.pdt = 2,
++	.cssck = 5,
++	.asc = 5,
++	.dt = 5,
++};
++#endif
++
++static struct spi_board_info spi_board_info[] = {
++#if defined(CONFIG_MCF_SSI_AUDIO) || defined(CONFIG_MCF_SSI_AUDIO_MODULE)
++	{
++/*		.modalias = "mcf_ssi_audio", */
++		.modalias = "ssi_audio",
++		.max_speed_hz = 300000,
++		.bus_num = 1,
++		.chip_select = 5,
++		.irq = M5445X_AUDIO_IRQ_VECTOR,
++		.platform_data = NULL,
++		.controller_data = &ssi_audio_chip_info
++	},
++#endif
++
++#if defined(CONFIG_SPI_SPIDEV) || defined(CONFIG_SPI_SPIDEV_MODULE)
++	{
++		.modalias = "spidev",
++		.max_speed_hz = 16000000, /* max clk (SCK) speed in HZ */
++		.bus_num = 1,
++		.chip_select = 0,		/* CS0 */
++		.controller_data = &spidev_chip_info,
++ 	},
++#endif
++};
++
++static struct coldfire_spi_master coldfire_master_info = {
++	.bus_num = 1,
++	.num_chipselect = SPI_NUM_CHIPSELECTS,
++	.irq_list = 0,		/* not used */
++	.irq_source = M5445X_DSPI_IRQ_SOURCE,
++	.irq_vector = M5445X_DSPI_IRQ_VECTOR,
++	.irq_mask = (1 << M5445X_DSPI_IRQ_SOURCE),
++	.irq_lp = 0x2,		/* irq level */
++	.par_val = M5445X_SPI_PAR_VAL,
++	.cs_control = NULL,
++};
++
++static struct resource coldfire_spi_resources[] = {
++	[0] = {
++		.name = "spi-par",
++		.start = &MCF_GPIO_PAR_DSPI,	/* PAR_DSPI */
++		.end = &MCF_GPIO_PAR_DSPI,	/* PAR_DSPI */
++		.flags = IORESOURCE_MEM
++	},
++
++	[1] = {
++		.name = "spi-module",
++		.start = M5445X_DSPI_MCR,	/* DSPI MCR Base */
++		.end = M5445X_DSPI_MCR + 0xc0,	/* DSPI mem map end */
++		.flags = IORESOURCE_MEM
++	},
++
++	[2] = {
++		.name = "spi-int-level",
++		.start = &MCF_INTC0_ICR31,	/* ICR start */
++		.end = &MCF_INTC0_ICR31, 	/* ICR end */
++		.flags = IORESOURCE_MEM
++	},
++
++	[3] = {
++		.name = "spi-int-mask",
++		.start = &MCF_INTC0_IMRL,	/* IMRL */
++		.end = &MCF_INTC0_IMRL,		/* IMRL */
++		.flags = IORESOURCE_MEM
++	}
++};
++
++static struct platform_device coldfire_spi = {
++	.name = "spi_coldfire",
++	.id = -1,
++	.resource = coldfire_spi_resources,
++	.num_resources = ARRAY_SIZE(coldfire_spi_resources),
++	.dev = {
++		.platform_data = &coldfire_master_info,
++	}
++};
++
++/**
++ * m5445x_spi_init - Initialize SPI
++ */
++static int __init m5445x_spi_init(void)
++{
++	int retval;
++
++	/* register device */
++	retval = platform_device_register(&coldfire_spi);
++	if (retval < 0) {
++		goto out;
++	}
++
++	/* register board info */
++	if (ARRAY_SIZE(spi_board_info))
++		retval = spi_register_board_info(spi_board_info,
++						 ARRAY_SIZE(spi_board_info));
++
++out:
++	return retval;
++}
++#endif
++
+ /*
+  * On-chip PATA
+  */
+@@ -118,16 +284,17 @@ static inline void mcf5445x_init_pata(void)
+ {
+ 	(void)platform_device_register(&pata_fsl_device);
+ }
+-#else
+-static inline void mcf5445x_init_pata(void)
+-{
+-}
+ #endif
+ 
+ static int __init mcf5445x_init_devices(void)
+ {
+ 	printk(KERN_INFO "MCF5445x INIT_DEVICES\n");
+-#if 0
++
++#ifdef CONFIG_SPI
++	m5445x_spi_init();
++#endif
++
++#if defined(CONFIG_PATA_FSL) || defined(CONFIG_PATA_FSL_MODULE)
+ 	mcf5445x_init_pata();
+ #endif
+ 
+diff --git a/drivers/spi/dspi_mcf.c b/drivers/spi/dspi_mcf.c
+index 2e97e05..2df6ee0 100644
+--- a/drivers/spi/dspi_mcf.c
++++ b/drivers/spi/dspi_mcf.c
+@@ -64,7 +64,7 @@
+ #define DBG(fmt, args...)	do {} while (0)
+ #endif
+ 
+-#if defined(CONFIG_M54455)
++#if defined(CONFIG_M5445X)
+ #include <asm/mcf5445x_dspi.h>
+ #if defined(CONFIG_SPI_COLDFIRE_DSPI_EDMA)
+ 	#include <asm/mcf5445x_edma.h>
+-- 
+1.6.0.1
+

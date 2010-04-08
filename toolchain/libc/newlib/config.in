@@ -1,0 +1,119 @@
+# newlib options
+config LIBC
+    string
+
+config LIBC_eglibc
+    bool
+    select LIBC_SUPPORT_LINUXTHREADS
+    help
+      The de-facto standard for embeded linux systems.
+      Highly configurable, thus as feature-rich as you need, without
+      compromising for size.
+
+choice
+    bool
+    prompt "newlib version"
+
+config LIBC_V_1_17_0
+    bool
+    prompt "1.17.0"
+
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+
+endchoice
+
+config LIBC_VERSION
+    string
+    prompt "Enter date (YYYYMMDD)" if LIBC_V_specific_date
+    default "snapshot" if LIBC_V_snapshot
+    default "1.17.0" if LIBC_V_1_17_0
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!
+
+config LIBC_NEWLIB_PARALLEL
+    bool
+    prompt "Build newlib in //" if LIBC_V_snapshot || LIBC_V_specific_date
+    default n
+    help
+      Build newlib using parallel jobs.
+      Some 'old' versions won't build in //, but it works starting with
+      0.9.30 release candidates.
+
+choice
+    bool
+    prompt "newlib verbosity:"
+    default LIBC_NEWLIB_VERBOSITY_0
+
+config LIBC_NEWLIB_VERBOSITY_0
+    bool
+    prompt "Simplified"
+    help
+      Print simplified command lines.
+
+config LIBC_NEWLIB_VERBOSITY_1
+    bool
+    prompt "Full commands"
+    help
+      Print full command lines.
+
+endchoice
+
+config LIBC_NEWLIB_VERBOSITY
+    string
+    default ""      if LIBC_NEWLIB_VERBOSITY_0
+    default "V=1"   if LIBC_NEWLIB_VERBOSITY_1
+
+choice
+    bool
+    prompt "Debug level"
+    default LIBC_NEWLIB_DEBUG_LEVEL_0
+
+config LIBC_NEWLIB_DEBUG_LEVEL_0
+    bool
+    prompt "none"
+
+config LIBC_NEWLIB_DEBUG_LEVEL_1
+    bool
+    prompt "minimal"
+
+config LIBC_NEWLIB_DEBUG_LEVEL_2
+    bool
+    prompt "all"
+
+endchoice
+
+config LIBC_NEWLIB_DEBUG_LEVEL
+    int
+    default 0 if LIBC_NEWLIB_DEBUG_LEVEL_0
+    default 1 if LIBC_NEWLIB_DEBUG_LEVEL_1
+    default 2 if LIBC_NEWLIB_DEBUG_LEVEL_2
+
+config LIBC_NEWLIB_BUILD_CROSS_LDD
+    bool
+    prompt "Build cross-ldd"
+    default y
+    help
+      Say 'y' here to build a cross-ldd to run in the host.
+
+      Building a cross-ldd only works on ELF systems, that is,
+      if you build under Cygwin, you *must* say 'n' here.
+
+config LIBC_NEWLIB_CONFIG_FILE
+    string
+    prompt "Configuration file"
+    default "${CT_TLC_DIR}/libc/newlib/newlib.config"
+    help
+      Path to the configuration file.
+      Default is "${CT_TLC_DIR}/libc/newlib/newlib.config"
+      You _must_ provide one (for now).
+
+config LIBC_NEWLIB_LOCALES
+    bool
+    prompt "Add support for locales"
+    default n
+    help
+      Say y if you want newlib to support localisation.
+
+      Note that seems to be broken on recent newlib releases.
+

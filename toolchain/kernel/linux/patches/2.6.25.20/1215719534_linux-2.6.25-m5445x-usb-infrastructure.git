@@ -1,0 +1,1248 @@
+From 0fd892dc075ecb3c83e2e935279a061dbc7fd68a Mon Sep 17 00:00:00 2001
+From: Bruce Schmid <duck@freescale.com>
+Date: Thu, 10 Jul 2008 13:52:14 -0600
+Subject: [PATCH] USB infrastructure
+
+LTIBName: m5445x-usb-infrastructure
+Signed-off-by: Bruce Schmid <duck@freescale.com>
+---
+ arch/m68k/Kconfig                 |    6 +
+ arch/m68k/coldfire/Makefile       |    2 +-
+ arch/m68k/coldfire/usb.c          |  207 +++++++++++++++++++++----------------
+ arch/m68k/coldfire/usb/Makefile   |   19 +---
+ arch/m68k/coldfire/usb/usb.h      |  102 ++++++++++++++++++
+ arch/m68k/coldfire/usb/usb_dr.c   |  124 ++++++++++++++++++++++
+ arch/m68k/coldfire/usb/xcvr.c     |  170 ++++++++++++------------------
+ include/asm-m68k/fsl_usb_gadget.h |   40 +++++++
+ include/asm-m68k/fsl_usb_io.h     |   31 ++++++
+ include/asm-m68k/mcf5445x_usb.h   |   31 ++++--
+ include/linux/fsl_devices.h       |   65 +++++-------
+ include/linux/usb/fsl_usb2.h      |   56 +---------
+ include/linux/usb/fsl_xcvr.h      |   26 ++---
+ 13 files changed, 558 insertions(+), 321 deletions(-)
+ create mode 100644 arch/m68k/coldfire/usb/usb.h
+ create mode 100644 arch/m68k/coldfire/usb/usb_dr.c
+ create mode 100644 include/asm-m68k/fsl_usb_gadget.h
+ create mode 100644 include/asm-m68k/fsl_usb_io.h
+
+diff --git a/arch/m68k/Kconfig b/arch/m68k/Kconfig
+index 826c320..cbfc0bb 100644
+--- a/arch/m68k/Kconfig
++++ b/arch/m68k/Kconfig
+@@ -328,6 +328,8 @@ config M68060
+ config M5445X
+ 	bool "MCF5445x support"
+ 	depends on COLDFIRE
++	select USB_EHCI_FSL
++	select HAVE_FSL_USB_DR
+ 	help
+           This option will add support for the MCF5445 processor with mmu.
+ 
+@@ -341,6 +343,10 @@ config M54455
+ 	depends on M5445X
+ 	default n
+ 
++config HAVE_FSL_USB_DR
++	bool
++	default n
++
+ choice
+ 	prompt "Model"
+ 	depends on M5445X
+diff --git a/arch/m68k/coldfire/Makefile b/arch/m68k/coldfire/Makefile
+index bf91bd3..b7979dd 100644
+--- a/arch/m68k/coldfire/Makefile
++++ b/arch/m68k/coldfire/Makefile
+@@ -6,7 +6,7 @@ obj-y:= entry.o config.o cache.o signal.o muldi3.o traps.o ints.o
+ extra-y:= head.o
+ 
+ ifdef CONFIG_M5445X
+-ifneq ($(strip $(CONFIG_USB) $(CONFIG_USB_GADGET_MCF5445X)),)
++ifneq ($(strip $(CONFIG_USB) $(CONFIG_USB_GADGET_FSL_USB2)),)
+ 	obj-y	+= usb.o usb/
+ endif
+ endif
+diff --git a/arch/m68k/coldfire/usb.c b/arch/m68k/coldfire/usb.c
+index fd56433..40c9664 100644
+--- a/arch/m68k/coldfire/usb.c
++++ b/arch/m68k/coldfire/usb.c
+@@ -1,9 +1,5 @@
+ /*
+- *
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
+- *
+- *	otg_{get,set}_transceiver() are from arm/plat-omap/usb.c.
+- *	which is Copyright (C) 2004 Texas Instruments, Inc.
++ * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -19,45 +15,101 @@
+ #include <linux/kernel.h>
+ #include <linux/types.h>
+ #include <linux/errno.h>
+-#include <linux/init.h>
+-#include <linux/io.h>
+ #include <linux/err.h>
+ #include <linux/platform_device.h>
+-#include <linux/usb/otg.h>
+-#include <linux/delay.h>
+ #include <linux/fsl_devices.h>
+ #include <linux/usb/fsl_xcvr.h>
++#include <asm/mcfsim.h>
+ 
++#define MCF_SCM_BCR		MCF_REG32(0xFC040024)
++#define MCF_SCM_BCR_GBR		(1 << 9)	/* global bursts for read */
++#define MCF_SCM_BCR_GBW		(1 << 8)	/* global bursts for write */
++#define MCF_SCM_BCR_SBE_ALL	(0xff << 0)	/* slave burst enable */
+ 
+-/* The dmamask must be set for EHCI to work */
+-static u64 ehci_dmamask = ~(u32) 0;
++#define MAX_XCVR 3
++struct fsl_xcvr_ops *g_xc_ops[MAX_XCVR] = { NULL };
+ 
+-struct fsl_xcvr_ops *xc_ops[3] = { NULL };
++#ifdef ULPI_DEBUG
++void print_ulpi_regs(void)
++{
++	pr_debug("MCF_SCM_BCR=0x%08lx  MCF_CCM_MISCCR=0x%08x  "
++		 "MCF_GPIO_PAR_DMA=0x%08x  MCF_GPIO_PAR_USB=08%08x  "
++		 "MCF_GPIO_PAR_FEC=08%08x\n",
++		 MCF_SCM_BCR, MCF_CCM_MISCCR, MCF_GPIO_PAR_DMA,
++		 MCF_GPIO_PAR_USB, MCF_GPIO_PAR_FEC);
++}
++EXPORT_SYMBOL(print_ulpi_regs);
++#endif
+ 
+-void fsl_usb_enable_clk(void)
++static inline void fsl_usb_enable_clk(void)
+ {
++	pr_debug("%s\n", __func__);
++
++	/* Use external clock source if PLL isn't a multiple of 60MHz */
++	MCF_CCM_MISCCR &= ~MCF_CCM_MISCCR_USBSRC;
++
++	/* Initialize the USB Clock: use USB input clock */
++	MCF_GPIO_PAR_DMA = (MCF_GPIO_PAR_DMA & MCF_GPIO_PAR_DMA_DREQ1_MASK) |
++			   MCF_GPIO_PAR_DMA_DREQ1_USB_CLKIN;
+ }
+-EXPORT_SYMBOL(fsl_usb_enable_clk);
+ 
+-void fsl_usb_disable_clk(void)
++static inline void fsl_usb_disable_clk(void)
+ {
++	pr_debug("%s\n", __func__);
+ }
+-EXPORT_SYMBOL(fsl_usb_disable_clk);
+ 
+ void fsl_usb_xcvr_register(struct fsl_xcvr_ops *xcvr_ops)
+ {
+-	pr_debug("%s ctrlr=%d\n", __FUNCTION__, xcvr_ops->ctrlr);
+-	xc_ops[xcvr_ops->ctrlr] = xcvr_ops;
++	int i;
++
++	pr_debug("%s '%s'\n", __func__, xcvr_ops->name);
++	for (i = 0; i < MAX_XCVR; i++) {
++		if (g_xc_ops[i] == NULL) {
++			g_xc_ops[i] = xcvr_ops;
++			return;
++		}
++	}
+ 
++	pr_debug("%s failed\n", __func__);
+ }
+-EXPORT_SYMBOL(fsl_usb_xcvr_register);
++EXPORT_SYMBOL_GPL(fsl_usb_xcvr_register);
+ 
+-void fsl_usb_xcvr_unregister(enum fsl_usb_ctrlr ctrlr)
++void fsl_usb_xcvr_unregister(struct fsl_xcvr_ops *xcvr_ops)
+ {
+-	pr_debug("%s ctrlr=%d\n", __FUNCTION__, ctrlr);
+-	xc_ops[ctrlr] = NULL;
++	int i;
++
++	pr_debug("%s '%s'\n", __func__, xcvr_ops->name);
++	for (i = 0; i < MAX_XCVR; i++) {
++		if (g_xc_ops[i] == xcvr_ops) {
++			g_xc_ops[i] = NULL;
++			return;
++		}
++	}
++
++	pr_debug("%s failed\n", __func__);
++}
++EXPORT_SYMBOL_GPL(fsl_usb_xcvr_unregister);
++
++static struct fsl_xcvr_ops *fsl_usb_get_xcvr(char *name)
++{
++	int i;
++
++	pr_debug("%s '%s'\n", __func__, name);
++	if (name == NULL) {
++		printk(KERN_ERR "get_xcvr(): No tranceiver name\n");
++		return NULL;
++	}
++
++	for (i = 0; i < MAX_XCVR; i++) {
++		if (strcmp(g_xc_ops[i]->name, name) == 0)
++			return g_xc_ops[i];
++	}
++	pr_debug("Failed %s\n", __func__);
++	return NULL;
+ }
+-EXPORT_SYMBOL(fsl_usb_xcvr_unregister);
++
++/* The dmamask must be set for EHCI to work */
++static u64 ehci_dmamask = ~(u32) 0;
+ 
+ /*!
+  * Register an instance of a USB host platform device.
+@@ -68,18 +120,16 @@ EXPORT_SYMBOL(fsl_usb_xcvr_unregister);
+  *
+  * @return      newly-registered platform_device
+  *
+- * DDD fix this comment:
+- * The USB controller supports 3 host interfaces, and the
+- * kernel can be configured to support some number of them.
+  * Each supported host interface is registered as an instance
+  * of the "fsl-ehci" device.  Call this function multiple times
+  * to register each host interface.
+  */
+ static int instance_id;
+ struct platform_device *host_pdev_register(struct resource *res, int n_res,
+-					  struct fsl_usb2_platform_data *config)
++					   struct fsl_usb2_platform_data *config)
+ {
+ 	struct platform_device *pdev;
++	int rc;
+ 
+ 	pr_debug("register host res=0x%p, size=%d\n", res, n_res);
+ 
+@@ -94,16 +144,15 @@ struct platform_device *host_pdev_register(struct resource *res, int n_res,
+ 	pdev->dev.coherent_dma_mask = 0xffffffff;
+ 	pdev->dev.dma_mask = &ehci_dmamask;
+ 
+-	/*
+-	 * platform_device_add_data() makes a copy of
+-	 * the platform_data passed in.  That makes it
+-	 * impossible to share the same config struct for
+-	 * all OTG devices (host,gadget,otg).  So, just
+-	 * set the platform_data pointer ourselves.
+-	 */
+-	pdev->dev.platform_data = config;
++	rc = platform_device_add_data(pdev, config,
++				      sizeof(struct fsl_usb2_platform_data));
++	if (rc) {
++		platform_device_unregister(pdev);
++		return NULL;
++	}
+ 
+-	printk(KERN_INFO "usb: %s Host registered\n", config->name);
++	printk(KERN_INFO "usb: %s host (%s) registered\n", config->name,
++	       config->transceiver);
+ 	pr_debug("pdev=0x%p  dev=0x%p  resources=0x%p  pdata=0x%p\n",
+ 		 pdev, &pdev->dev, pdev->resource, pdev->dev.platform_data);
+ 
+@@ -113,70 +162,52 @@ struct platform_device *host_pdev_register(struct resource *res, int n_res,
+ }
+ 
+ 
+-int fsl_usb_mem_init(struct platform_device *pdev)
+-{
+-	struct resource *res;
+-	struct fsl_usb2_platform_data *pdata;
++static int dr_used;
+ 
+-	pdata = (struct fsl_usb2_platform_data *)pdev->dev.platform_data;
++int usb_platform_dr_init(struct platform_device *pdev)
++{
++	struct fsl_usb2_platform_data *pdata = pdev->dev.platform_data;
++	struct fsl_xcvr_ops *xops;
+ 
+-	pr_debug("%s: pdev=0x%p  pdata=0x%p\n", __FUNCTION__, pdev, pdata);
++	pr_debug("%s: pdev=0x%p  pdata=0x%p\n", __func__, pdev, pdata);
+ 
+-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+-	if (!res) {
+-		dev_err(&pdev->dev, "no MEM resource.\n");
+-		return -ENODEV;
++	xops = fsl_usb_get_xcvr(pdata->transceiver);
++	if (!xops) {
++		printk(KERN_ERR "DR transceiver ops missing\n");
++		return -EINVAL;
+ 	}
++	pdata->xcvr_ops = xops;
++	pdata->xcvr_type = xops->xcvr_type;
++	pdata->pdev = pdev;
++	xops->pdata = pdata;
+ 
+-	pdata->r_start = res->start;
+-	pdata->r_len = res->end - res->start + 1;
+-	pr_debug("%s: MEM resource start=0x%x  len=0x%x\n", pdata->name,
+-		 res->start, pdata->r_len);
++	/* enable USB read, write and slave bursts */
++	MCF_SCM_BCR = MCF_SCM_BCR_GBR | MCF_SCM_BCR_GBW | MCF_SCM_BCR_SBE_ALL;
+ 
+-	if (!request_mem_region(pdata->r_start, pdata->r_len, "OTG")) {
+-		dev_err(&pdev->dev, "request_mem_region failed\n");
+-		return -EBUSY;
+-	}
+-	pdata->regs = ioremap(pdata->r_start, pdata->r_len);
+-	pr_debug("ioremapped to 0x%p\n", pdata->regs);
++	if (!dr_used) {
++		fsl_usb_enable_clk();
+ 
+-	if (pdata->regs == NULL) {
+-		dev_err(&pdev->dev, "ioremap failed\n");
+-		release_mem_region(pdata->r_start, pdata->r_len);
+-		return -EFAULT;
++		if (xops->init)
++			xops->init(xops);
+ 	}
+ 
+-	pr_debug("%s: success\n", __FUNCTION__);
++	dr_used++;
++	pr_debug("%s: success\n", __func__);
+ 	return 0;
+ }
++EXPORT_SYMBOL_GPL(usb_platform_dr_init);
+ 
+-
+-#if defined(CONFIG_USB_OTG)
+-static struct otg_transceiver *xceiv;
+-
+-/**
+- * otg_get_transceiver - find the (single) OTG transceiver driver
+- *
+- * Returns the transceiver driver, after getting a refcount to it; or
+- * null if there is no such transceiver.  The caller is responsible for
+- * releasing that count.
+- */
+-struct otg_transceiver *otg_get_transceiver(void)
++void usb_platform_dr_uninit(struct fsl_usb2_platform_data *pdata)
+ {
+-	pr_debug("%s xceiv=0x%p\n", __FUNCTION__, xceiv);
+-	if (xceiv)
+-		get_device(xceiv->dev);
+-	return xceiv;
+-}
+-EXPORT_SYMBOL(otg_get_transceiver);
++	pr_debug("%s\n", __func__);
+ 
+-int otg_set_transceiver(struct otg_transceiver *x)
+-{
+-	pr_debug("%s xceiv=0x%p  x=0x%p\n", __FUNCTION__, xceiv, x);
+-	if (xceiv && x)
+-		return -EBUSY;
+-	xceiv = x;
+-	return 0;
++	dr_used--;
++	if (!dr_used) {
++		if (pdata->xcvr_ops && pdata->xcvr_ops->uninit)
++			pdata->xcvr_ops->uninit(pdata->xcvr_ops);
++
++		pdata->regs = NULL;
++		fsl_usb_disable_clk();
++	}
+ }
+-EXPORT_SYMBOL(otg_set_transceiver);
+-#endif
++EXPORT_SYMBOL_GPL(usb_platform_dr_uninit);
+diff --git a/arch/m68k/coldfire/usb/Makefile b/arch/m68k/coldfire/usb/Makefile
+index f40c136..d53ff83 100644
+--- a/arch/m68k/coldfire/usb/Makefile
++++ b/arch/m68k/coldfire/usb/Makefile
+@@ -4,25 +4,12 @@
+ 
+ # Object file lists.
+ 
+-ifneq ($(CONFIG_USB_EHCI_HCD),)
+-	obj-y	+= otg_host.o
++ifneq ($(strip $(CONFIG_USB_GADGET_FSL_USB2) $(CONFIG_USB_EHCI_HCD)),)
++	obj-y	+= usb_dr.o
+ endif
+ 
+-ifneq ($(CONFIG_USB_GADGET_MCF5445X),)
+-	obj-y	+= otg_device.o
+-endif
+-
+-ifneq ($(strip $(CONFIG_USB_GADGET_MCF5445X) $(CONFIG_USB_EHCI_HCD)),)
+-	obj-y	+= otg_cmn.o
+-endif
+-
+-ifneq ($(CONFIG_USB_OTG),)
+-	obj-y	+= otg_otg.o
+-endif
+-
+-
+ # USB Transceiver driver:
+-ifneq ($(strip $(CONFIG_USB) $(CONFIG_USB_GADGET_MCF5445X)),)
++ifneq ($(strip $(CONFIG_USB) $(CONFIG_USB_GADGET_FSL_USB2)),)
+ 	obj-y	+= xcvr.o
+ endif
+ 
+diff --git a/arch/m68k/coldfire/usb/usb.h b/arch/m68k/coldfire/usb/usb.h
+new file mode 100644
+index 0000000..e3e0337
+--- /dev/null
++++ b/arch/m68k/coldfire/usb/usb.h
+@@ -0,0 +1,102 @@
++/*
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++
++extern int usb_platform_dr_init(struct platform_device *pdev);
++extern void usb_platform_dr_uninit(struct fsl_usb2_platform_data *pdata);
++extern struct platform_device *host_pdev_register(struct resource *res,
++		  int n_res, struct fsl_usb2_platform_data *config);
++
++
++/*
++ * Determine which platform_data struct to use, based on which
++ * transceiver is configured.
++ * PDATA is a pointer to it.
++ */
++#ifdef CONFIG_USB_M5445X_ULPI
++static struct fsl_usb2_platform_data dr_config_ulpi;
++#define PDATA (&dr_config_ulpi)
++#else
++static struct fsl_usb2_platform_data dr_config_fsls;
++#define PDATA (&dr_config_fsls)
++#endif
++
++/*
++ * Used to set pdata->operating_mode before registering the platform_device.
++ * If OTG is configured, the controller operates in OTG mode,
++ * otherwise it's either host or device.
++ */
++#ifdef CONFIG_USB_OTG
++#define DR_UDC_MODE	FSL_USB2_DR_OTG
++#define DR_HOST_MODE	FSL_USB2_DR_OTG
++#else
++#define DR_UDC_MODE	FSL_USB2_DR_DEVICE
++#define DR_HOST_MODE	FSL_USB2_DR_HOST
++#endif
++
++
++#if defined CONFIG_USB_EHCI_HCD || defined CONFIG_USB_EHCI_HCD_MODULE
++static inline void dr_register_host(struct resource *r, int rs)
++{
++	PDATA->operating_mode = DR_HOST_MODE;
++	host_pdev_register(r, rs, PDATA);
++}
++#else
++static inline void dr_register_host(struct resource *r, int rs)
++{
++}
++#endif
++
++#ifdef CONFIG_USB_GADGET_FSL_USB2
++static struct platform_device dr_udc_device;
++
++static inline void dr_register_udc(void)
++{
++	PDATA->operating_mode = DR_UDC_MODE;
++	dr_udc_device.dev.platform_data = PDATA;
++
++	if (platform_device_register(&dr_udc_device))
++		printk(KERN_ERR "usb: can't register DR gadget\n");
++	else
++		printk(KERN_INFO "usb: DR gadget (%s) registered\n",
++		       PDATA->transceiver);
++}
++#else
++static inline void dr_register_udc(void)
++{
++}
++#endif
++
++#ifdef CONFIG_USB_OTG
++static struct platform_device dr_otg_device;
++
++/*
++ * set the proper operating_mode and
++ * platform_data pointer, then register the
++ * device.
++ */
++static inline void dr_register_otg(void)
++{
++	PDATA->operating_mode = FSL_USB2_DR_OTG;
++	dr_otg_device.dev.platform_data = PDATA;
++
++	if (platform_device_register(&dr_otg_device))
++		printk(KERN_ERR "usb: can't register otg device\n");
++	else
++		printk(KERN_INFO "usb: DR OTG registered\n");
++}
++#else
++static inline void dr_register_otg(void)
++{
++}
++#endif
+diff --git a/arch/m68k/coldfire/usb/usb_dr.c b/arch/m68k/coldfire/usb/usb_dr.c
+new file mode 100644
+index 0000000..3dd218d
+--- /dev/null
++++ b/arch/m68k/coldfire/usb/usb_dr.c
+@@ -0,0 +1,124 @@
++/*
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/kernel.h>
++#include <linux/types.h>
++#include <linux/platform_device.h>
++#include <linux/fsl_devices.h>
++#include <asm/mcfsim.h>
++
++#define USB_OTGREGS_BASE MCF_REG32(0xFC0B0000)
++#define INT_USB		(64 + 64 + 47)	/* INTC1:47 16.2.9.1 */
++#define INT_UOCSR	(64 + 64 + 53)	/* INTC1:53 16.2.9.1 */
++
++#include "usb.h"
++
++/*
++ * platform data structs
++ * 	- Which one to use is determined by CONFIG options in usb.h
++ * 	- operating_mode plugged at run time
++ */
++
++/* off-chip ULPI transceiver */
++static struct fsl_usb2_platform_data __maybe_unused dr_config_ulpi = {
++	.name            = "DR",
++	.platform_init   = usb_platform_dr_init,
++	.platform_uninit = usb_platform_dr_uninit,
++	.phy_mode	 = FSL_USB2_PHY_ULPI,
++	.transceiver     = "dr-ulpi",
++	.power_budget    = 500,
++	.es              = 1,
++	.big_endian_mmio = 1,
++	.big_endian_desc = 1,
++	.le_setup_buf    = 1,
++};
++
++/* on-chip FS/LS serial transceiver */
++static struct fsl_usb2_platform_data __maybe_unused dr_config_fsls = {
++	.name            = "DR",
++	.platform_init   = usb_platform_dr_init,
++	.platform_uninit = usb_platform_dr_uninit,
++	.phy_mode        = FSL_USB2_PHY_SERIAL,
++	.transceiver     = "dr-fsls",
++	.power_budget    = 500,
++	.es              = 1,
++	.big_endian_mmio = 1,
++	.big_endian_desc = 1,
++	.le_setup_buf    = 1,
++};
++
++/*
++ * resources
++ */
++static struct resource dr_resources[] = {
++	[0] = {
++		.start = (u32)(&USB_OTGREGS_BASE),
++		.end   = (u32)(&USB_OTGREGS_BASE + 0x1ff),
++		.flags = IORESOURCE_MEM,
++	},
++	[1] = {
++		.start = INT_USB,
++		.flags = IORESOURCE_IRQ,
++	},
++};
++
++static u64 dr_udc_dmamask = ~(u32) 0;
++static void dr_udc_release(struct device *dev)
++{
++}
++
++static u64 dr_otg_dmamask = ~(u32) 0;
++static void dr_otg_release(struct device *dev)
++{
++}
++
++/*
++ * platform device structs
++ * 	dev.platform_data field plugged at run time
++ */
++static struct platform_device __maybe_unused dr_udc_device = {
++	.name = "fsl-usb2-udc",
++	.id   = -1,
++	.dev  = {
++		.release           = dr_udc_release,
++		.dma_mask          = &dr_udc_dmamask,
++		.coherent_dma_mask = 0xffffffff,
++	},
++	.resource      = dr_resources,
++	.num_resources = ARRAY_SIZE(dr_resources),
++};
++
++static struct platform_device __maybe_unused dr_otg_device = {
++	.name = "fsl-usb2-otg",
++	.id = -1,
++	.dev = {
++		.release           = dr_otg_release,
++		.dma_mask          = &dr_otg_dmamask,
++		.coherent_dma_mask = 0xffffffff,
++	},
++	.resource      = dr_resources,
++	.num_resources = ARRAY_SIZE(dr_resources),
++};
++
++static int __init usb_dr_init(void)
++{
++	pr_debug("%s:\n", __func__);
++
++	dr_register_otg();
++	dr_register_host(dr_resources, ARRAY_SIZE(dr_resources));
++	dr_register_udc();
++
++	return 0;
++}
++
++module_init(usb_dr_init);
+diff --git a/arch/m68k/coldfire/usb/xcvr.c b/arch/m68k/coldfire/usb/xcvr.c
+index dd4c84f..70c8601 100644
+--- a/arch/m68k/coldfire/usb/xcvr.c
++++ b/arch/m68k/coldfire/usb/xcvr.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -14,137 +14,104 @@
+ #include <linux/module.h>
+ #include <linux/kernel.h>
+ #include <linux/types.h>
+-#include <linux/errno.h>
+ #include <linux/init.h>
+-#include <linux/err.h>
+-#include <linux/platform_device.h>
+-#include <linux/delay.h>
+-#include <linux/fsl_devices.h>
++#include <linux/io.h>
+ #include <linux/usb/fsl_xcvr.h>
+-#include <linux/usb/fsl_usb2.h>
+-
+ #include <asm/mcfsim.h>
+ 
+-extern void fsl_usb_xcvr_register(struct fsl_xcvr_ops *xcvr_ops);
+-extern void fsl_usb_xcvr_unregister(enum fsl_usb_ctrlr ctrlr);
++/* Use the configured xcvr_ops */
++#ifdef CONFIG_USB_M5445X_ULPI
++#define XCVR_OPS &xcvr_ops_ulpi
++#elif defined CONFIG_USB_M5445X_FSLS
++#define XCVR_OPS &xcvr_ops_fsls
++#else
++#error "Invalid USB transceiver selection."
++#endif
+ 
+-#define MCF_SCM_BCR		MCF_REG32(0xFC040024)
+-#define MCF_SCM_BCR_GBR		(1 << 9)	/* global bursts for read */
+-#define MCF_SCM_BCR_GBW		(1 << 8)	/* global bursts for write */
+-#define MCF_SCM_BCR_SBE_ALL	(0xff << 0)	/* slave burst enable */
++/*
++ * Init routine for on-chip FSLS xcvr
++ */
++static void xcvr_fsls_init(struct fsl_xcvr_ops *this)
++{
++	pr_debug("%s: name=%s\n", __func__, this->name);
+ 
++	/* Enable VBUS_EN and VBUS_OC signals */
++	MCF_GPIO_PAR_USB = MCF_GPIO_PAR_USB_VBUSEN_VBUSEN |
++			   MCF_GPIO_PAR_USB_VBUSOC_VBUSOC;
+ 
+-#ifdef ULPI_DEBUG
+-void print_ulpi_regs(void)
+-{
+-	pr_debug("MCF_SCM_BCR=0x%08lx  MCF_CCM_MISCCR=0x%08x  "
+-		 "MCF_GPIO_PAR_DMA=0x%08x  MCF_GPIO_PAR_USB=08%08x  "
+-		 "MCF_GPIO_PAR_FEC=08%08x\n",
+-		 MCF_SCM_BCR, MCF_CCM_MISCCR, MCF_GPIO_PAR_DMA,
+-		 MCF_GPIO_PAR_USB, MCF_GPIO_PAR_FEC);
++	/* Setup USB_VBUS_OC signal to be active-low */
++	MCF_CCM_MISCCR |= MCF_CCM_MISCCR_USBOC;
+ }
+-EXPORT_SYMBOL(print_ulpi_regs);
+-#endif
+ 
+-
+-static void xcvr_init(struct platform_device *pdev)
++/*
++ * Init routine for off-chip ULPI xcvr
++ */
++static void xcvr_ulpi_init(struct fsl_xcvr_ops *this)
+ {
+-	struct fsl_usb2_platform_data *pdata = pdev->dev.platform_data;
+-	struct fsl_xcvr_ops *this = pdata->xcvr_ops;
+-	struct fsl_usb_host_regs *regs = pdata->regs;
+-
+-	pr_debug("%s: ctrlr=%d  pdata=0x%p  regs=0x%p\n", __FUNCTION__,
+-		 this->ctrlr, pdata, pdata->regs);
+-
+-	/* enable USB read, write and slave bursts */
+-	MCF_SCM_BCR = MCF_SCM_BCR_GBR | MCF_SCM_BCR_GBW | MCF_SCM_BCR_SBE_ALL;
+-
+-	/* Use external clock source if PLL isn't a multiple of 60MHz */
+-	MCF_CCM_MISCCR &= ~MCF_CCM_MISCCR_USBSRC;
+-
+-	/* Initialize the USB Clock: use USB input clock */
+-	MCF_GPIO_PAR_DMA = (MCF_GPIO_PAR_DMA & MCF_GPIO_PAR_DMA_DREQ1_MASK) |
+-			   MCF_GPIO_PAR_DMA_DREQ1_USB_CLKIN;
+-
+-	switch (this->xcvr_type) {
+-	case PORTSCX_PTS_ULPI:
+-		/* Enable the required ULPI signals */
+-		MCF_GPIO_PAR_DMA = (MCF_GPIO_PAR_DMA &
+-				    MCF_GPIO_PAR_DMA_DACK1_MASK) |
+-				    MCF_GPIO_PAR_DMA_DACK1_ULPI_DIR;
+-
+-		MCF_GPIO_PAR_USB = MCF_GPIO_PAR_USB_VBUSEN_ULPI_NXT |
+-				   MCF_GPIO_PAR_USB_VBUSOC_ULPI_STP;
+-
+-		MCF_GPIO_PAR_FEC = (MCF_GPIO_PAR_FEC &
+-				    MCF_GPIO_PAR_FEC_FEC0_MASK) |
+-				    MCF_GPIO_PAR_FEC_FEC0_RMII_ULPI;
+-		break;
+-	case PORTSCX_PTS_ONCHIP:
+-		/* Enable VBUS_EN and VBUS_OC signals */
+-		MCF_GPIO_PAR_USB = MCF_GPIO_PAR_USB_VBUSEN_VBUSEN |
+-				   MCF_GPIO_PAR_USB_VBUSOC_VBUSOC;
+-
+-		/* Setup USB_VBUS_OC signal to be active-low */
+-		MCF_CCM_MISCCR |= MCF_CCM_MISCCR_USBOC;
+-
+-		break;
+-	}
+-
+-	pr_debug("&regs->portsc1=0x%p  old portsc1=0x%x \n", &regs->portsc1,
+-		 regs->portsc1);
++	pr_debug("%s: name=%s\n", __func__, this->name);
+ 
+-	regs->portsc1 &= ~PORTSCX_PTS_MASK;
+-	regs->portsc1 |= this->xcvr_type;
++	/* Enable the required ULPI signals */
++	MCF_GPIO_PAR_DMA = (MCF_GPIO_PAR_DMA &
++			    MCF_GPIO_PAR_DMA_DACK1_MASK) |
++			    MCF_GPIO_PAR_DMA_DACK1_ULPI_DIR;
+ 
+-	/*
+-	 * need to reset the controller here so that the ID pin
+-	 * is correctly detected.
+-	 */
+-	regs->usbcmd |= USB_CMD_CTRL_RESET;
++	MCF_GPIO_PAR_USB = MCF_GPIO_PAR_USB_VBUSEN_ULPI_NXT |
++			   MCF_GPIO_PAR_USB_VBUSOC_ULPI_STP;
+ 
+-	/*
+-	 * allow controller to reset, and leave time for
+-	 * the ULPI transceiver to reset too.
+-	 */
+-	mdelay(10);
+-
+-	pr_debug("DDD %s: done.  portsc1=0x%x\n", __FUNCTION__, regs->portsc1);
++	MCF_GPIO_PAR_FEC = (MCF_GPIO_PAR_FEC &
++			    MCF_GPIO_PAR_FEC_FEC0_MASK) |
++			    MCF_GPIO_PAR_FEC_FEC0_RMII_ULPI;
+ }
+ 
+-static void xcvr_uninit(struct platform_device *pdev)
++static void xcvr_uninit(struct fsl_xcvr_ops *this)
+ {
+-	pr_debug("%s: pdev=0x%p\n", __FUNCTION__, pdev);
++	pr_debug("%s\n", __func__);
+ }
+ 
++static void xcvr_pullup(int on)
++{
++	unsigned short ccm = in_be16(&MCF_CCM_UOCSR);
++
++	pr_debug("%s(%d)\n", __func__, on);
++
++	ccm = in_be16(&MCF_CCM_UOCSR);
++	if (on) {
++		ccm |= MCF_CCM_UOCSR_BVLD;
++		ccm &= ~MCF_CCM_UOCSR_SEND;
++		out_be16(&MCF_CCM_UOCSR, ccm);
++	} else {
++		ccm &= ~MCF_CCM_UOCSR_BVLD;
++		out_be16(&MCF_CCM_UOCSR, ccm);
++	}
++}
+ 
+-struct fsl_xcvr_ops xcvr_ops_otg = {
+-	.ctrlr          = USB_CTRLR_OTG,
+-	.init           = xcvr_init,
+-	.uninit         = xcvr_uninit,
++struct fsl_xcvr_ops xcvr_ops_ulpi = {
++	.init   = xcvr_ulpi_init,
++	.uninit = xcvr_uninit,
++	.pullup = xcvr_pullup,
++	.name   = "dr-ulpi",
++};
+ 
+-#ifdef CONFIG_USB_M5445X_ULPI
+-	.xcvr_type      = PORTSCX_PTS_ULPI,
+-#elif defined CONFIG_USB_M5445X_FSLS
+-	.xcvr_type      = PORTSCX_PTS_ONCHIP,
+-#else
+-#error "Invalid USB transceiver selection."
+-#endif
++struct fsl_xcvr_ops xcvr_ops_fsls = {
++	.init   = xcvr_fsls_init,
++	.uninit = xcvr_uninit,
++	.pullup = xcvr_pullup,
++	.name   = "dr-fsls",
+ };
+ 
+ static int __init usb_xcvr_init(void)
+ {
+-	pr_debug("%s\n", __FUNCTION__);
++	struct fsl_xcvr_ops *xops = XCVR_OPS;
+ 
+-	fsl_usb_xcvr_register(&xcvr_ops_otg);
++	pr_debug("%s %s\n", __func__, xops->name);
++	fsl_usb_xcvr_register(xops);
+ 
+-	pr_debug("%s done\n", __FUNCTION__);
+ 	return 0;
+ }
+ 
+ static void __exit usb_xcvr_exit(void)
+ {
+-	fsl_usb_xcvr_unregister(USB_CTRLR_OTG);
++	fsl_usb_xcvr_unregister(XCVR_OPS);
+ }
+ 
+ module_init(usb_xcvr_init);
+@@ -153,4 +120,3 @@ module_exit(usb_xcvr_exit);
+ MODULE_AUTHOR("Freescale Semiconductor, Inc.");
+ MODULE_DESCRIPTION("External ULPI xcvr driver");
+ MODULE_LICENSE("GPL");
+-
+diff --git a/include/asm-m68k/fsl_usb_gadget.h b/include/asm-m68k/fsl_usb_gadget.h
+new file mode 100644
+index 0000000..d3c581e
+--- /dev/null
++++ b/include/asm-m68k/fsl_usb_gadget.h
+@@ -0,0 +1,40 @@
++/*
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*
++ * USB Gadget side, platform-specific functionality.
++ */
++
++#include <linux/usb/fsl_xcvr.h>
++
++/* Needed for i2c/serial transceivers */
++static inline void
++fsl_platform_set_device_mode(struct fsl_usb2_platform_data *pdata)
++{
++	if (pdata->xcvr_ops && pdata->xcvr_ops->set_device)
++		pdata->xcvr_ops->set_device();
++}
++
++static inline void
++fsl_platform_pullup_enable(struct fsl_usb2_platform_data *pdata)
++{
++	if (pdata->xcvr_ops && pdata->xcvr_ops->pullup)
++		pdata->xcvr_ops->pullup(1);
++}
++
++static inline void
++fsl_platform_pullup_disable(struct fsl_usb2_platform_data *pdata)
++{
++	if (pdata->xcvr_ops && pdata->xcvr_ops->pullup)
++		pdata->xcvr_ops->pullup(0);
++}
+diff --git a/include/asm-m68k/fsl_usb_io.h b/include/asm-m68k/fsl_usb_io.h
+new file mode 100644
+index 0000000..b6e0127
+--- /dev/null
++++ b/include/asm-m68k/fsl_usb_io.h
+@@ -0,0 +1,31 @@
++/* Copyright (c) 2008 Freescale Semiconductor Inc.
++ *
++ * This program is free software; you can redistribute  it and/or modify it
++ * under  the terms of  the GNU General  Public License as published by the
++ * Free Software Foundation;  either version 2 of the  License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the  GNU General Public License along
++ * with this program; if not, write  to the Free Software Foundation, Inc.,
++ * 675 Mass Ave, Cambridge, MA 02139, USA.
++ */
++#ifndef _FSL_USB_IO_H
++#define _FSL_USB_IO_H
++
++#define fsl_readl(addr)		in_be32((__force unsigned *)(addr))
++#define fsl_writel(val32, addr)	out_be32((__force unsigned *)(addr), (val32))
++
++static inline void fsl_set_usb_accessors(struct fsl_usb2_platform_data *pdata)
++{
++}
++
++#define cpu_to_hc32(x)	(x)
++#define hc32_to_cpu(x)	(x)
++
++#endif /* _FSL_USB_IO_H */
++
+diff --git a/include/asm-m68k/mcf5445x_usb.h b/include/asm-m68k/mcf5445x_usb.h
+index af26ae2..ec865ee 100644
+--- a/include/asm-m68k/mcf5445x_usb.h
++++ b/include/asm-m68k/mcf5445x_usb.h
+@@ -1,7 +1,5 @@
+ /*
+- * Duck Schmid duck@freescale.com
+- *
+- * Copyright 2005-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -13,18 +11,24 @@
+  * http://www.gnu.org/copyleft/gpl.html
+  */
+ 
++#include <linux/usb/fsl_xcvr.h>
++#include <linux/usb/fsl_usb2.h>
+ #include <asm/mcfsim.h>
+ 
+ /* ehci_arc_hc_driver.flags value */
+ #define FSL_PLATFORM_HC_FLAGS (HCD_USB2 | HCD_MEMORY)
+ 
+-static inline int fsl_platform_verify(struct platform_device *pdev)
+-{
+-	return 0;
+-}
++static void fsl_setup_phy(struct ehci_hcd *ehci,
++			  enum fsl_usb2_phy_modes phy_mode,
++			  int port_offset);
+ 
+-static inline void fsl_platform_usb_setup(struct usb_hcd *hcd)
++
++static inline void fsl_platform_usb_setup(struct ehci_hcd *ehci)
+ {
++	struct fsl_usb2_platform_data *pdata;
++
++	pdata = ehci_to_hcd(ehci)->self.controller->platform_data;
++	fsl_setup_phy(ehci, pdata->phy_mode, 0);
+ }
+ 
+ static inline void fsl_platform_set_host_mode(struct usb_hcd *hcd)
+@@ -40,11 +44,16 @@ static inline void fsl_platform_set_host_mode(struct usb_hcd *hcd)
+ 		pdata->xcvr_ops->set_host();
+ 
+ 	/* set host mode and select "big endian" */
+-	temp = fsl_readl(&regs->usbmode);
++	temp = in_be32(&regs->usbmode);
+ 	temp |= USBMODE_CM_HOST | (pdata->es ? USBMODE_ES : 0);
+-	fsl_writel(temp, &regs->usbmode);
++	out_be32(&regs->usbmode, temp);
+ 
+ 	pr_debug("%s: set usbmode to 0x%x\n\n", __FUNCTION__,
+-		fsl_readl(&regs->usbmode));
++		in_be32(&regs->usbmode));
++
++}
+ 
++static inline void
++fsl_platform_set_vbus_power(struct fsl_usb2_platform_data *pdata, int on)
++{
+ }
+diff --git a/include/linux/fsl_devices.h b/include/linux/fsl_devices.h
+index 6b5228e..fb9cb15 100644
+--- a/include/linux/fsl_devices.h
++++ b/include/linux/fsl_devices.h
+@@ -6,7 +6,7 @@
+  *
+  * Maintainer: Kumar Gala <galak@kernel.crashing.org>
+  *
+- * Copyright 2004 Freescale Semiconductor, Inc
++ * Copyright 2004-2008 Freescale Semiconductor, Inc
+  *
+  * This program is free software; you can redistribute  it and/or modify it
+  * under  the terms of  the GNU General  Public License as published by the
+@@ -91,19 +91,6 @@ enum fsl_usb2_operating_modes {
+ 	FSL_USB2_DR_OTG,
+ };
+ 
+-/* DDD
+- * replace _operating_modes with _controller
+- *
+- * the operating_mode tests in fsl_platform_verify() aren't needed,
+- * since the ehci driver isn't going to be probe()d unless it's
+- * "fsl-ehci" device anyway, and what we really need to know is
+- * which controller (MPH/DR) we're dealing with
+- */
+-enum fsl_usb2_controller {
+-	FSL_USB2_MPH,
+-	FSL_USB2_DR,
+-};
+-
+ enum fsl_usb2_phy_modes {
+ 	FSL_USB2_PHY_NONE,
+ 	FSL_USB2_PHY_ULPI,
+@@ -112,38 +99,42 @@ enum fsl_usb2_phy_modes {
+ 	FSL_USB2_PHY_SERIAL,
+ };
+ 
++struct platform_device;
+ struct fsl_usb2_platform_data {
+ 	/* board specific information */
+-	/*
+-	 * DDD see note above
+-	 * enum fsl_usb2_operating_modes	operating_mode;
+-	 */
+-	enum fsl_usb2_controller	controller;
++	enum fsl_usb2_operating_modes	operating_mode;
+ 	enum fsl_usb2_phy_modes		phy_mode;
+ 	unsigned int			port_enables;
+-	/*
+-	 * DDD this could arguably be moved to a separate
+-	 * fsl usb2 device header file
+-	 */
+-	char *name;			/* pretty print */
++
++	char *name;		/* pretty print */
+ 	int (*platform_init) (struct platform_device *);
+-	void (*platform_uninit) (struct platform_device *);
+-	int (*platform_verify) (struct platform_device *);
+-	u32				xcvr_type;	/* PORTSCX_PTS_* */
+-	u32				view;		/* ULPI viewport register */
+-	u32				r_start;	/* start of MEM resource */
+-	u32				r_len;		/* length of MEM resource */
+-	void __iomem			*regs;		/* ioremap'd register base */
++	void (*platform_uninit) (struct fsl_usb2_platform_data *);
++	void __iomem *regs;	/* ioremap'd register base */
++	u32 xcvr_type;		/* PORTSC_PTS_* */
++	char *transceiver;	/* transceiver name */
++	unsigned power_budget;	/* for hcd->power_budget */
++	struct platform_device *pdev;
++	struct fsl_xcvr_ops *xcvr_ops;
++	int (*gpio_usb_active) (void);
++	void (*gpio_usb_inactive) (void);
+ 	unsigned			big_endian_mmio : 1;
+ 	unsigned			big_endian_desc : 1;
+-	unsigned			es : 1;		/* need USBMODE:ES */
++	unsigned			es : 1;	/* need USBMODE:ES */
+ 	unsigned			have_sysif_regs : 1;
+ 	unsigned			le_setup_buf : 1;
+-	unsigned			does_otg : 1;	/* set IFF it's an OTG port */
+-
+-	unsigned			power_budget;	/* for hcd->power_budget */
+-	struct fsl_xcvr_ops		*xcvr_ops;
+-	int				max_ep_nr;	/* max # of endpoints */
++	unsigned			suspended : 1;
++	unsigned			already_suspended : 1;
++
++	/* register save area for suspend/resume */
++	u32				pm_command;
++	u32				pm_status;
++	u32				pm_intr_enable;
++	u32				pm_frame_index;
++	u32				pm_segment;
++	u32				pm_frame_list;
++	u32				pm_async_next;
++	u32				pm_configured_flag;
++	u32				pm_portsc;
+ };
+ 
+ /* Flags in fsl_usb2_mph_platform_data */
+diff --git a/include/linux/usb/fsl_usb2.h b/include/linux/usb/fsl_usb2.h
+index 50d2f5f..b6c9cb6 100644
+--- a/include/linux/usb/fsl_usb2.h
++++ b/include/linux/usb/fsl_usb2.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -55,13 +55,8 @@ struct fsl_usb_device_regs {
+ 	u32 endptflush;		/* Endpoint Flush Register */
+ 	u32 endptstatus;	/* Endpoint Status Register */
+ 	u32 endptcomplete;	/* Endpoint Complete Register */
+-#if 0
+-	u32 endptctrl[USB_MAX_ENDPOINTS]; /* Endpoint Control Registers */
+-#else
+-	// DDD see DCCPARAMS:DEN for the real number of device endpoints
+-	// DDD 16 is the max
++	/* DCCPARAMS:DEN has the real number of device endpoints. */
+ 	u32 endptctrl[16];	/* Endpoint Control Registers */
+-#endif
+ };
+ 
+  /* USB DR host mode registers (Little Endian) */
+@@ -101,13 +96,8 @@ struct fsl_usb_host_regs {
+ 	u32 endptflush;		/* Endpoint Flush Register */
+ 	u32 endptstatus;	/* Endpoint Status Register */
+ 	u32 endptcomplete;	/* Endpoint Complete Register */
+-#if 0
+-	u32 endptctrl[USB_MAX_ENDPOINTS]; /* Endpoint Control Registers */
+-#else
+-	/* DDD see DCCPARAMS:DEN for the real number of device endpoints */
+-	/* DDD 16 is the max */
++	/* DCCPARAMS:DEN has the real number of device endpoints. */
+ 	u32 endptctrl[16];	/* Endpoint Control Registers */
+-#endif
+ };
+ 
+  /* non-EHCI USB system interface registers (Big Endian) */
+@@ -318,7 +308,7 @@ struct usb_sys_interface {
+ 
+ /* OTG interrupt status bit masks */
+ #define  OTGSC_INTERRUPT_STATUS_BITS_MASK	OTGSC_INTSTS_MASK
+-#endif // 1
++#endif
+ 
+ 
+ 
+@@ -330,7 +320,6 @@ struct usb_sys_interface {
+ #define USBMODE_CM_MASK		(3 << 0)	/* controller mode mask */
+ #define USBMODE_CM_HOST		(3 << 0)	/* host */
+ #define USBMODE_CM_DEVICE	(2 << 0)	/* device */
+-// DDD #define USBMODE_CM_IDLE		(0 << 0)	/* idle */
+ 
+ /* DDD for compatibility for now */
+ #define USB_MODE_CTRL_MODE_IDLE		USBMODE_CM_IDLE
+@@ -385,30 +374,6 @@ struct usb_sys_interface {
+ #define EPCTRL_TX_EP_TYPE_SHIFT			18
+ #define EPCTRL_RX_EP_TYPE_SHIFT			2
+ 
+-/* SNOOPn Register Bit Masks */
+-#define SNOOP_ADDRESS_MASK			0xFFFFF000
+-#define SNOOP_SIZE_ZERO				0x00	/* snooping disable */
+-#define SNOOP_SIZE_4KB				0x0B	/* 4KB snoop size */
+-#define SNOOP_SIZE_8KB				0x0C
+-#define SNOOP_SIZE_16KB				0x0D
+-#define SNOOP_SIZE_32KB				0x0E
+-#define SNOOP_SIZE_64KB				0x0F
+-#define SNOOP_SIZE_128KB			0x10
+-#define SNOOP_SIZE_256KB			0x11
+-#define SNOOP_SIZE_512KB			0x12
+-#define SNOOP_SIZE_1MB				0x13
+-#define SNOOP_SIZE_2MB				0x14
+-#define SNOOP_SIZE_4MB				0x15
+-#define SNOOP_SIZE_8MB				0x16
+-#define SNOOP_SIZE_16MB				0x17
+-#define SNOOP_SIZE_32MB				0x18
+-#define SNOOP_SIZE_64MB				0x19
+-#define SNOOP_SIZE_128MB			0x1A
+-#define SNOOP_SIZE_256MB			0x1B
+-#define SNOOP_SIZE_512MB			0x1C
+-#define SNOOP_SIZE_1GB				0x1D
+-#define SNOOP_SIZE_2GB				0x1E	/* 2GB snoop size */
+-
+ /* pri_ctrl Register Bit Masks */
+ #define PRI_CTRL_PRI_LVL1			0x0000000C
+ #define PRI_CTRL_PRI_LVL0			0x00000003
+@@ -447,17 +412,4 @@ struct usb_sys_interface {
+ /* Controller dma boundary */
+ #define UDC_DMA_BOUNDARY			0x1000
+ 
+-#if defined CONFIG_PPC32
+-#define fsl_readl(addr)		in_le32((addr))
+-#define fsl_writel(addr, val32)	out_le32((addr), (val32))
+-#elif defined CONFIG_COLDFIRE
+-#define fsl_readl(addr)		in_be32((__force unsigned *)(addr))
+-#define fsl_writel(val32, addr)	out_be32((__force unsigned *)(addr), (val32))
+-
+-#define fsl_readw(addr)		in_be16((__force unsigned *)(addr))
+-#define fsl_writew(val16, addr)	out_be16((__force unsigned *)(addr), (val16))
+-#else
+-#error fsl_{readl, writel} must be defined
+-#endif
+-
+ #endif	/* __FSL_USB2_H */
+diff --git a/include/linux/usb/fsl_xcvr.h b/include/linux/usb/fsl_xcvr.h
+index 72b27f9..2e6cee9 100644
+--- a/include/linux/usb/fsl_xcvr.h
++++ b/include/linux/usb/fsl_xcvr.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -11,13 +11,6 @@
+  * http://www.gnu.org/copyleft/gpl.html
+  */
+ 
+-enum fsl_usb_ctrlr {
+-	USB_CTRLR_H1 = 0,
+-	USB_CTRLR_H2 = 1,
+-	USB_CTRLR_OTG = 2,
+-};
+-
+-
+ /**
+  * struct fsl_xcvr_ops - USB transceiver operations
+  *
+@@ -29,14 +22,19 @@ enum fsl_usb_ctrlr {
+  *
+  */
+ struct fsl_xcvr_ops {
+-	enum fsl_usb_ctrlr ctrlr;	/* H1, H2, OTG */
++	char *name;
+ 	u32 xcvr_type;
++	struct fsl_usb2_platform_data *pdata;
+ 
+-	void (*init)(struct platform_device *pdev);
+-	void (*uninit)(struct platform_device *pdev);
+-	void (*set_host)(void);	/* DDD combine set_host and _device ? */
++	void (*init)(struct fsl_xcvr_ops *ops);
++	void (*uninit)(struct fsl_xcvr_ops *ops);
++	void (*suspend)(struct fsl_xcvr_ops *ops);
++	void (*set_host)(void);
+ 	void (*set_device)(void);
+-	void (*set_vbus_power)(struct fsl_usb2_platform_data *pdata, int on);
++	void (*set_vbus_power)(struct fsl_xcvr_ops *ops, int on);
++	void (*set_remote_wakeup)(u32 *view);
++	void (*pullup)(int on);
+ };
+ 
+-
++extern void fsl_usb_xcvr_register(struct fsl_xcvr_ops *xcvr_ops);
++extern void fsl_usb_xcvr_unregister(struct fsl_xcvr_ops *xcvr_ops);
+-- 
+1.6.0.1
+

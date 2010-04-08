@@ -1,0 +1,40 @@
+config SQLITE
+    string
+
+choice
+    bool
+    prompt "Version"
+
+
+config SQLITE_V_3_6_14_2
+    bool
+    prompt "3.6.14.2"
+
+config SQLITE_V_3_6_20
+    bool
+    prompt "3.6.20"
+
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+
+config SQLITE_V_snapshot
+    bool
+    prompt "latest snapshot (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+config SQLITE_V_specific_date
+    bool
+    prompt "<specific date> (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+endchoice
+
+config SQLITE_VERSION
+    string
+    prompt "Enter date (YYYYMMDD)" if SQLITE_V_specific_date
+    default "snapshot" if SQLITE_V_snapshot
+    default "3.6.14.2" if SQLITE_V_3_6_14_2
+    default "3.6.20" if SQLITE_V_3_6_20
+
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!

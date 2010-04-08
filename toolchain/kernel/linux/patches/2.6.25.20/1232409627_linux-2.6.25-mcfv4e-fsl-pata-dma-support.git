@@ -1,0 +1,894 @@
+From acd812d3e72f950b95eb9f0f793a25806821ccbc Mon Sep 17 00:00:00 2001
+From: Kurt Mahan <kmahan@freescale.com>
+Date: Mon, 19 Jan 2009 17:00:27 -0700
+Subject: [PATCH] coldfire: FSL PATA DMA support.
+
+Acked-by: Kurt Mahan <kmahan@freescale.com>
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ arch/m68k/coldfire/mcf5445x-devices.c |   12 +--
+ drivers/ata/Kconfig                   |    8 ++
+ drivers/ata/pata_fsl.c                |  205 ++++++++++++++++++++------------
+ drivers/dma/mcf_edma.c                |  214 ++++++++++++++++++++++++++++++++-
+ include/asm-m68k/mcf_edma.h           |   52 ++++++++-
+ 5 files changed, 403 insertions(+), 88 deletions(-)
+
+diff --git a/arch/m68k/coldfire/mcf5445x-devices.c b/arch/m68k/coldfire/mcf5445x-devices.c
+index 2ed8642..ba3874a 100644
+--- a/arch/m68k/coldfire/mcf5445x-devices.c
++++ b/arch/m68k/coldfire/mcf5445x-devices.c
+@@ -5,9 +5,11 @@
+  *
+  * Based on the Freescale MXC devices.c
+  *
+- * Copyright (c) 2007,2008 Freescale Semiconductor, Inc.
++ * Copyright (c) 2007-2009 Freescale Semiconductor, Inc.
+  *	Kurt Mahan <kmahan@freescale.com>
+  */
++
++
+ #include <linux/module.h>
+ #include <linux/kernel.h>
+ #include <linux/init.h>
+@@ -289,19 +291,11 @@ static int ata_get_clk_rate(void)
+ 	return MCF_BUSCLK;
+ }
+ 
+-/* JKM -- move these to a header file */
+-#define MCF_IDE_DMA_WATERMARK	32	/* DMA watermark level in bytes */
+-#define MCF_IDE_DMA_BD_NR	(512/3/4) /* number of BDs per channel */
+ 
+ static struct fsl_ata_platform_data ata_data = {
+ 	.init             = ata_init,
+ 	.exit             = ata_exit,
+ 	.get_clk_rate     = ata_get_clk_rate,
+-#ifdef CONFIG_PATA_FSL_USE_DMA
+-        .udma_mask        = 0x0F, /* the board handles up to UDMA3 */
+-        .fifo_alarm       = MCF_IDE_DMA_WATERMARK / 2,
+-        .max_sg           = MCF_IDE_DMA_BD_NR,
+-#endif
+ };
+ 
+ static struct resource pata_fsl_resources[] = {
+diff --git a/drivers/ata/Kconfig b/drivers/ata/Kconfig
+index baf944d..10a2a65 100644
+--- a/drivers/ata/Kconfig
++++ b/drivers/ata/Kconfig
+@@ -688,4 +688,12 @@ config PATA_FSL
+ 
+ 	  If you are unsure, say N to this.
+ 
++config FSL_PATA_USE_DMA
++	bool "Freescale PATA eDMA support"
++	depends on PATA_FSL && COLDFIRE_EDMA
++	default y
++	help
++	  This option enables the DMA mode on PATA operations.
++
++
+ endif # ATA
+diff --git a/drivers/ata/pata_fsl.c b/drivers/ata/pata_fsl.c
+index 7b823ee..5f2e1e4 100644
+--- a/drivers/ata/pata_fsl.c
++++ b/drivers/ata/pata_fsl.c
+@@ -3,7 +3,7 @@
+  */
+ 
+ /*
+- * Copyright 2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2007-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -25,7 +25,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/fsl_devices.h>
+ #ifdef CONFIG_FSL_PATA_USE_DMA
+-#include <asm/dma.h>
++#include <asm/mcf_edma.h>
+ #endif
+ 
+ #define DRV_NAME "pata_fsl"
+@@ -43,16 +43,22 @@
+ 	__raw_writel(val, (ata_regs + reg));
+ #endif
+ 
++#define MAX_FSL_SG 256	/* MCF_EDMA_TCD_PER_CHAN */
++
+ struct pata_fsl_priv {
+ #ifdef CONFIG_FSL_PATA_USE_DMA
+ 	int ultra;
+ #endif
+-	u8 *fsl_ata_regs;
++	volatile u8 *fsl_ata_regs;
+ #ifdef CONFIG_FSL_PATA_USE_DMA
+ 	int dma_rchan;
+ 	int dma_wchan;
+ 	int dma_done;
+ 	int dma_dir;
++#if 0
++	int nsg;
++	struct fsl_edma_requestbuf reqbuf[MAX_FSL_SG];
++#endif
+ #endif
+ };
+ 
+@@ -107,7 +113,7 @@ static struct {
+ } pio_specs[] = {
+ 	[0] = {
+ 		.t0 = 600, .t1 = 70, .t2_8 = 290, .t2_16 = 165, .t2i = 0,
+-		.t4 = 30,.t9 = 20,.tA = 50
++		.t4 = 30, .t9 = 20, .tA = 50
+ 	},
+ 	[1] = {
+ 		.t0 = 383, .t1 = 50, .t2_8 = 290, .t2_16 = 125, .t2i = 0,
+@@ -219,26 +225,26 @@ struct fsl_ata_time_regs {
+ 	u8 time_k, time_ack, time_env, time_rpx;
+ 	u8 time_zah, time_mlix, time_dvh, time_dzfs;
+ 	u8 time_dvs, time_cvh, time_ss, time_cyc;
+-};
++} __attribute__((packed));
+ 
+-static void update_timing_config(struct fsl_ata_time_regs *tp, struct ata_host *host)
++static void update_timing_config(struct fsl_ata_time_regs *tp,
++			struct ata_host *host)
+ {
+-	u32 *lp = (u32 *)tp;
++	volatile u32 *lp = (volatile u32 *)tp;
+ 	struct pata_fsl_priv *priv = host->private_data;
+-	u32 *ctlp = (u32 *)priv->fsl_ata_regs;
++	volatile u32 *ctlp = (volatile u32 *)priv->fsl_ata_regs;
+ 	int i;
+ 
+-	/* 
++	/*
+ 	 * JKM - this could have endianess issues on BE depending
+ 	 * on how the controller is glued to the bus -- probably
+ 	 * should rewrite this to write byte at a time.
+ 	 */
+-	for (i = 0; i < 5; i++) {
++	for (i = 0; i < 6; i++) {
+ 		__raw_writel(*lp, ctlp);
+ 		lp++;
+ 		ctlp++;
+ 	}
+-	mb();
+ }
+ 
+ /*!
+@@ -259,7 +265,7 @@ static int set_ata_bus_timing(u8 xfer_mode, struct platform_device *pdev)
+ 	/* get the bus clock cycle time, in ns */
+ 	int T = 1 * 1000 * 1000 * 1000 / plat->get_clk_rate();
+ 	struct fsl_ata_time_regs tr = {0};
+-	DPRINTK("clk_rate = %d  T = %d\n",plat->get_clk_rate(), T);
++	DPRINTK("clk_rate = %d  T = %d\n", plat->get_clk_rate(), T);
+ 
+ 	/*
+ 	 * every mode gets the same t_off and t_on
+@@ -269,9 +275,9 @@ static int set_ata_bus_timing(u8 xfer_mode, struct platform_device *pdev)
+ 
+ 	if (xfer_mode >= XFER_UDMA_0) {
+ 		int speed = xfer_mode - XFER_UDMA_0;
+-		if (speed >= NR_UDMA_SPECS) {
++		if (speed >= NR_UDMA_SPECS)
+ 			return -EINVAL;
+-		}
++
+ 		tr.time_ack = (udma_specs[speed].tACK + T) / T;
+ 		tr.time_env = (udma_specs[speed].tENV_min + T) / T;
+ 		tr.time_rpx = (udma_specs[speed].tRP + T) / T + 2;
+@@ -287,9 +293,9 @@ static int set_ata_bus_timing(u8 xfer_mode, struct platform_device *pdev)
+ 		tr.time_cyc = (udma_specs[speed].tCYC + T) / T;
+ 	} else if (xfer_mode >= XFER_MW_DMA_0) {
+ 		int speed = xfer_mode - XFER_MW_DMA_0;
+-		if (speed >= NR_MDMA_SPECS) {
++		if (speed >= NR_MDMA_SPECS)
+ 			return -EINVAL;
+-		}
++
+ 		tr.time_m = (mdma_specs[speed].tM + T) / T;
+ 		tr.time_jn = (mdma_specs[speed].tJNH + T) / T;
+ 		tr.time_d = (mdma_specs[speed].tD + T) / T;
+@@ -297,9 +303,9 @@ static int set_ata_bus_timing(u8 xfer_mode, struct platform_device *pdev)
+ 		tr.time_k = (mdma_specs[speed].tKW + T) / T;
+ 	} else {
+ 		int speed = xfer_mode - XFER_PIO_0;
+-		if (speed >= NR_PIO_SPECS) {
++		if (speed >= NR_PIO_SPECS)
+ 			return -EINVAL;
+-		}
++
+ 		tr.time_1 = (pio_specs[speed].t1 + T) / T;
+ 		tr.time_2w = (pio_specs[speed].t2_8 + T) / T;
+ 
+@@ -338,14 +344,16 @@ static int pata_fsl_port_start(struct ata_port *ap)
+ }
+ 
+ #ifdef CONFIG_FSL_PATA_USE_DMA
+-static void dma_callback(void *arg, int error_status, unsigned int count)
++
++static int dma_callback(int channel, void *arg)
+ {
+ 	struct ata_port *ap = arg;
+ 	struct pata_fsl_priv *priv = ap->host->private_data;
+-	u8 *ata_regs = priv->fsl_ata_regs;
++	volatile u8 *ata_regs = priv->fsl_ata_regs;
+ 
+-	priv->dma_done = 1;
+-	/* 
++		mcf_edma_stop_transfer(channel);
++		priv->dma_done = 1;
++	/*
+ 	 * DMA is finished, so unmask INTRQ from the drive to allow the
+ 	 * normal ISR to fire.
+ 	 */
+@@ -353,25 +361,30 @@ static void dma_callback(void *arg, int error_status, unsigned int count)
+ 	__raw_writel(FSL_ATA_INTR_ATA_INTRQ2, ata_regs + FSL_ATA_INT_EN);
+ #else
+ 	WRITE_ATA8(FSL_ATA_INTR_ATA_INTRQ2, FSL_ATA_INT_EN);
++	WRITE_ATA8(FSL_ATA_CTRL_ATA_RST_B, FSL_ATA_CONTROL);
+ #endif
+-	mb();
++
++	return IRQ_HANDLED;
+ }
+ 
+ static void pata_fsl_bmdma_setup(struct ata_queued_cmd *qc)
+ {
+-	int nr_sg = 0;
+ 	int chan;
+-	int dma_mode = 0, dma_ultra;
++	int dma_ultra;
+ 	u8 ata_control;
+ 	struct ata_port *ap = qc->ap;
+ 	struct pata_fsl_priv *priv = ap->host->private_data;
+-	u8 *ata_regs = priv->fsl_ata_regs;
+-	struct fsl_ata_platform_data *plat = ap->dev->platform_data;
+-	struct scatterlist tmp[plat->max_sg], *tsg, *sg;
+-	int err;
++	volatile u8 *ata_regs = priv->fsl_ata_regs;
++	struct scatterlist  *sg;
++	struct fsl_edma_requestbuf *pbuf;
++	unsigned int si;
+ 
+ 	DPRINTK("ENTER\n");
+ 
++	/* reset the ATA FIFO first */
++/*
++ * 	WRITE_ATA8(FSL_ATA_CTRL_ATA_RST_B,FSL_ATA_CONTROL);
++ */
+ 	priv->dma_dir = qc->dma_dir;
+ 
+ 	/*
+@@ -389,11 +402,9 @@ static void pata_fsl_bmdma_setup(struct ata_queued_cmd *qc)
+ 		chan = priv->dma_wchan;
+ 		ata_control |= FSL_ATA_CTRL_FIFO_TX_EN |
+ 			      FSL_ATA_CTRL_DMA_WRITE;
+-		dma_mode = DMA_MODE_WRITE;
+ 	} else {
+ 		chan = priv->dma_rchan;
+ 		ata_control |= FSL_ATA_CTRL_FIFO_RCV_EN;
+-		dma_mode = DMA_MODE_READ;
+ 	}
+ #if 0
+ 	__raw_writel(ata_control, ata_regs + FSL_ATA_CONTROL);
+@@ -401,31 +412,71 @@ static void pata_fsl_bmdma_setup(struct ata_queued_cmd *qc)
+ 	__raw_writel(FSL_ATA_INTR_ATA_INTRQ1, ata_regs + FSL_ATA_INT_EN);
+ #else
+ 	WRITE_ATA8(ata_control, FSL_ATA_CONTROL);
+-	WRITE_ATA8(plat->fifo_alarm, FSL_ATA_FIFO_ALARM);
++	WRITE_ATA8(16/*plat->fifo_alarm*/, FSL_ATA_FIFO_ALARM);
+ 	WRITE_ATA8(FSL_ATA_INTR_ATA_INTRQ1, FSL_ATA_INT_EN);
+ #endif
+-	mb();
++	/*mb();*/
+ 
+ 	/*
+ 	 * Set up the DMA completion callback.
+ 	 */
+-	mxc_dma_callback_set(chan, dma_callback, (void *)ap);
+-
++	/*
++	mcf_edma_set_callback(chan,dma_callback,NULL,(void *)ap);
++	*/
+ 	/*
+ 	 * Copy the sg list to an array.
+ 	 */
+-	tsg = tmp;
+-	ata_for_each_sg(sg, qc) {
+-		memcpy(tsg, sg, sizeof *sg);
+-		tsg++;
+-		nr_sg++;
++#if 0
++	priv->nsg = 0;
++	pbuf = priv->reqbuf;
++
++	for_each_sg(qc->sg, sg, qc->n_elem, si) {
++
++	/*dma_map_sg(NULL, sg, 1, priv->dma_dir);	*/
++
++		if (priv->dma_dir == DMA_TO_DEVICE) {	/* WRITE */
++			pbuf->saddr = sg->dma_address;
++			pbuf->daddr = (dma_addr_t)(priv->fsl_ata_regs + 0x18);
++			pbuf->soff = 4;
++			pbuf->doff = 0;
++		} else {					/* Read */
++			pbuf->daddr = sg->dma_address;
++			pbuf->saddr = (dma_addr_t)(priv->fsl_ata_regs + 0x18);
++			pbuf->doff = 4;
++			pbuf->soff = 0;
++		}
++		pbuf->attr = MCF_EDMA_TCD_ATTR_SSIZE_32BIT
++			|MCF_EDMA_TCD_ATTR_DSIZE_32BIT;
++		pbuf->minor_loop = 16*4;	/* 16 longwords per request*/
++		pbuf->len = sg_dma_len(sg);
++
++		pbuf++;
++		priv->nsg++;
+ 	}
+-	
+-	err = mxc_dma_sg_config(chan, tmp, nr_sg, 0, dma_mode);
+-	if (err) {
+-		printk(KERN_ERR "pata_fsl_bmdma_setup: error %d\n", err);
++
++	BUG_ON(*(unsigned char *)(ata_regs + FSL_ATA_FIFO_FILL));
++	mcf_edma_sg_config(chan, priv->reqbuf, priv->nsg);
++#else
++	if (priv->dma_dir == DMA_TO_DEVICE) {
++		mcf_edma_sglist_config(chan, qc->sg, qc->n_elem, priv->dma_dir,
++			(dma_addr_t)(priv->fsl_ata_regs + 0x18),
++			MCF_EDMA_TCD_ATTR_SSIZE_32BIT
++			| MCF_EDMA_TCD_ATTR_DSIZE_32BIT,
++			4, 0, 8*4);
++	} else {
++
++		mcf_edma_sglist_config(chan, qc->sg, qc->n_elem, priv->dma_dir,
++			(dma_addr_t)(priv->fsl_ata_regs + 0x18),
++			MCF_EDMA_TCD_ATTR_SSIZE_32BIT
++			| MCF_EDMA_TCD_ATTR_DSIZE_32BIT,
++			0, 4, 8*4);
+ 	}
++
++#endif
++	priv->dma_done = 0;
++
+ 	DPRINTK("EXIT\n");
++
+ }
+ 
+ static void pata_fsl_bmdma_start(struct ata_queued_cmd *qc)
+@@ -433,19 +484,13 @@ static void pata_fsl_bmdma_start(struct ata_queued_cmd *qc)
+ 	struct ata_port *ap = qc->ap;
+ 	struct pata_fsl_priv *priv = ap->host->private_data;
+ 	int chan;
+-	int err;
+ 
+ 	/*
+ 	 * Start the channel.
+ 	 */
+ 	chan = qc->dma_dir == DMA_TO_DEVICE ? priv->dma_wchan : priv->dma_rchan;
+ 
+-	priv->dma_done = 0;
+-
+-	err = mxc_dma_enable(chan);
+-	if (err) {
+-		printk(KERN_ERR "%s: : error %d\n", __func__, err);
+-	}
++	mcf_edma_enable_transfer(chan);
+ 
+ 	ap->ops->exec_command(ap, &qc->tf);
+ }
+@@ -453,8 +498,13 @@ static void pata_fsl_bmdma_start(struct ata_queued_cmd *qc)
+ static void pata_fsl_bmdma_stop(struct ata_queued_cmd *qc)
+ {
+ 	struct ata_port *ap = qc->ap;
++/*
++	int chan;
+ 
+-	/* do a dummy read as in ata_bmdma_stop */
++	chan = qc->dma_dir == DMA_TO_DEVICE ? priv->dma_wchan : priv->dma_rchan;
++	mcf_edma_stop_transfer(chan);
++*/
++/* do a dummy read as in ata_bmdma_stop */
+ 	ata_altstatus(ap);
+ }
+ 
+@@ -472,17 +522,27 @@ static void pata_fsl_dma_init(struct ata_port *ap)
+ 	priv->dma_rchan = -1;
+ 	priv->dma_wchan = -1;
+ 
+-	priv->dma_rchan = mxc_dma_request(MXC_DMA_ATA_RX, "MXC ATA RX");
++	priv->dma_rchan = mcf_edma_request_channel(MCF_EDMA_CHAN_ATA_RX,
++				dma_callback,
++				NULL, 0x6,
++				(void *)ap,
++				NULL,
++				"MCF ATA RX");
+ 	if (priv->dma_rchan < 0) {
+ 		dev_printk(KERN_ERR, ap->dev, "couldn't get RX DMA channel\n");
+ 		goto err_out;
+ 	}
+ 
+-	priv->dma_wchan = mxc_dma_request(MXC_DMA_ATA_TX, "MXC ATA TX");
++	priv->dma_wchan = mcf_edma_request_channel(MCF_EDMA_CHAN_ATA_TX,
++				dma_callback,
++				NULL, 0x6,
++				(void *)ap,
++				NULL,
++				"MCF ATA TX");
+ 	if (priv->dma_wchan < 0) {
+ 		dev_printk(KERN_ERR, ap->dev, "couldn't get TX DMA channel\n");
+ 		goto err_out;
+-	}       
++	}
+ 
+ 	dev_printk(KERN_ERR, ap->dev, "rchan=%d wchan=%d\n", priv->dma_rchan,
+ 		   priv->dma_wchan);
+@@ -491,8 +551,8 @@ static void pata_fsl_dma_init(struct ata_port *ap)
+ err_out:
+ 	ap->mwdma_mask = 0;
+ 	ap->udma_mask = 0;
+-	mxc_dma_free(priv->dma_rchan);
+-	mxc_dma_free(priv->dma_wchan);
++	mcf_edma_free_channel(priv->dma_rchan, ap);
++	mcf_edma_free_channel(priv->dma_wchan, ap);
+ 	kfree(priv);
+ }
+ #endif /* CONFIG_FSL_PATA_USE_DMA */
+@@ -512,7 +572,8 @@ static struct scsi_host_template pata_fsl_sht = {
+ 	.use_clustering		= ATA_SHT_USE_CLUSTERING,
+ 	.proc_name		= DRV_NAME,
+ #ifdef CONFIG_FSL_PATA_USE_DMA
+-	.dma_boundary		= FSL_ATA_MAX_SG_LEN,
++	.sg_tablesize		= MAX_FSL_SG,
++	.dma_boundary		= ATA_DMA_BOUNDARY,
+ #endif
+ 	.slave_configure	= ata_scsi_slave_config,
+ 	.slave_destroy		= ata_scsi_slave_destroy,
+@@ -599,19 +660,18 @@ static int __devinit pata_fsl_probe(struct platform_device *pdev)
+ 	int ret;
+ 
+ 	DPRINTK("ENTER\n");
+-	/* 
++	/*
+ 	 * Get an ata_host structure for this device
+ 	 */
+ 	host = ata_host_alloc(&pdev->dev, 1);
+ 	if (!host)
+ 		return -ENOMEM;
+ 	ap = host->ports[0];
+-
+-	/* 
++	/*
+ 	 * Allocate private data
+ 	 */
+-	priv = kzalloc(sizeof (struct pata_fsl_priv), GFP_KERNEL);
+-	if(priv == NULL) {
++	priv = kzalloc(sizeof(struct pata_fsl_priv), GFP_KERNEL);
++	if (priv == NULL) {
+ 		/* free(host); */
+ 		return -ENOMEM;
+ 	}
+@@ -632,11 +692,12 @@ static int __devinit pata_fsl_probe(struct platform_device *pdev)
+ 	ap->ioaddr.ctl_addr = (void *)(ata_regs + FSL_ATA_DRIVE_CONTROL);
+ 	ap->ioaddr.altstatus_addr = ap->ioaddr.ctl_addr;
+ 	ap->ops = &pata_fsl_port_ops;
+-	ap->pio_mask = 0x7F;
++	ap->pio_mask = 0x3F;
+ #ifdef CONFIG_FSL_PATA_USE_DMA
+-	ap->mwdma_mask = 0x7F;
+-	ap->udma_mask = plat->udma_mask;
+-	pata_fsl_sht.sg_tablesize = plat->max_sg;
++	ap->mwdma_mask = 0x07;
++	ap->udma_mask = 0x1F;
++/*	ap->udma_mask = plat->udma_mask;	*/
++/*	pata_fsl_sht.sg_tablesize = plat->max_sg;	*/
+ #else
+ 	ap->mwdma_mask = 0x00;
+ 	ap->udma_mask = 0x00;
+@@ -656,7 +717,6 @@ static int __devinit pata_fsl_probe(struct platform_device *pdev)
+ 
+ 	/* Deassert the reset bit to enable the interface */
+ 	WRITE_ATA8(FSL_ATA_CTRL_ATA_RST_B, FSL_ATA_CONTROL);
+-	mb();
+ 
+ 	/* Set initial timing and mode */
+ 	set_ata_bus_timing(XFER_PIO_4, pdev);
+@@ -676,7 +736,6 @@ static int __devinit pata_fsl_probe(struct platform_device *pdev)
+ #else
+ 	WRITE_ATA8(FSL_ATA_INTR_ATA_INTRQ2, FSL_ATA_INT_EN);
+ #endif
+-	mb();
+ 
+ 	/* activate */
+ 	ret = ata_host_activate(host, platform_get_irq(pdev, 0), ata_interrupt,
+@@ -706,7 +765,6 @@ static int __devexit pata_fsl_remove(struct platform_device *pdev)
+ #else
+ 	WRITE_ATA8(0, FSL_ATA_INT_EN); /* Disable interrupts */
+ #endif
+-	mb();
+ 
+ 	ata_host_detach(host);
+ 
+@@ -733,7 +791,6 @@ static int pata_fsl_suspend(struct platform_device *pdev, pm_message_t state)
+ #else
+ 	WRITE_ATA8(0, FSL_ATA_INT_EN);
+ #endif
+-	mb();
+ 
+ 	if (plat->exit)
+ 		plat->exit();
+@@ -749,17 +806,14 @@ static int pata_fsl_resume(struct platform_device *pdev)
+ 					     pdev->dev.platform_data;
+ 	u8 *ata_regs = priv->fsl_ata_regs;
+ 
+-	if (plat->init && plat->init(pdev)) {
++	if (plat->init && plat->init(pdev))
+ 		return -ENODEV;
+-	}
+-
+ 	/* Deassert the reset bit to enable the interface */
+ #if 0
+ 	__raw_writel(FSL_ATA_CTRL_ATA_RST_B, ata_regs + FSL_ATA_CONTROL);
+ #else
+ 	WRITE_ATA8(FSL_ATA_CTRL_ATA_RST_B, FSL_ATA_CONTROL);
+ #endif
+-	mb();
+ 
+ 	/* Set initial timing and mode */
+ 	set_ata_bus_timing(XFER_PIO_4, pdev);
+@@ -772,7 +826,6 @@ static int pata_fsl_resume(struct platform_device *pdev)
+ #else
+ 	WRITE_ATA8(FSL_ATA_INTR_ATA_INTRQ2, FSL_ATA_INT_EN);
+ #endif
+-	mb();
+ 
+ 	return 0;
+ }
+diff --git a/drivers/dma/mcf_edma.c b/drivers/dma/mcf_edma.c
+index a0a30fc..9362bd4 100644
+--- a/drivers/dma/mcf_edma.c
++++ b/drivers/dma/mcf_edma.c
+@@ -2,7 +2,7 @@
+   * mcf_edma.c - eDMA driver for Coldfire.
+   *
+   * Andrey Butok
+-  * Copyright Freescale Semiconductor, Inc. 2008
++  * Copyright Freescale Semiconductor, Inc. 2008,2009
+   *
+   *      Based on coldfire_edma.c
+   *      of Yaroslav Vinogradov (Freescale Semiconductor)
+@@ -40,6 +40,7 @@
+   *     or use Intel DMA API
+   */
+ 
++#include <linux/dma-mapping.h>
+ #include <asm/mcf_edma.h>
+ #include <linux/init.h>
+ #include <linux/module.h>
+@@ -82,7 +83,6 @@
+ /* DMA channel pool used for atomtic channel allocation.
+  * You can edit this list. First candidates are "Not used/Reserved" channels */
+ u8 mcf_edma_channel_pool[] = { 1,	/* Not used */
+-	15,			/* Not used */
+ 	0,			/* External DMA request */
+ 	5,			/* UART1 Receive */
+ 	6,			/* UART1 Transmit */
+@@ -116,6 +116,13 @@ static int mcf_edma_major;
+ /* device driver structure */
+ static struct mcf_edma_dev *mcf_edma_devp;
+ 
++/* PATA controller structure */
++static struct {
++	struct TCD *pata_tcd_va;
++	dma_addr_t pata_tcd_pa;
++} fsl_pata_dma_tcd;
++
++
+ /* device driver file operations */
+ struct file_operations mcf_edma_fops = {
+ 	.owner = THIS_MODULE,
+@@ -264,6 +271,179 @@ mcf_edma_set_tcd_params(int channel, u32 source, u32 dest,
+ EXPORT_SYMBOL(mcf_edma_set_tcd_params);
+ 
+ /**
++ * mcf_edma_sg_config - config an eDMA channel to use the S/G tcd feature
++ * @channel: channel number
++ * @buf: the array of tcd sg
++ * @nents: number of tcd sg array, the max is 256 set but can modify
++ *
++ * limitation:
++ * 	currently this function is only for PATA RX/TX,
++ * 	so eDMA init does not allocate TCD memory for other memory
++ *
++ * TODO:
++ *	any one who need this feature shoule add his own TCD memory init
++ */
++void mcf_edma_sg_config(int channel, struct fsl_edma_requestbuf *buf,
++			int nents)
++{
++	struct TCD *vtcd = (struct TCD *)fsl_pata_dma_tcd.pata_tcd_va;
++	u32 ptcd = fsl_pata_dma_tcd.pata_tcd_pa;
++	struct fsl_edma_requestbuf *pb = buf;
++	int i;
++
++	if (channel < MCF_EDMA_CHAN_ATA_RX || channel > MCF_EDMA_CHAN_ATA_TX) {
++		printk(KERN_ERR "mcf edma sg config err, not support\n");
++		return;
++	}
++	if (nents > MCF_EDMA_TCD_PER_CHAN) {
++		printk(KERN_ERR "Too many SGs, please confirm.%d > %d \n",
++				nents, MCF_EDMA_TCD_PER_CHAN);
++		return;
++	}
++
++	/* build our tcd sg array */
++	for (i = 0; i < nents; i++) {
++		memset(vtcd, 0 , sizeof(struct TCD));
++		vtcd->saddr = pb->saddr;
++		vtcd->daddr = pb->daddr;
++		vtcd->attr = pb->attr;
++		vtcd->soff = pb->soff;
++		vtcd->doff = pb->doff;
++		vtcd->nbytes = pb->minor_loop;
++		vtcd->citer = vtcd->biter = pb->len/pb->minor_loop;
++
++		if (i != nents - 1) {
++			vtcd->csr |= MCF_EDMA_TCD_CSR_E_SG;/* we are tcd sg */
++			vtcd->dlast_sga =
++				(u32)(ptcd + (i + 1)*sizeof(struct TCD));
++		} else {
++			/*this is the last sg, so enable the major int*/
++			vtcd->csr |= MCF_EDMA_TCD_CSR_INT_MAJOR
++					|MCF_EDMA_TCD_CSR_D_REQ;
++		}
++		pb++;
++		vtcd++;
++	}
++
++	/* Now setup the firset TCD for this sg to the edma enginee */
++	vtcd = fsl_pata_dma_tcd.pata_tcd_va;
++
++	MCF_EDMA_TCD_CSR(channel) = 0x0000;
++	MCF_EDMA_TCD_SADDR(channel) = vtcd->saddr;
++	MCF_EDMA_TCD_DADDR(channel) = vtcd->daddr;
++	MCF_EDMA_TCD_ATTR(channel) = vtcd->attr;
++	MCF_EDMA_TCD_SOFF(channel) = MCF_EDMA_TCD_SOFF_SOFF(vtcd->soff);
++	MCF_EDMA_TCD_NBYTES(channel) = MCF_EDMA_TCD_NBYTES_NBYTES(vtcd->nbytes);
++	MCF_EDMA_TCD_SLAST(channel) = MCF_EDMA_TCD_SLAST_SLAST(vtcd->slast);
++	MCF_EDMA_TCD_CITER(channel) = MCF_EDMA_TCD_CITER_CITER(vtcd->citer);
++	MCF_EDMA_TCD_BITER(channel) = MCF_EDMA_TCD_BITER_BITER(vtcd->biter);
++	MCF_EDMA_TCD_DOFF(channel) = MCF_EDMA_TCD_DOFF_DOFF(vtcd->doff);
++	MCF_EDMA_TCD_DLAST_SGA(channel) =
++	    MCF_EDMA_TCD_DLAST_SGA_DLAST_SGA(vtcd->dlast_sga);
++	MCF_EDMA_TCD_CSR(channel) |= vtcd->csr;
++}
++EXPORT_SYMBOL(mcf_edma_sg_config);
++
++/**
++ * The zero-copy version of mcf_edma_sg_config
++ * dma_dir : indicate teh addr direction
++ */
++void mcf_edma_sglist_config(int channel, struct scatterlist *sgl, int n_elem,
++			int dma_dir, u32 addr, u32 attr,
++			u32 soff, u32 doff, u32 nbytes)
++{
++	struct TCD *vtcd = (struct TCD *)fsl_pata_dma_tcd.pata_tcd_va;
++	u32 ptcd = fsl_pata_dma_tcd.pata_tcd_pa;
++	struct scatterlist *sg;
++	u32 si;
++
++	if (channel < MCF_EDMA_CHAN_ATA_RX || channel > MCF_EDMA_CHAN_ATA_TX) {
++		printk(KERN_ERR "mcf edma sg config err, not support\n");
++		return;
++	}
++	if (n_elem > MCF_EDMA_TCD_PER_CHAN) {
++		printk(KERN_ERR "Too many SGs, please confirm.%d > %d \n",
++				n_elem, MCF_EDMA_TCD_PER_CHAN);
++		return;
++	}
++
++	/* build our tcd sg array */
++ if (dma_dir == DMA_TO_DEVICE) {	/* write */
++	for_each_sg(sgl, sg, n_elem, si) {
++		memset(vtcd, 0 , sizeof(struct TCD));
++		vtcd->saddr = sg_dma_address(sg);
++		vtcd->daddr = addr;
++		vtcd->attr = attr;
++		vtcd->soff = soff;
++		vtcd->doff = doff;
++		vtcd->nbytes = nbytes;
++		vtcd->citer = vtcd->biter = sg_dma_len(sg)/nbytes;
++
++		if (si != n_elem - 1) {
++			vtcd->csr |= MCF_EDMA_TCD_CSR_E_SG;/* we are tcd sg */
++			vtcd->dlast_sga =
++				(u32)(ptcd + (si + 1)*sizeof(struct TCD));
++		} else {
++			/*this is the last sg, so enable the major int*/
++			vtcd->csr |= MCF_EDMA_TCD_CSR_INT_MAJOR
++					|MCF_EDMA_TCD_CSR_D_REQ;
++
++		}
++
++		vtcd++;
++
++	}
++
++ } else {
++
++	for_each_sg(sgl, sg, n_elem, si) {
++		memset(vtcd, 0 , sizeof(struct TCD));
++		vtcd->daddr = sg_dma_address(sg);
++		vtcd->saddr = addr;
++		vtcd->attr = attr;
++		vtcd->soff = soff;
++		vtcd->doff = doff;
++		vtcd->nbytes = nbytes;
++		vtcd->citer = vtcd->biter = sg_dma_len(sg)/nbytes;
++
++		if (si != n_elem - 1) {
++			vtcd->csr |= MCF_EDMA_TCD_CSR_E_SG;/* we are tcd sg */
++			vtcd->dlast_sga =
++				(u32)(ptcd + (si + 1)*sizeof(struct TCD));
++		} else {
++			/*this is the last sg, so enable the major int*/
++			vtcd->csr |= MCF_EDMA_TCD_CSR_INT_MAJOR
++					|MCF_EDMA_TCD_CSR_D_REQ;
++
++		}
++
++		vtcd++;
++
++	}
++
++ }
++
++	/* Now setup the firset TCD for this sg to the edma enginee */
++	vtcd = fsl_pata_dma_tcd.pata_tcd_va;
++
++	MCF_EDMA_TCD_CSR(channel) = 0x0000;
++	MCF_EDMA_TCD_SADDR(channel) = vtcd->saddr;
++	MCF_EDMA_TCD_DADDR(channel) = vtcd->daddr;
++	MCF_EDMA_TCD_ATTR(channel) = vtcd->attr;
++	MCF_EDMA_TCD_SOFF(channel) = MCF_EDMA_TCD_SOFF_SOFF(vtcd->soff);
++	MCF_EDMA_TCD_NBYTES(channel) = MCF_EDMA_TCD_NBYTES_NBYTES(vtcd->nbytes);
++	MCF_EDMA_TCD_SLAST(channel) = MCF_EDMA_TCD_SLAST_SLAST(vtcd->slast);
++	MCF_EDMA_TCD_CITER(channel) = MCF_EDMA_TCD_CITER_CITER(vtcd->citer);
++	MCF_EDMA_TCD_BITER(channel) = MCF_EDMA_TCD_BITER_BITER(vtcd->biter);
++	MCF_EDMA_TCD_DOFF(channel) = MCF_EDMA_TCD_DOFF_DOFF(vtcd->doff);
++	MCF_EDMA_TCD_DLAST_SGA(channel) =
++	    MCF_EDMA_TCD_DLAST_SGA_DLAST_SGA(vtcd->dlast_sga);
++
++	MCF_EDMA_TCD_CSR(channel) |= vtcd->csr;
++}
++EXPORT_SYMBOL(mcf_edma_sglist_config);
++
++/**
+  * mcf_edma_set_tcd_params_halfirq - Set TCD AND enable half irq
+  * @channel: channel number
+  * @source: source address
+@@ -577,6 +757,7 @@ mcf_edma_init(void)
+ 	dev_t dev;
+ 	int result;
+ 	int i;
++	u32 offset;
+ 
+ 	DBG("Entry\n");
+ 
+@@ -644,6 +825,35 @@ mcf_edma_init(void)
+ 
+ 	MCF_EDMA_CR = 0;
+ 
++	fsl_pata_dma_tcd.pata_tcd_va = (struct TCD *) dma_alloc_coherent(NULL,
++			MCF_EDMA_TCD_PER_CHAN + 1,
++			&fsl_pata_dma_tcd.pata_tcd_pa,
++			GFP_KERNEL);
++
++	if (!fsl_pata_dma_tcd.pata_tcd_va) {
++		printk(KERN_INFO "MCF eDMA alllocate tcd memeory failed \n");
++		goto fail;
++	}
++
++
++	offset = (fsl_pata_dma_tcd.pata_tcd_pa & (sizeof(struct TCD)-1)) ;
++	if (offset) {
++		/*
++		 * up align the addr to 32B to match the eDMA enginee require,
++		 * ie. sizeof tcd boundary
++		 * */
++		printk(KERN_INFO "pata tcd original:pa-%x[%x]\n",
++				fsl_pata_dma_tcd.pata_tcd_pa,
++				(u32)fsl_pata_dma_tcd.pata_tcd_va);
++
++		fsl_pata_dma_tcd.pata_tcd_pa += sizeof(struct TCD) - offset;
++		fsl_pata_dma_tcd.pata_tcd_va += sizeof(struct TCD) - offset;
++
++		printk(KERN_INFO "pata tcd realigned:pa-%x[%x]\n",
++				fsl_pata_dma_tcd.pata_tcd_pa,
++				(u32)fsl_pata_dma_tcd.pata_tcd_va);
++	}
++
+ #ifdef CONFIG_PROC_FS
+ 	mcf_edma_proc_init();
+ #endif
+diff --git a/include/asm-m68k/mcf_edma.h b/include/asm-m68k/mcf_edma.h
+index 1a0ee93..1d2b60e 100644
+--- a/include/asm-m68k/mcf_edma.h
++++ b/include/asm-m68k/mcf_edma.h
+@@ -1,7 +1,7 @@
+  /*
+   * mcf_edma.h - Coldfire eDMA driver header file.
+   *
+-  * Copyright Freescale Semiconductor, Inc. 2008
++  * Copyright Freescale Semiconductor, Inc. 2008, 2009
+   *
+   * This program is free software; you can redistribute  it and/or modify it
+   * under  the terms of  the GNU General  Public License as published by the
+@@ -17,6 +17,7 @@
+ #if defined(CONFIG_M5445X)
+ #include <asm/mcf5445x_edma.h>
+ #endif
++#include <linux/scatterlist.h>
+ 
+ #define MCF_EDMA_INT_CHANNEL_BASE 	(8)
+ #define MCF_EDMA_INT_CONTROLLER_BASE 	(64)
+@@ -26,6 +27,55 @@
+ #define MCF_EDMA_CHANNEL_ANY		(0xFF)
+ #define MCF_EDMA_INT_ERR		(16)	/* edma error interrupt */
+ 
++#define MCF_EDMA_TCD_PER_CHAN		256
++
++/* eDMA engine TCD memory description */
++
++struct TCD {
++	u32	saddr;
++	u16	attr;
++	u16	soff;
++	u32	nbytes;
++	u32	slast;
++	u32	daddr;
++	u16	citer;
++	u16	doff;
++	u32	dlast_sga;
++	u16	biter;
++	u16	csr;
++} __attribute__ ((packed));
++
++struct fsl_edma_requestbuf {
++	dma_addr_t	saddr;
++	dma_addr_t	daddr;
++	u32	soff;
++	u32	doff;
++	u32	attr;
++	u32	 minor_loop;
++	u32	len;
++};
++
++/*
++ * config the eDMA to use the TCD sg feature
++ *
++ * @channel: which channel. in fact this function is designed to satisfy
++ * the ATA driver TCD SG need, i.e. by now it is a special
++ * func, because it need prev alloc channel TCD physical memory
++ * first, we add the ATA's in the eDMA init only
++ * @buf: buffer array to fill the TCDs
++ * @nents: the size of the buf
++ */
++void mcf_edma_sg_config(int channel, struct fsl_edma_requestbuf *buf,
++			int nents);
++
++/*
++ * The zero-copy version of mcf_edma_sg_config()
++ */
++void mcf_edma_sglist_config(int channel, struct scatterlist *sgl, int n_elem,
++			int dma_dir, u32 addr, u32 attr,
++			u32 soff, u32 doff, u32 nbytes);
++
++
+ /* Setup transfer control descriptor (TCD)
+  *   channel - descriptor number
+  *   source  - source address
+-- 
+1.6.0.1
+

@@ -1,0 +1,416 @@
+From 171f045fa2c87e6b7e63d3961451eebb11eca28d Mon Sep 17 00:00:00 2001
+From: Kurt Mahan <kmahan@freescale.com>
+Date: Fri, 21 Nov 2008 14:19:41 -0700
+Subject: [PATCH] Enable half-complete IRQ.
+
+Add APIs to enable setting a half-way-complete IRQ.
+Add ability to check half-way functionality in the test driver.
+Add error checking to the test driver.
+Add destination buffer initialization to the test driver.
+Increase test buffer sizes.
+Add 1-line fix from Jingchang-Lu to initialize CSR field in TCD setup.
+
+Signed-off-by: Jingchang-lu <B22599@freescale.com>
+Signed-off-by: Kurt Mahan <kmahan@freescale.com>
+LTIBName: m5445x-edma-halfirq
+---
+ drivers/dma/mcf_edma.c      |  105 ++++++++++++++++++++++++++++++++++++++++--
+ drivers/dma/mcf_edma_test.c |   71 ++++++++++++++++++++++++-----
+ include/asm-m68k/mcf_edma.h |   35 ++++++++++++++
+ 3 files changed, 194 insertions(+), 17 deletions(-)
+
+diff --git a/drivers/dma/mcf_edma.c b/drivers/dma/mcf_edma.c
+index 6927ba3..a0a30fc 100644
+--- a/drivers/dma/mcf_edma.c
++++ b/drivers/dma/mcf_edma.c
+@@ -54,7 +54,7 @@
+ #error "The driver is not tested/designed for your processor!"
+ #endif
+ 
+-#define MCF_EDMA_DRIVER_VERSION	"Revision: 0.002"
++#define MCF_EDMA_DRIVER_VERSION	"Revision: 0.003"
+ #define MCF_EDMA_DRIVER_AUTHOR	"Freescale Semiconductor Inc, Andrey Butok"
+ #define MCF_EDMA_DRIVER_DESC	"Coldfire EDMA driver."
+ #define MCF_EDMA_DRIVER_INFO	DRIVER_VERSION " " DRIVER_DESC
+@@ -67,13 +67,13 @@
+ 
+ #ifdef MCF_EDMA_DEBUG
+ #define DBG(fmt, args...) 	printk(KERN_INFO "[%s]  " fmt, \
+-				__FUNCTION__, ## args)
++				__func__, ## args)
+ #else
+ #define DBG(fmt, args...)	do {} while (0)
+ #endif
+ 
+ #define ERR(format, arg...)	printk(KERN_ERR "%s:%s: " format "\n", \
+-				 __FILE__,  __FUNCTION__ , ## arg)
++				 __FILE__,  __func__ , ## arg)
+ #define WARN(stuff...)		printk(KERN_WARNING MCF_EDMA_DRIVER_NAME \
+ 				": " stuff)
+ #define INFO(stuff...)		printk(KERN_INFO MCF_EDMA_DRIVER_NAME \
+@@ -192,6 +192,21 @@ mcf_edma_error_isr(int irq, void *dev_id)
+ }
+ 
+ /**
++ * mcf_edma_check_done - Check if channel is finished or not
++ * @channel: channel number
++ * return: 0 if not done yet
++ */
++int
++mcf_edma_check_done(int channel)
++{
++	if (channel < 0 || channel > MCF_EDMA_CHANNELS)
++		return 1;
++
++	return MCF_EDMA_TCD_CSR(channel) & MCF_EDMA_TCD_CSR_DONE;
++}
++EXPORT_SYMBOL(mcf_edma_check_done);
++
++/**
+  * mcf_edma_set_tcd_params - Set transfer control descriptor (TCD)
+  * @channel: channel number
+  * @source: source address
+@@ -201,7 +216,7 @@ mcf_edma_error_isr(int irq, void *dev_id)
+  * @nbytes: number of bytes to be transfered in minor loop
+  * @slast: last source address adjustment
+  * @citer: major loop count
+- * @biter: beginning minor loop count
++ * @biter: beginning major loop count
+  * @doff: destination offset
+  * @dlast_sga: last destination address adjustment
+  * @major_int: generate interrupt after each major loop
+@@ -229,6 +244,7 @@ mcf_edma_set_tcd_params(int channel, u32 source, u32 dest,
+ 	MCF_EDMA_TCD_DOFF(channel) = MCF_EDMA_TCD_DOFF_DOFF(doff);
+ 	MCF_EDMA_TCD_DLAST_SGA(channel) =
+ 	    MCF_EDMA_TCD_DLAST_SGA_DLAST_SGA(dlast_sga);
++	MCF_EDMA_TCD_CSR(channel) = 0x0000;
+ 
+ 	/* interrupt at the end of major loop */
+ 	if (major_int)
+@@ -241,10 +257,51 @@ mcf_edma_set_tcd_params(int channel, u32 source, u32 dest,
+ 		MCF_EDMA_TCD_CSR(channel) |= MCF_EDMA_TCD_CSR_D_REQ;
+ 	else
+ 		MCF_EDMA_TCD_CSR(channel) &= ~MCF_EDMA_TCD_CSR_D_REQ;
++
++	/* enable error interrupt */
++	MCF_EDMA_SEEI = MCF_EDMA_SEEI_SEEI(channel);
+ }
+ EXPORT_SYMBOL(mcf_edma_set_tcd_params);
+ 
+ /**
++ * mcf_edma_set_tcd_params_halfirq - Set TCD AND enable half irq
++ * @channel: channel number
++ * @source: source address
++ * @dest: destination address
++ * @attr: attributes
++ * @soff: source offset
++ * @nbytes: number of bytes to be transfered in minor loop
++ * @slast: last source address adjustment
++ * @biter: beginning major loop count
++ * @doff: destination offset
++ * @dlast_sga: last destination address adjustment
++ * @disable_req: disable DMA request after major loop
++ */
++void
++mcf_edma_set_tcd_params_halfirq(int channel, u32 source, u32 dest,
++				u32 attr, u32 soff, u32 nbytes, u32 slast,
++				u32 biter, u32 doff, u32 dlast_sga,
++				int disable_req)
++{
++	DBG("(%d)\n", channel);
++
++	if (channel < 0 || channel > MCF_EDMA_CHANNELS)
++		return;
++
++	mcf_edma_set_tcd_params(channel, source, dest,
++				attr, soff, nbytes, slast,
++				biter, biter, doff, dlast_sga,
++				0, disable_req);
++
++	if (biter < 2)
++		printk(KERN_ERR "MCF_EDMA: Request for halfway irq denied\n");
++
++	/* interrupt midway through major loop */
++	MCF_EDMA_TCD_CSR(channel) |= MCF_EDMA_TCD_CSR_INT_HALF;
++}
++EXPORT_SYMBOL(mcf_edma_set_tcd_params_halfirq);
++
++/**
+  * mcf_edma_request_channel - Request an eDMA channel
+  * @channel: channel number. In case it is equal to EDMA_CHANNEL_ANY
+  *		it will be allocated a first free eDMA channel.
+@@ -272,7 +329,7 @@ mcf_edma_request_channel(int channel,
+ 		|| (channel == MCF_EDMA_CHANNEL_ANY))) {
+ 		if (channel == MCF_EDMA_CHANNEL_ANY) {
+ 			int i;
+-			for (i = 0; i < sizeof (mcf_edma_channel_pool); i++) {
++			for (i = 0; i < sizeof(mcf_edma_channel_pool); i++) {
+ 				if (mcf_edma_devp->dma_interrupt_handlers
+ 				    [mcf_edma_channel_pool[i]].allocated ==
+ 				    0) {
+@@ -370,6 +427,10 @@ mcf_edma_free_channel(int channel, void *arg)
+ 			mcf_edma_devp->dma_interrupt_handlers[channel].lock =
+ 			    NULL;
+ 		}
++
++		/* make sure error interrupt is disabled */
++		MCF_EDMA_CEEI = MCF_EDMA_CEEI_CEEI(channel);
++
+ 		return 0;
+ 	}
+ 	return -EINVAL;
+@@ -387,6 +448,9 @@ mcf_edma_cleanup(void)
+ 
+ 	DBG("\n");
+ 
++	/* disable all error ints */
++	MCF_EDMA_CEEI = MCF_EDMA_CEEI_CAEE;
++
+ 	/* free interrupts/memory */
+ 	if (mcf_edma_devp) {
+ 		for (i = 0; i < MCF_EDMA_CHANNELS; i++)
+@@ -402,6 +466,37 @@ mcf_edma_cleanup(void)
+ 	unregister_chrdev_region(devno, 1);
+ }
+ 
++/**
++ * mcf_edma_dump_channel - dump a channel information
++ */
++void
++mcf_edma_dump_channel(int channel)
++{
++	printk(KERN_DEBUG "EDMA Channel %d\n", channel);
++	printk(KERN_DEBUG "  TCD Base     = 0x%x\n",
++	       (int)&MCF_EDMA_TCD_SADDR(channel));
++	printk(KERN_DEBUG "  SRCADDR      = 0x%lx\n",
++	       MCF_EDMA_TCD_SADDR(channel));
++	printk(KERN_DEBUG "  SRCOFF       = 0x%x\n",
++	       MCF_EDMA_TCD_SOFF(channel));
++	printk(KERN_DEBUG "  XFR ATTRIB   = 0x%x\n",
++	       MCF_EDMA_TCD_ATTR(channel));
++	printk(KERN_DEBUG "  SRCLAST      = 0x%lx\n",
++	       MCF_EDMA_TCD_SLAST(channel));
++	printk(KERN_DEBUG "  DSTADDR      = 0x%lx\n",
++	       MCF_EDMA_TCD_DADDR(channel));
++	printk(KERN_DEBUG "  MINOR BCNT   = 0x%lx\n",
++	       MCF_EDMA_TCD_NBYTES(channel));
++	printk(KERN_DEBUG "  CUR_LOOP_CNT = 0x%x\n",
++	       MCF_EDMA_TCD_CITER(channel)&0x1ff);
++	printk(KERN_DEBUG "  BEG_LOOP_CNT = 0x%x\n",
++	       MCF_EDMA_TCD_BITER(channel)&0x1ff);
++	printk(KERN_DEBUG "  STATUS       = 0x%x\n",
++	       MCF_EDMA_TCD_CSR(channel));
++
++}
++EXPORT_SYMBOL(mcf_edma_dump_channel);
++
+ #ifdef CONFIG_PROC_FS
+ /*
+  * proc file system support
+diff --git a/drivers/dma/mcf_edma_test.c b/drivers/dma/mcf_edma_test.c
+index 3e2102f..edb5332 100644
+--- a/drivers/dma/mcf_edma_test.c
++++ b/drivers/dma/mcf_edma_test.c
+@@ -37,6 +37,7 @@
+ #include <linux/interrupt.h>
+ #include <asm/coldfire.h>
+ #include <asm/mcf_edma.h>
++#include <asm/virtconvert.h>
+ 
+ #define MCF_EDMA_TEST_DRIVER_VERSION	"Revision: 0.001"
+ #define MCF_EDMA_TEST_DRIVER_AUTHOR	\
+@@ -53,6 +54,8 @@
+ #define FALSE 0
+ #endif
+ 
++#define TEST_HALFIRQ
++
+ /* Global variable used to signal main process when interrupt is recognized */
+ static int mcf_edma_test_interrupt;
+ int *mcf_edma_test_interrupt_p = &mcf_edma_test_interrupt;
+@@ -61,15 +64,34 @@ int *mcf_edma_test_interrupt_p = &mcf_edma_test_interrupt;
+ static int
+ mcf_edma_test_handler(int channel, void *dev_id)
+ {
++	int done = mcf_edma_check_done(channel);
++
+ 	/* Clear interrupt flag */
+ 	mcf_edma_confirm_interrupt_handled(channel);
+ 
+-	/* Set interrupt status flag to TRUE */
+-	mcf_edma_test_interrupt = TRUE;
++	if (done) {
++		printk(KERN_INFO "DMA Finished\n");
++
++		/* Set interrupt status flag to TRUE */
++		mcf_edma_test_interrupt = TRUE;
++	} else {
++		printk(KERN_INFO "DMA Halfway Done\n");
++
++		/* restart DMA. */
++		mcf_edma_confirm_halfirq(channel);
++	}
+ 
+ 	return IRQ_HANDLED;
+ }
+ 
++static void
++mcf_edma_test_error_handler(int channel, void *dev_id)
++{
++	printk(KERN_INFO "DMA ERROR: Channel = %d\n", channel);
++	printk(KERN_INFO "           EDMA_ES = 0x%lx\n", (MCF_EDMA_ES));
++	mcf_edma_dump_channel(channel);
++}
++
+ /********************************************************************/
+ 
+ int
+@@ -78,8 +100,12 @@ mcf_edma_test_block_compare(u8 *block1, u8 *block2, u32 size)
+ 	u32 i;
+ 
+ 	for (i = 0; i < (size); i++) {
+-		if ((*(u8 *) (block1 + i)) != (*(u8 *) (block2 + i)))
++		if ((*(u8 *) (block1 + i)) != (*(u8 *) (block2 + i))) {
++			printk(KERN_INFO "Data Mismatch index=0x%x len=0x%x "
++			       "block1=0x%p  block2=0x%p\n",
++			       i, size, block1, block2);
+ 			return FALSE;
++		}
+ 	}
+ 
+ 	return TRUE;
+@@ -102,7 +128,7 @@ mcf_edma_test_run(void)
+ 	printk(KERN_INFO "\nStarting eDMA transfer test!\n");
+ 
+ 	/* Initialize test variables */
+-	byte_count = 0x20;
++	byte_count = 0x2000;
+ 	test_data = 0xA5A5A5A5;
+ 
+ 	/* DMA buffer must be from GFP_DMA zone, so it will not be cached */
+@@ -124,35 +150,56 @@ mcf_edma_test_run(void)
+ 	 * isn't the same twice in a row */
+ 	for (i = 0; i < MCF_EDMA_CHANNELS; i++) {
+ 		/* request eDMA channel */
+-		if ((channel = mcf_edma_request_channel(MCF_EDMA_CHANNEL_ANY,
++		channel = mcf_edma_request_channel(MCF_EDMA_CHANNEL_ANY,
+ 						mcf_edma_test_handler,
+-						NULL,
++						mcf_edma_test_error_handler,
+ 						0x6,
+ 						NULL,
+ 						NULL,
+-						MCF_EDMA_TEST_DRIVER_NAME))
+-		    < 0)
++						MCF_EDMA_TEST_DRIVER_NAME);
++		if (channel < 0)
+ 			goto test_end;
+ 
+ 
+ 		allocated_channels |= (1 << channel);
+ 
+ 		/* Initialize data for DMA to move */
+-		for (j = 0; j < byte_count; j = j + 4)
++		for (j = 0; j < byte_count; j = j + 4) {
+ 			*((u32 *) (start_address + j)) = test_data;
++			*((u32 *) (dest_address + j)) = ~test_data;
++		}
+ 
+ 		/* Clear interrupt status indicator */
+ 		mcf_edma_test_interrupt = FALSE;
+ 
+ 		/* Configure DMA Channel TCD */
+-/* JKM -- convert to PHYS */
+-		mcf_edma_set_tcd_params(channel, (u32) start_address,
+-					(u32) dest_address,
++#ifndef TEST_HALFIRQ
++		/* regular irq on completion */
++		mcf_edma_set_tcd_params(channel,
++					(u32)virt_to_phys(start_address),
++					(u32)virt_to_phys(dest_address),
+ 					(0 | MCF_EDMA_TCD_ATTR_SSIZE_32BIT |
+ 					 MCF_EDMA_TCD_ATTR_DSIZE_32BIT), 0x04,
+ 					byte_count, 0x0, 1, 1, 0x04, 0x0, 0x1,
+ 					0x0);
++#else
++		/* half completion irq */
++		mcf_edma_set_tcd_params_halfirq(channel,
++					       (u32)virt_to_phys(start_address),
++					       (u32)virt_to_phys(dest_address),
++					       (MCF_EDMA_TCD_ATTR_SSIZE_32BIT |
++						MCF_EDMA_TCD_ATTR_DSIZE_32BIT),
++					       0x04,		/* soff */
++					       byte_count/2,	/* bytes/loop */
++					       0x0,		/* slast */
++					       2,		/* loop count */
++					       0x04,		/* doff */
++					       0x0,		/* dlast_sga */
++					       0x0);		/* req dis */
++#endif
+ 
++		printk(KERN_INFO "DMA Channel %d  Bytes = 0x%x\n",
++		       channel, byte_count);
+ 		/* Start DMA. */
+ 		mcf_edma_start_transfer(channel);
+ 
+diff --git a/include/asm-m68k/mcf_edma.h b/include/asm-m68k/mcf_edma.h
+index cf5ba26..1a0ee93 100644
+--- a/include/asm-m68k/mcf_edma.h
++++ b/include/asm-m68k/mcf_edma.h
+@@ -46,6 +46,30 @@ void mcf_edma_set_tcd_params(int channel, u32 source, u32 dest,
+ 			     u32 citer, u32 biter, u32 doff, u32 dlast_sga,
+ 			     int major_int, int disable_req);
+ 
++/* Setup transfer control descriptor (TCD) and enable halfway irq
++ *   channel - descriptor number
++ *   source  - source address
++ *   dest    - destination address
++ *   attr    - attributes
++ *   soff    - source offset
++ *   nbytes  - number of bytes to be transfered in minor loop
++ *   slast   - last source address adjustment
++ *   biter   - major loop count
++ *   doff    - destination offset
++ *   dlast_sga - last destination address adjustment
++ *   disable_req - disable DMA request after major loop
++ */
++void mcf_edma_set_tcd_params_halfirq(int channel, u32 source, u32 dest,
++				     u32 attr, u32 soff, u32 nbytes, u32 slast,
++				     u32 biter, u32 doff, u32 dlast_sga,
++				     int disable_req);
++
++/* check if dma is done
++ *   channel - descriptor number
++ *   return 1 if done
++ */
++int mcf_edma_check_done(int channel);
++
+ /* Starts eDMA transfer on specified channel
+  *   channel - eDMA TCD number
+  */
+@@ -56,6 +80,15 @@ mcf_edma_start_transfer(int channel)
+ 	MCF_EDMA_SSRT = channel;
+ }
+ 
++/* Restart eDMA transfer from halfirq
++ *   channel - eDMA TCD number
++ */
++static inline void
++mcf_edma_confirm_halfirq(int channel)
++{
++	MCF_EDMA_TCD_CSR(channel) = 7;
++}
++
+ /* Starts eDMA transfer on specified channel based on peripheral request
+  *   channel - eDMA TCD number
+  */
+@@ -127,4 +160,6 @@ int mcf_edma_set_callback(int channel,
+  */
+ int mcf_edma_free_channel(int channel, void *arg);
+ 
++void mcf_edma_dump_channel(int channel);
++
+ #endif				/* _MCF_EDMA_H */
+-- 
+1.6.0.1
+

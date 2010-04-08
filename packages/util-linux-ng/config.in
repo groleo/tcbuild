@@ -1,0 +1,35 @@
+config UTIL_LINUX_NG
+    string
+
+choice
+    bool
+    prompt "Version"
+
+
+config UTIL_LINUX_NG_V_2_14_2
+    bool
+    prompt "2.14.2"
+
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+
+config UTIL_LINUX_NG_V_snapshot
+    bool
+    prompt "latest snapshot (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+config UTIL_LINUX_NG_V_specific_date
+    bool
+    prompt "<specific date> (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+endchoice
+
+config UTIL_LINUX_NG_VERSION
+    string
+    prompt "Enter date (YYYYMMDD)" if UTIL_LINUX_NG_V_specific_date
+    default "snapshot" if UTIL_LINUX_NG_V_snapshot
+    default "2.14.2" if UTIL_LINUX_NG_V_2_14_2
+
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!

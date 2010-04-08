@@ -1,0 +1,31 @@
+From 8fe99205ec4d76e84a47783914c8ec2b9347f9d1 Mon Sep 17 00:00:00 2001
+From: Kurt Mahan <kmahan@freescale.com>
+Date: Thu, 8 Jan 2009 15:21:48 -0700
+Subject: [PATCH] Fix USBCV Remote Wakeup test failure.
+
+Erroneously reported when OTG is enabled, causing the USBCV
+Remote Wakeup test to fail.
+
+Signed-off-by: Bruce Schmid <duck@freescale.com>
+---
+ drivers/usb/gadget/ether.c |    2 --
+ 1 files changed, 0 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/usb/gadget/ether.c b/drivers/usb/gadget/ether.c
+index 8afe615..6ad2e31 100644
+--- a/drivers/usb/gadget/ether.c
++++ b/drivers/usb/gadget/ether.c
+@@ -2448,10 +2448,8 @@ autoconf_fail:
+ 
+ 	if (gadget_is_otg(gadget)) {
+ 		otg_descriptor.bmAttributes |= USB_OTG_HNP,
+-		eth_config.bmAttributes |= USB_CONFIG_ATT_WAKEUP;
+ 		eth_config.bMaxPower = 4;
+ #ifdef	CONFIG_USB_ETH_RNDIS
+-		rndis_config.bmAttributes |= USB_CONFIG_ATT_WAKEUP;
+ 		rndis_config.bMaxPower = 4;
+ #endif
+ 	}
+-- 
+1.6.0.1
+

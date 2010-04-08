@@ -1,0 +1,11 @@
+--- uClibc-0.9.30.1.orig/libpthread/linuxthreads.old/sysdeps/m68k/pt-machine.h	2008-01-06 02:04:02.000000000 +0200
++++ uClibc-0.9.30.1/libpthread/linuxthreads.old/sysdeps/m68k/pt-machine.h	2009-03-17 10:45:39.234486101 +0200
+@@ -40,7 +40,7 @@
+ #else
+          "bset #7,%1; sne %0"
+ #endif
+-       : "=dm"(ret), "=m"(*spinlock)
++       : "=&dm"(ret), "=m"(*spinlock)
+        : "m"(*spinlock)
+        : "cc");
+ 
