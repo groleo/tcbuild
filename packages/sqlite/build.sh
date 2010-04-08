@@ -29,7 +29,8 @@ do_sqlite_configure() {
 	 --disable-largefile	\
 	 --disable-debug	\
 	 --disable-tcl		\
-	 --disable-threadsafe
+	 --disable-threadsafe	\
+	 --enable-readline
 
 	CT_EndStep
 }

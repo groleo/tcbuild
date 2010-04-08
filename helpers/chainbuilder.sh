@@ -43,14 +43,17 @@ CT_TARBALLS_DIR="${CT_TMP_DIR}/_archives"
 CT_BIN_OVERIDE_DIR="${CT_WORK_DIR}/bin"
 CT_DoLog DEBUG "Creating bin-overide for tools in '${CT_BIN_OVERIDE_DIR}'"
 CT_DoExecLog DEBUG mkdir -p "${CT_BIN_OVERIDE_DIR}"
-cat "${CT_MK_DIR}/paths.mk" |while read trash line; do
+cat "${CT_MK_DIR}/_paths.mk" |while read trash line; do
 	tool="${line%%=*}"
 	path="${line#*=}"
 	CT_DoLog DEBUG "  '${tool}' -> '${path}'"
 	printf "#${BANG}/bin/sh\nexec '${path}' \"\${@}\"\n" >"${CT_BIN_OVERIDE_DIR}/${tool}"
 	CT_DoExecLog ALL chmod 700 "${CT_BIN_OVERIDE_DIR}/${tool}"
 done
-export PATH="${CT_BIN_OVERIDE_DIR}:${PATH}"
+CT_DoLog ALL ${CT_BIN_OVERIDE_DIR}
+
+#export PATH="${CT_BIN_OVERIDE_DIR}:${PATH}"
+export PATH="${CT_BIN_OVERIDE_DIR}"
 
 # Start date. Can't be done until we know the locale
 CT_STAR_DATE=$(CT_DoDate +%s%N)
@@ -60,11 +63,26 @@ CT_STAR_DATE_HUMAN=$(CT_DoDate +%Y%m%d.%H%M%S)
 CT_DoLog INFO "Build started ${CT_STAR_DATE_HUMAN}"
 
 # renice oursleves
-CT_DoExecLog DEBUG renice ${CT_NICE} $$
+CT_DoExecLog DEBUG ${renice} ${CT_NICE} $$
 
-CT_DoStep DEBUG "Dumping user-supplied configuration"
-CT_DoExecLog DEBUG ${grep} -E '^(# |)CT_' .config
-CT_EndStep
+dumpUserConfig()
+{
+	if [ "${CT_DEBUG_DUMP_CONFIG}" != "y" ]; then
+		return
+	fi
+	CT_DoStep DEBUG "Dumping user-supplied configuration"
+	CT_DoExecLog DEBUG ${grep} -E '^(# |)CT_' .config
+	CT_EndStep
+}
+dumpInternalConfig()
+{
+	if [ "${CT_DEBUG_DUMP_CONFIG}" != "y" ]; then
+		return
+	fi
+	CT_DoStep DEBUG "Dumping internal configuration"
+	set | ${grep} -E '^CT_.+=' | ${sort} |CT_DoLog DEBUG
+	CT_EndStep
+}
 
 # Some sanity checks in the environment and needed tools
 CT_DoLog INFO "Checking environment sanity"
@@ -116,9 +134,7 @@ CT_STATE_DIR="${CT_WORK_DIR}/${CT_TARGET}/state"
 CT_CC_CORE_STATIC_PREFIX_DIR="${CT_BUILD_DIR}/${CT_CC}-core-static"
 CT_CC_CORE_SHARED_PREFIX_DIR="${CT_BUILD_DIR}/${CT_CC}-core-shared"
 
-CT_SetLibPath "${CT_PREFIX_DIR}/lib" first
-
-CT_SetLibPath "${CT_PREFIX_DIR}/lib" first
+#CT_SetLibPath "${CT_PREFIX_DIR}/lib:${CT_PREFIX_DIR}/${CT_TARGET}/lib" first
 
 # We must ensure that we can restart if asked for!
 if [ -n "${CT_RESTART}" -a ! -d "${CT_STATE_DIR}"  ]; then
@@ -142,98 +158,105 @@ esac
 
 # Good, now grab a bit of informations on the system we're being run on,
 # just in case something goes awok, and it's not our fault:
-CT_SYS_USER=$(id -un)
+CT_SYS_USER=$(${id} -un)
 CT_SYS_HOSTNAME=$(hostname -f 2>/dev/null || true)
 # Hmmm. Some non-DHCP-enabled machines do not have an FQDN... Fall back to node name.
-CT_SYS_HOSTNAME="${CT_SYS_HOSTNAME:-$(uname -n)}"
-CT_SYS_KERNEL=$(uname -s)
-CT_SYS_REVISION=$(uname -r)
+CT_SYS_HOSTNAME="${CT_SYS_HOSTNAME:-$(${uname} -n)}"
+CT_SYS_KERNEL=$(${uname} -s)
+CT_SYS_REVISION=$(${uname} -r)
 # MacOS X lacks '-o' :
-CT_SYS_OS=$(uname -o || echo "Unknown (maybe MacOS-X)")
-CT_SYS_MACHINE=$(uname -m)
-CT_SYS_PROCESSOR=$(uname -p)
+CT_SYS_OS=$(${uname} -o || echo "Unknown (maybe MacOS-X)")
+CT_SYS_MACHINE=$(${uname} -m)
+CT_SYS_PROCESSOR=$(${uname} -p)
 CT_SYS_GCC=$(gcc -dumpversion)
 CT_SYS_TARGET=$(CT_DoConfigGuess)
 CT_TOOLCHAIN_ID="chainbuilder-${CT_VERSION} build ${CT_STAR_DATE_HUMAN} by ${CT_SYS_USER}@${CT_SYS_HOSTNAME}"
 CT_EndStep
 
-CT_DoStep INFO "Preparing working directories"
+prepareWorkingDirs() {
+	CT_DoStep INFO "Preparing working directories"
 
-# Ah! The build directory shall be eradicated, even if we restart!
-if [ -d "${CT_BUILD_DIR}" ]; then
-	CT_DoForceRmdir "${CT_BUILD_DIR}"
-fi
+	# Ah! The build directory shall be eradicated, even if we restart!
+	if [ -d "${CT_BUILD_DIR}" ]; then
+		CT_DoForceRmdir "${CT_BUILD_DIR}"
+	fi
 
-# Don't eradicate directories if we need to restart
-if [ -z "${CT_RESTART}" ]; then
-	# Get rid of pre-existing installed toolchain and previous build directories.
-	# We need to do that _before_ we can safely log, because the log file will
-	# most probably be in the toolchain directory.
-	if [ "${CT_FORCE_DOWNLOAD}" = "y" -a -d "${CT_TARBALLS_DIR}" ]; then
-		CT_DoForceRmdir "${CT_TARBALLS_DIR}"
+	# Don't eradicate directories if we need to restart
+	if [ -z "${CT_RESTART}" ]; then
+		# Get rid of pre-existing installed toolchain and previous build directories.
+		# We need to do that _before_ we can safely log, because the log file will
+		# most probably be in the toolchain directory.
+		if [ "${CT_FORCE_DOWNLOAD}" = "y" -a -d "${CT_TARBALLS_DIR}" ]; then
+			CT_DoForceRmdir "${CT_TARBALLS_DIR}"
+		fi
+		if [ "${CT_FORCE_EXTRACT}" = "y" -a -d "${CT_SRC_DIR}" ]; then
+			CT_DoForceRmdir "${CT_SRC_DIR}"
+		fi
+		if [ "${CT_USE_EXTERNAL_TOOLCHAIN}" = "n" ] ; then
+			# Check now if we can write to the destination directory:
+			# this should actually be tested at install time
+			if [ -d "${CT_INSTALL_DIR}" ]; then
+				CT_TestAndAbort "Destination directory '${CT_INSTALL_DIR}' is not removable" ! -w $(dirname "${CT_INSTALL_DIR}")
+			fi
+			if [ -d "${CT_INSTALL_DIR}" ]; then
+				echo "Removing CT_INSTALL_DIR"
+				sleep 2
+				#CT_DoForceRmdir "${CT_INSTALL_DIR}"
+			fi
+		fi
+
+		# In case we start anew, get rid of the previously saved state directory
+		if [ -d "${CT_STATE_DIR}" ]; then
+			CT_DoForceRmdir "${CT_STATE_DIR}"
+		fi
 	fi
-	if [ "${CT_FORCE_EXTRACT}" = "y" -a -d "${CT_SRC_DIR}" ]; then
-		CT_DoForceRmdir "${CT_SRC_DIR}"
+
+	# Create the directories we'll use, even if restarting: it does no harm to
+	# create already existent directories, and CT_BUILD_DIR needs to be created
+	# anyway
+	CT_DoExecLog ALL mkdir -p   "${CT_TARBALLS_DIR}"
+	CT_DoExecLog ALL mkdir -p   "${CT_SRC_DIR}"
+	CT_DoExecLog ALL mkdir -p   "${CT_BUILD_DIR}"
+
+	CT_DoExecLog ALL mkdir -p   "${CT_CC_CORE_STATIC_PREFIX_DIR}"
+	CT_DoExecLog ALL mkdir -p   "${CT_CC_CORE_SHARED_PREFIX_DIR}"
+
+	if [ -n "{CT_DEBUG_CT_SAVE_STEPS}" ] ; then
+		CT_DoExecLog ALL mkdir -p   "${CT_STATE_DIR}"
 	fi
+
+	# Create install directory only when building a toolchain too
 	if [ "${CT_USE_EXTERNAL_TOOLCHAIN}" = "n" ] ; then
-		# Check now if we can write to the destination directory:
-		# this should actually be tested at install time
-		if [ -d "${CT_INSTALL_DIR}" ]; then
-			CT_TestAndAbort "Destination directory '${CT_INSTALL_DIR}' is not removable" ! -w $(dirname "${CT_INSTALL_DIR}")
-		fi
-		if [ -d "${CT_INSTALL_DIR}" ]; then
-			echo "Removing CT_INSTALL_DIR"
-			sleep 2
-			#CT_DoForceRmdir "${CT_INSTALL_DIR}"
-		fi
+		CT_DoExecLog ALL mkdir -p "${CT_INSTALL_DIR}"
+		CT_DoExecLog ALL mkdir -p "${CT_PREFIX_DIR}"
+		# Kludge: CT_INSTALL_DIR and CT_PREFIX_DIR might have grown read-only if
+		# the previous build was successful. To be able to move the logfile there,
+		# switch them back to read/write
+		CT_DoExecLog ALL chmod -R u+w "${CT_INSTALL_DIR}" "${CT_PREFIX_DIR}"
 	fi
+	CT_EndStep
+}
 
-	# In case we start anew, get rid of the previously saved state directory
-	if [ -d "${CT_STATE_DIR}" ]; then
-		CT_DoForceRmdir "${CT_STATE_DIR}"
-	fi
-fi
-
-# Create the directories we'll use, even if restarting: it does no harm to
-# create already existent directories, and CT_BUILD_DIR needs to be created
-# anyway
-CT_DoExecLog ALL mkdir -p   "${CT_TARBALLS_DIR}"
-CT_DoExecLog ALL mkdir -p   "${CT_SRC_DIR}"
-CT_DoExecLog ALL mkdir -p   "${CT_BUILD_DIR}"
-CT_DoExecLog ALL mkdir -p   "${CT_CC_CORE_STATIC_PREFIX_DIR}"
-CT_DoExecLog ALL mkdir -p   "${CT_CC_CORE_SHARED_PREFIX_DIR}"
-
-if [ -n "{CT_DEBUG_CT_SAVE_STEPS}" ] ; then
-	CT_DoExecLog ALL mkdir -p   "${CT_STATE_DIR}"
-fi
-
-# Create install directory only when building a toolchain
-if [ "${CT_USE_EXTERNAL_TOOLCHAIN}" != "y" ] ; then
-	CT_DoExecLog ALL mkdir -p "${CT_INSTALL_DIR}"
-	CT_DoExecLog ALL mkdir -p "${CT_PREFIX_DIR}"
-	# Kludge: CT_INSTALL_DIR and CT_PREFIX_DIR might have grown read-only if
-	# the previous build was successful. To be able to move the logfile there,
-	# switch them back to read/write
-	CT_DoExecLog ALL chmod -R u+w "${CT_INSTALL_DIR}" "${CT_PREFIX_DIR}"
-fi
-CT_EndStep
-
-# Redirect log to the actual log file now we can
-# It's quite understandable that the log file will be installed in the install
-# directory, so we must first ensure it exists and is writeable (above) before
-# we can log there
-exec >/dev/null
-case "${CT_LOG_TO_FILE}" in
-	y)  CT_LOG_FILE="${CT_BUILD_DIR}/build.log"
-		cat "${tmp_log_file}" >>"${CT_LOG_FILE}"
-		rm -f "${tmp_log_file}"
-		exec >>"${CT_LOG_FILE}"
+redirectLog()
+{
+	# Redirect log to the actual log file now we can
+	# It's quite understandable that the log file will be installed in the
+	# install directory, so we must first ensure it exists and is writeable
+	# (above) before we can log there
+	exec >/dev/null
+	case "${CT_LOG_TO_FILE}" in
+		y)  CT_LOG_FILE="${CT_BUILD_DIR}/build_`date +%s`.log"
+			cat "${tmp_log_file}" >>"${CT_LOG_FILE}"
+			rm -f "${tmp_log_file}"
+			exec >>"${CT_LOG_FILE}"
+			CT_DoLog INFO "Log file: ${CT_LOG_FILE}"
 		;;
-	*)  rm -f "${tmp_log_file}"
+		*)  rm -f "${tmp_log_file}"
 		;;
-esac
+	esac
+}
 
-#{{{#############################i####################################################
+#####################################################################################
 build_tools_alias()
 {
 	# Now we have mangled our BUILD and HOST tuples, we must fake the new
@@ -245,6 +268,7 @@ build_tools_alias()
 		v="CT_${m}"
 		p="CT_${m}_PREFIX"
 		s="CT_${m}_SUFFIX"
+		CT_DoLog ALL "p=${!p} s=${!s} ${!r} ${CT_REAL_HOST} HOST:${HOST}"
 		if [ -n "${!p}" ]; then
 			t="${!p}"
 		else
@@ -266,9 +290,7 @@ build_tools_alias()
 			           -o "${CT_REAL_BUILD}" = "${!r}" \) ]; then
 			    where=$(CT_Which "${tool}${!s}")
 			fi
-			if [ -z "${where}"                            \
-			     -a \(    "${m}" = "BUILD"                \
-			           -o "${CT_REAL_BUILD}" = "${!r}" \) ]; then
+			if [ -z "${where}" -a \( "${m}" = "BUILD" -o "${CT_REAL_BUILD}" = "${!r}" \) ]; then
 			    where=$(CT_Which "${tool}")
 			fi
 
@@ -281,8 +303,8 @@ build_tools_alias()
 			else
 			    case "${tool}" in
 			        # We'll at least need some of them...
-			        ar|as|gcc|ld|nm|objcopy|objdump|ranlib)
-			            CT_Abort "Missing: '${t}${tool}${!s}' or '${t}${tool}' or '${tool}' : either needed!"
+			        ar|as|gcc|g++|ld|nm|objcopy|objdump|ranlib)
+			            CT_Abort "Missing: '${t}${tool}${!s}' or '${t}${tool}' or '${tool}' <${where}> : either needed!"
 			            ;;
 			        # Some are conditionnally required
 			        # Add them in alphabetical (C locale) ordering
@@ -430,9 +452,9 @@ setup_environment()
 	case "${CT_TOOLCHAIN_TYPE}" in
 		cross)
 			if [ "${CT_USE_EXTERNAL_TOOLCHAIN}" = "y" ] ; then
-				export PATH="${CT_BIN_OVERIDE_DIR}:${CT_EXTERNAL_TOOLCHAIN_DIR}/bin:${CT_CC_CORE_SHARED_PREFIX_DIR}/bin:${CT_CC_CORE_STATIC_PREFIX_DIR}/bin:${PATH}"
+				export PATH="${CT_EXTERNAL_TOOLCHAIN_DIR}/bin:${CT_BIN_OVERIDE_DIR}:${CT_CC_CORE_SHARED_PREFIX_DIR}/bin:${CT_CC_CORE_STATIC_PREFIX_DIR}/bin:${PATH}"
 			else
-				export PATH="${CT_BIN_OVERIDE_DIR}:${CT_PREFIX_DIR}/bin:${CT_CC_CORE_SHARED_PREFIX_DIR}/bin:${CT_CC_CORE_STATIC_PREFIX_DIR}/bin:${PATH}"
+				export PATH="${CT_PREFIX_DIR}/bin:${CT_BIN_OVERIDE_DIR}:${CT_CC_CORE_SHARED_PREFIX_DIR}/bin:${CT_CC_CORE_STATIC_PREFIX_DIR}/bin:${PATH}"
 			fi
 		;;
 		*)  ;;
@@ -458,14 +480,10 @@ setup_environment()
 	CT_DoExecLog DEBUG install -m 0755 "${CT_LIB_DIR}/toolchain-config.in" "${CT_BUILD_DIR}/${CT_TARGET}-ct-ng.config"
 	bzip2 -c -9 .config >>"${CT_BUILD_DIR}/${CT_TARGET}-ct-ng.config"
 
-	CT_DoStep EXTRA "Dumping internal configuration"
-		CT_DoLog EXTRA  "Building a toolchain for:"
-		CT_DoLog EXTRA  "  build  = ${CT_REAL_BUILD}"
-		CT_DoLog EXTRA  "  host   = ${CT_REAL_HOST}"
-		CT_DoLog EXTRA  "  target = ${CT_TARGET}"
-		set | ${grep} -E '^CT_.+=' | ${sort} |CT_DoLog DEBUG
-	CT_EndStep
-
+	CT_DoLog EXTRA  "Building a toolchain for:"
+	CT_DoLog EXTRA  "  build  = ${CT_REAL_BUILD}"
+	CT_DoLog EXTRA  "  host   = ${CT_REAL_HOST}"
+	CT_DoLog EXTRA  "  target = ${CT_TARGET}"
 	CT_EndStep
 }
 #}}}#################################################################################
@@ -476,28 +494,33 @@ setup_environment()
 #########################################################
 if [ -z "${CT_RESTART}" ]; then
 	# Setup the rest of the environment only if not restarting
+	prepareWorkingDirs
+	redirectLog
 	setup_environment
+	dumpUserConfig
+	dumpInternalConfig
 
-	CT_DoStep INFO "Retrieving needed toolchain components' tarballs"
 	for component in ${CT_COMPONENTS}; do
+		IT=${component%%_*}
+		# Skip package, if it's not enabled in config
+		# TODO: this will skip every non-package
+		eval COMPILE=\${CT_PKG_`echo ${IT}`}
+		if [ "${CT_PKG}" = "y" ]; then
+			if [ "${COMPILE}" = "n" -o "${COMPILE}" = "" ]; then
+				continue
+				:
+			fi
+		fi
 		. "${CT_COMPONENTS_DIR}/${component}/build.sh"
 		do_${component}_get
-	done
-	CT_EndStep
-
-	if [ "${CT_ONLY_DOWNLOAD}" != "y" ]; then
-		if [ "${CT_FORCE_EXTRACT}" = "y" ]; then
-			CT_DoForceRmdir "${CT_SRC_DIR}"
-			CT_DoExecLog ALL mkdir -p "${CT_SRC_DIR}"
+		if [ "${CT_ONLY_DOWNLOAD}" != "y" ]; then
+			if [ "${CT_FORCE_EXTRACT}" = "y" ]; then
+				CT_DoForceRmdir "${CT_SRC_DIR}"
+				CT_DoExecLog ALL mkdir -p "${CT_SRC_DIR}"
+			fi
 		fi
-
-		CT_DoStep INFO "Extracting and patching toolchain components"
-		for component in ${CT_COMPONENTS}; do
-			. "${CT_COMPONENTS_DIR}/${component}/build.sh"
-			do_${component}_extract
-		done
-		CT_EndStep
-	fi
+		do_${component}_extract
+	done
 fi
 
 # Now for the job by itself. Go have a coffee!
@@ -510,19 +533,24 @@ if [ "${CT_ONLY_DOWNLOAD}" != "y" -a "${CT_ONLY_EXTRACT}" != "y" ]; then
 
 	# Aha! CT_STEPS comes from steps.mk!
 	for step in ${CT_STEPS}; do
-	IT=`echo ${step}|cut -f1 -d'_'`
+		#IT=`echo ${step}|cut -f1 -d'_'`
+		IT=${step%%_*}
 
-	# Skip it, if it's not enabled in config
-	eval COMPILE=\${CT_PKG_`echo ${IT}`}
-	if [ "${COMPILE}" != "y" ]; then
-		#continue
-		:
-	fi
+		# Skip it, if it's not enabled in config
+		eval COMPILE=\${CT_PKG_`echo ${IT}`}
+		if [ "${CT_PKG}" = "y" ]; then
+			if [ "${COMPILE}" = "n" -o "${COMPILE}" = "" ]; then
+				continue
+				:
+			fi
+		fi
 
-	. "${CT_COMPONENTS_DIR}/${IT}/build.sh"
+		. "${CT_COMPONENTS_DIR}/${IT}/build.sh"
 		if [ ${do_it} -eq 0 ]; then
 			if [ "${CT_RESTART}" = "${step}" ]; then
 				CT_DoLoadState "${step}"
+				#CT_SetLibPath "${CT_PREFIX_DIR}/lib:${CT_PREFIX_DIR}/${CT_TARGET}/lib" first
+				CT_DoLog INFO "Log File: ${CT_LOG_FILE}"
 				do_it=1
 				do_stop=0
 			fi

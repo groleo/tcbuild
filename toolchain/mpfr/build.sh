@@ -58,7 +58,6 @@ do_mpfr() {
     esac
 
     CT_DoLog EXTRA "Configuring ${PKG_NAME}"
-	${CT_GET_CONFIG_FLAGS} "${CT_SRC_DIR}/${PKG_SRC}/configure" ${CT_TOP_DIR}/_mpfr.in
 
     rm -rf config.cache
     CC="${CT_HOST}-gcc"			\

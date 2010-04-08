@@ -111,6 +111,27 @@ help_tail::
 	@echo
 	@echo 'You can combine the above commands in a single run `make packages rootfs`'
 	@echo
+	@echo " 1) build"
+	@echo " this is *always* the platform on which you are running the build"
+	@echo " process; since we are building on Linux, this is unequivocally going to"
+	@echo " specify 'linux', with the canonical form being 'i686-pc-linux-gnu'."
+	@echo
+	@echo " 2) host"
+	@echo " this is a tricky one: it specifies the platform on which whatever we"
+	@echo " are building is going to be run; for the cross-compiler itself, that's"
+	@echo " also 'i686-pc-linux-gnu', but when we get to the stage of building the"
+	@echo " runtime support libraries to go with that cross-compiler, they must"
+	@echo " contain code which will run on the 'i686-pc-mingw32' host, so the 'host'"
+	@echo " specification should change to this, for the 'runtime' and 'w32api'"
+	@echo " stages of the build."
+	@echo
+	@echo " 3) target"
+	@echo " this is probably the one which causes the most confusion; it is only"
+	@echo " relevant when building a cross-compiler, and it specifies where the code"
+	@echo " which is built by that cross-compiler itself will ultimately run; it"
+	@echo " should not need to be specified at all, for the 'runtime' or 'w32api',"
+	@echo " since these are already targetted to 'i686-pc-mingw32' by a correct"
+	@echo " 'host' specification."
 
 help_build::
 	@echo  '  build[.#]       - Build the currently configured toolchain'

@@ -2,7 +2,7 @@
 config LIBC
     string
 
-config LIBC_glibc
+config TLC_glibc
     select LIBC_SUPPORT_NPTL
     select LIBC_SUPPORT_LINUXTHREADS
     help
@@ -46,6 +46,10 @@ config LIBC_V_2_9
     bool
     prompt "2.9"
 
+config LIBC_V_2_10_1
+    bool
+    prompt "2.10.1"
+
 # CT_INSERT_VERSION_ABOVE
 # Don't remove above line!
 
@@ -74,6 +78,7 @@ config LIBC_VERSION
     default "2.7" if LIBC_V_2_7
     default "2.8" if LIBC_V_2_8
     default "2.9" if LIBC_V_2_9
+    default "2.10.1" if LIBC_V_2_10_1
 # CT_INSERT_VERSION_STRING_ABOVE
 # Don't remove above line!
 

@@ -31,6 +31,18 @@ config BUSYBOX_V_1_14_3
     bool
     prompt "1.14.3"
 
+config BUSYBOX_V_1_15_0
+    bool
+    prompt "1.15.0"
+
+config BUSYBOX_V_1_15_1
+    bool
+    prompt "1.15.1"
+
+config BUSYBOX_V_1_15_2
+    bool
+    prompt "1.15.2"
+
 
 # CT_INSERT_VERSION_ABOVE
 # Don't remove above line!
@@ -56,6 +68,10 @@ config BUSYBOX_VERSION
     default "1.14.0" if BUSYBOX_V_1_14_0
     default "1.14.1" if BUSYBOX_V_1_14_1
     default "1.14.2" if BUSYBOX_V_1_14_2
+    default "1.14.3" if BUSYBOX_V_1_14_3
+    default "1.15.0" if BUSYBOX_V_1_15_0
+    default "1.15.1" if BUSYBOX_V_1_15_1
+    default "1.15.2" if BUSYBOX_V_1_15_2
 
 # CT_INSERT_VERSION_STRING_ABOVE
 # Don't remove above line!

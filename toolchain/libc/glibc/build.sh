@@ -135,6 +135,7 @@ do_libc_headers() {
     echo "${CT_LIBC_GLIBC_CONFIGPARMS}" > configparms
 
     cross_cc=$(CT_Which "${CT_TARGET}-gcc")
+    CT_Test 'Using gcc for target:' "${cross_cc}" = ""
     CT_DoLog DEBUG "Using gcc for target: '${cross_cc}'"
     CT_DoLog DEBUG "Extra config passed : '${extra_config}'"
 
@@ -145,12 +146,12 @@ do_libc_headers() {
         --build="${CT_BUILD}"                                   \
         --host="${CT_TARGET}"                                   \
         --prefix=/usr                                           \
-        --with-headers="${CT_HEADERS_DIR}"                      \
         --without-cvs                                           \
         --disable-sanity-checks                                 \
         --enable-hacker-mode                                    \
         ${extra_config}                                         \
         --without-nptl
+        #--with-headers="${CT_HEADERS_DIR}"                      \
 
     CT_DoLog EXTRA "Installing C library headers"
 
@@ -298,6 +299,7 @@ do_libc_start_files() {
     extra_cc_args="${extra_cc_args} ${CT_ARCH_ENDIAN_OPT}"
 
     cross_cc=$(CT_Which "${CT_TARGET}-gcc")
+    CT_Test 'Using gcc for target:' "${cross_cc}" != ""
     CT_DoLog DEBUG "Using gcc for target    : '${cross_cc}'"
     CT_DoLog DEBUG "Configuring with addons : '$(do_libc_add_ons_list ,)'"
     CT_DoLog DEBUG "Extra config args passed: '${extra_config}'"
@@ -412,6 +414,7 @@ do_libc() {
     extra_cc_args="${extra_cc_args} ${CT_ARCH_ENDIAN_OPT}"
 
     cross_cc=$(CT_Which "${CT_TARGET}-gcc")
+    CT_Test 'Using gcc for target:' "${cross_cc}" = ""
     CT_DoLog DEBUG "Using gcc for target    : '${cross_cc}'"
     CT_DoLog DEBUG "Configuring with addons : '$(do_libc_add_ons_list ,)'"
     CT_DoLog DEBUG "Extra config args passed: '${extra_config}'"

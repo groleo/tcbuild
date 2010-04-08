@@ -50,7 +50,6 @@ do_dropbear() {
 	 STATIC=0					\
 	 SCPPROGRESS=0
 
-
     CT_DoLog EXTRA "INSTALL ${PKG_NAME}"
     CT_DoExecLog ALL			\
     ${make} CROSS=${CT_TARGET}-		\

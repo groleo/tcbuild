@@ -2,7 +2,7 @@
 config LIBC
     string
 
-config LIBC_uClibc
+config TLC_uClibc
     bool
     select LIBC_SUPPORT_LINUXTHREADS
     help
@@ -30,18 +30,13 @@ config LIBC_V_0_9_30_1
     bool
     prompt "0.9.30.1"
 
+config LIBC_V_0_9_31_RC1
+    bool
+    prompt "0.9.31-rc1"
+
 # CT_INSERT_VERSION_ABOVE
 # Don't remove above line!
 
-config LIBC_V_snapshot
-    bool
-    prompt "latest snapshot (EXPERIMENTAL)"
-    depends on EXPERIMENTAL
-
-config LIBC_V_specific_date
-    bool
-    prompt "<specific date> (EXPERIMENTAL)"
-    depends on EXPERIMENTAL
 
 endchoice
 
@@ -56,6 +51,7 @@ config LIBC_VERSION
     default "0.9.29" if LIBC_V_0_9_29
     default "0.9.30" if LIBC_V_0_9_30
     default "0.9.30.1" if LIBC_V_0_9_30_1
+    default "0.9.31-rc1" if LIBC_V_0_9_31_RC1
 # CT_INSERT_VERSION_STRING_ABOVE
 # Don't remove above line!
 

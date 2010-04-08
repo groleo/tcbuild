@@ -20,6 +20,7 @@ CC_CONFIG_FILES     = $(wildcard $(CT_TLC_DIR)/compiler/*/config.in)
 GMP_CONFIG_FILES    = $(wildcard $(CT_TLC_DIR)/gmp/config.in)
 MPFR_CONFIG_FILES   = $(wildcard $(CT_TLC_DIR)/mpfr/config.in)
 PPL_CONFIG_FILES    = $(wildcard $(CT_TLC_DIR)/ppl/config.in)
+MPC_CONFIG_FILES    = $(wildcard $(CT_TLC_DIR)/mpc/config.in)
 CLOOG_CONFIG_FILES  = $(wildcard $(CT_TLC_DIR)/cloog-ppl/config.in)
 BINUTILS_CONFIG_FILES= $(wildcard $(CT_TLC_DIR)/binutils/config.in)
 PACKAGES_CONFIG_FILES= $(wildcard $(CT_PKG_DIR)/*/config.in)
@@ -36,6 +37,7 @@ MPFRS   = $(notdir $(patsubst %/,%,$(dir $(MPFR_CONFIG_FILES))) )
 #
 PPL    = $(notdir $(patsubst %/,%,$(dir $(PPL_CONFIG_FILES))) )
 CLOOG    = $(notdir $(patsubst %/,%,$(dir $(CLOOG_CONFIG_FILES))) )
+MPC    = $(notdir $(patsubst %/,%,$(dir $(MPC_CONFIG_FILES))) )
 #
 BINUTILS= $(notdir $(patsubst %/,%,$(dir $(BINUTILS_CONFIG_FILES))) )
 PACKAGES= $(notdir $(patsubst %/,%,$(dir $(PACKAGES_CONFIG_FILES))) ) 
@@ -47,6 +49,7 @@ GEN_CONFIG_FILES = $(CT_CFG_DIR)/_arch.in	   \
 			$(CT_CFG_DIR)/_cloog-ppl.in     \
 			$(CT_CFG_DIR)/_ppl.in     \
 			$(CT_CFG_DIR)/_mpfr.in     \
+			$(CT_CFG_DIR)/_mpc.in     \
 			$(CT_CFG_DIR)/_gmp.in      \
 			$(CT_CFG_DIR)/_kernel.in   \
 			$(CT_CFG_DIR)/_binutils.in \
@@ -191,6 +194,9 @@ $(CT_CFG_DIR)/_mpfr.in: $(MPFR_CONFIG_FILES)
 #
 $(CT_CFG_DIR)/_ppl.in: $(PPL_CONFIG_FILES)
 	$(call build_gen_choice_in,$@,PPL library,PPL,$(CT_TLC_DIR),$(PPL))
+
+$(CT_CFG_DIR)/_mpc.in: $(MPC_CONFIG_FILES)
+	$(call build_gen_choice_in,$@,MPC library,MPC,$(CT_TLC_DIR),$(MPC))
 
 $(CT_CFG_DIR)/_cloog-ppl.in: $(CLOOG_CONFIG_FILES)
 	$(call build_gen_choice_in,$@,CLOOG-PPL library,CLOOG_PPL,$(CT_TLC_DIR),$(CLOOG))

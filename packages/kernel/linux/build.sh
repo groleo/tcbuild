@@ -31,14 +31,14 @@ do_kernel_configure() {
 	if [ -f "${CT_KERNEL_CONFIG_FILE}" ]; then
 		CT_Pushd "${CT_SRC_DIR}/${PKG_SRC}"
 			CT_DoExecLog INFO cp "${CT_KERNEL_CONFIG_FILE}" .config
-			${make} -C "${CT_SRC_DIR}/${PKG_SRC}"		\
-				O=$(pwd)					\
-				ARCH=${CT_KERNEL_ARCH}				\
-				INSTALL_HDR_PATH="${CT_SYSROOT_DIR}/usr"	\
-				INSTALL_MOD_PATH=${CT_FS_DIR}			\
-				CROSS_COMPILE=${CT_TARGET}-			\
-				HOSTCC=${CT_BUILD}-gcc				\
-				${V_OPT}					\
+			${make} -C "${CT_SRC_DIR}/${PKG_SRC}"           \
+				O=$(pwd)                                    \
+				ARCH=${CT_KERNEL_ARCH}                      \
+				INSTALL_HDR_PATH="${CT_SYSROOT_DIR}/usr"    \
+				INSTALL_MOD_PATH=${CT_FS_DIR}               \
+				CROSS_COMPILE=${CT_TARGET}-                 \
+				HOSTCC=${CT_BUILD}-gcc                      \
+				${V_OPT}                                    \
 				menuconfig 1>&6
 			cp .config "${CT_KERNEL_CONFIG_FILE}"
 			${make} mrproper
@@ -73,27 +73,27 @@ do_kernel() {
     # Retrieve the config file
     CT_DoExecLog ALL cp "${CT_KERNEL_CONFIG_FILE}" .config
 
-    CT_DoExecLog ALL					\
-    ${make} -C "${CT_SRC_DIR}/${PKG_SRC}"		\
-	O=$(pwd)					\
-	ARCH=${CT_KERNEL_ARCH}				\
-	INSTALL_HDR_PATH="${CT_SYSROOT_DIR}/usr"	\
-	INSTALL_MOD_PATH=${CT_FS_DIR}			\
-	CROSS_COMPILE=${CT_TARGET}-			\
-	HOSTCC=${CT_BUILD}-gcc				\
-	${V_OPT}					\
+    CT_DoExecLog ALL                            \
+    ${make} -C "${CT_SRC_DIR}/${PKG_SRC}"       \
+	O=$(pwd)                                    \
+	ARCH=${CT_KERNEL_ARCH}                      \
+	INSTALL_HDR_PATH="${CT_SYSROOT_DIR}/usr"    \
+	INSTALL_MOD_PATH=${CT_FS_DIR}               \
+	CROSS_COMPILE=${CT_TARGET}-                 \
+	HOSTCC=${CT_BUILD}-gcc                      \
+	${V_OPT}                                    \
 	oldconfig vmlinux zImage modules
 
-    chmod u+w "${CT_FS_DIR}" -R
-    CT_DoExecLog ALL					\
-    ${make} -C "${CT_SRC_DIR}/${PKG_SRC}"		\
-	O=$(pwd)					\
-	ARCH=${CT_KERNEL_ARCH}				\
-	INSTALL_HDR_PATH="${CT_SYSROOT_DIR}/usr"	\
-	INSTALL_MOD_PATH=${CT_FS_DIR}			\
-	CROSS_COMPILE=${CT_TARGET}-			\
-	HOSTCC=${CT_BUILD}-gcc				\
-	${V_OPT}					\
+    sudo chmod u+w "${CT_FS_DIR}" -R
+    CT_DoExecLog ALL                            \
+    ${make} -C "${CT_SRC_DIR}/${PKG_SRC}"       \
+	O=$(pwd)                                    \
+	ARCH=${CT_KERNEL_ARCH}                      \
+	INSTALL_HDR_PATH="${CT_SYSROOT_DIR}/usr"    \
+	INSTALL_MOD_PATH=${CT_FS_DIR}               \
+	CROSS_COMPILE=${CT_TARGET}-                 \
+	HOSTCC=${CT_BUILD}-gcc                      \
+	${V_OPT}                                    \
 	modules_install
 
     ${CT_TARGET}-objcopy -O binary ./vmlinux ./vmlinux.bin

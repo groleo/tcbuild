@@ -8,18 +8,21 @@ CT_OnError() {
 	# Bail out early in subshell, the upper level shell will act accordingly.
 	[ ${BASH_SUBSHELL} -eq 0 ] || exit $ret
 
-	CT_DoLog ERROR "PATH=${PATH}"
+	CT_DoLog ERROR "Report:-----------------------------------------------"
+	CT_DoLog ERROR ""
 	if [ "${CT_USE_EXTERNAL_TOOLCHAIN}" = "y" ] ; then
 	CT_DoLog ERROR "Using external compiler"
 	else
 	CT_DoLog ERROR "Using internal compiler"
 	fi
 
+	CT_DoLog ERROR "Using LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
 	CT_DoLog ERROR "Using PATH=${PATH}"
 	CT_DoLog ERROR "Build failed in step '${CT_STEP_MESSAGE[${CT_STEP_COUNT}]}'"
 	for ((step=(CT_STEP_COUNT-1); step>1; step--)); do
 		CT_DoLog ERROR "      called in step '${CT_STEP_MESSAGE[${step}]}'"
 	done
+
 	CT_DoLog ERROR "Error happened in '${BASH_SOURCE[1]}' in function '${FUNCNAME[1]}' (line unknown, sorry)"
 	for ((depth=2; ${BASH_LINENO[$((${depth}-1))]}>0; depth++)); do
 		CT_DoLog ERROR "      called from '${BASH_SOURCE[${depth}]}' at line # ${BASH_LINENO[${depth}-1]} in function '${FUNCNAME[${depth}]}'"
@@ -51,7 +54,7 @@ set +o hashall
 #  - first of all, save stdout so we can see the live logs: fd #6
 exec 6>&1
 #  - then point stdout to the log file (temporary for now)
-tmp_log_file="${CT_LOG_DIR}/$$"
+tmp_log_file="${CT_LOG_DIR}/`date +%s`_$$.log"
 exec >>"${tmp_log_file}"
 
 # The different log levels:
@@ -92,8 +95,9 @@ CT_SetLibPath() {
             esac
             ;;
     esac
-    CT_DoLog DEBUG "==> LD_LIBRARY_PATH='${LD_LIBRARY_PATH}'"
+    CT_DoLog INFO "==> LD_LIBRARY_PATH='${LD_LIBRARY_PATH}'"
     export LD_LIBRARY_PATH
+    export LD_RUN_PATH=""
 }
 
 
@@ -127,7 +131,7 @@ CT_DoLog() {
 		  _prog_bar_cpt=0
 		  _prog_bar[0]='/'
 		  _prog_bar[1]='-'
-		  _prog_bar[2]='\\'
+		  _prog_bar[2]="\\"
 		  _prog_bar[3]='|'
 		  indent=$((2*CT_STEP_COUNT))
 		  while read line; do
@@ -138,11 +142,12 @@ CT_DoLog() {
 				*"make["*"]: *** ["*)   cur_L=ERROR; cur_l=${CT_LOG_LEVEL_ERROR};;
 				*)                      cur_L="${LEVEL}"; cur_l="${level}";;
 			  esac
-			  # There will always be a log file (stdout, fd #1), be it /dev/null
-			  printf "[%-5s]%*s%s%s\n" "${cur_L}" "${indent}" " " "${line}"
-			  if [ ${cur_l} -le ${max_level} ]; then
-				  # Only print to console (fd #6) if log level is high enough.
-				  printf "\r[%-5s %s]%*s%s%s\n" "${cur_L}" "${step}" "${indent}" " " "${line}" >&6
+			# There will always be a log file (stdout, fd #1), be it /dev/null
+			printf "[%-5s %s]%*s%s %s\n" "${cur_L}" "${step}" "${indent}" " " "${line}" >&1
+
+			# Only print to console (fd #6) if log level is high enough.
+			  if [ "${cur_l}" -le "${max_level}" ]; then
+				printf "\r[%-5s %s]%*s%s%s\n" "${cur_L}" "${step}" "${indent}" " " "${line}" >&6
 			  fi
 			  if [ "${CT_LOG_PROGRESS_BAR}" = "y" ]; then
 				  printf "\r[%02d:%02d] %s " $((SECONDS/60)) $((SECONDS%60)) "${_prog_bar[$((_prog_bar_cpt/10))]}" >&6
@@ -235,7 +240,7 @@ CT_Which() {
 # to the highest entire second
 # Usage: CT_DoDate <fmt>
 CT_DoDate() {
-	date "$1" | ${sed} -r -e 's/%N$/000000000/;'
+	${date} "$1" | ${sed} -r -e 's/%N$/000000000/;'
 }
 
 CT_STEP_COUNT=1
@@ -269,10 +274,12 @@ CT_EndStep() {
 # Pushes into a directory, and pops back
 CT_Pushd() {
 	CT_TestOrAbort "CT_Pushd:Invalid directory $1" -d "${1}"
-	pushd "$1" >/dev/null 2>&1
+	pushd "$1" > /dev/null 2>&1
+	CT_DoLog DEBUG "pushd $1"
 }
 CT_Popd() {
 	popd >/dev/null 2>&1
+	CT_DoLog DEBUG "popd"
 }
 
 # Creates a temporary directory
@@ -678,9 +685,9 @@ CT_Extract() {
 
 	CT_DoLog EXTRA "EXTRACT '${basename}'"
 	case "${ext}" in
-		.tar.bz2)     CT_DoExecLog ALL ${tar} xvjf "${full_file}";;
-		.tar.gz|.tgz) CT_DoExecLog ALL ${tar} xvzf "${full_file}";;
-		.tar)         CT_DoExecLog ALL ${tar} xvf  "${full_file}";;
+		.tar.bz2)     CT_DoExecLog EXTRA ${tar} xvjf "${full_file}";;
+		.tar.gz|.tgz) CT_DoExecLog EXTRA ${tar} xvzf "${full_file}";;
+		.tar)         CT_DoExecLog EXTRA ${tar} xvf  "${full_file}";;
 		*)            CT_Abort "Don't know how to handle '${basename}${ext}': unknown extension" ;;
 	esac
 

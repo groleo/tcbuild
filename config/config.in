@@ -4,6 +4,7 @@ source config/_arch.in
  source config/_cloog-ppl.in
  source config/_ppl.in
  source config/_mpfr.in
+ source config/_mpc.in
  source config/_gmp.in
  source config/_kernel.in
  source config/_binutils.in

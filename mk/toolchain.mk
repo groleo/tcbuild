@@ -5,8 +5,8 @@ help_module::
 
 # ----------------------------------------------------------
 # The steps list
-#CLOOG_PPL=ppl cloog-ppl
-CLOOG_PPL=
+CLOOG_PPL=ppl cloog-ppl mpc
+
 
 
 CT_TLC_COMPONENTS := \
@@ -27,12 +27,12 @@ CT_TLC_STEPS := \
 	mpfr			\
 	$(CLOOG_PPL)		\
 	binutils		\
-	compiler_core_pass_1	\
+	compiler_step1	\
 	libc_headers		\
 	libc_start_files	\
-	compiler_core_pass_2	\
+	compiler_step2	\
 	libc			\
-	compiler		\
+	compiler_step3		\
 	libc_finish		\
 	sstrip			\
 	gmp_target		\
@@ -64,13 +64,13 @@ last-tlc-step:
 # This part deals with executing steps
 
 $(patsubst %,toolchain_%,$(CT_TLC_STEPS)):
-	$(SILENT)$(MAKE) -rf $(CT_MAKEFILE) V=$(V) RESTART=$(patsubst toolchain_%,%,$@) STOP=$(patsubst toolchain_%,%,$@) toolchain
+	$(SILENT)$(MAKE) -r V=$(V) RESTART=$(patsubst toolchain_%,%,$@) STOP=$(patsubst toolchain_%,%,$@) toolchain
 
 $(patsubst %,+toolchain_%,$(CT_TLC_STEPS)):
-	$(SILENT)$(MAKE) -rf $(CT_MAKEFILE) V=$(V) STOP=$(patsubst +%,%,$@) toolchain
+	$(SILENT)$(MAKE) -r V=$(V) STOP=$(patsubst +%,%,$@) toolchain
 
 $(patsubst %,toolchain_%+,$(CT_TLC_STEPS)):
-	$(SILENT)$(MAKE) -rf $(CT_MAKEFILE) V=$(V) RESTART=$(patsubst %+,%,$@) toolchain
+	$(SILENT)$(MAKE) -r V=$(V) RESTART=$(patsubst %+,%,$@) toolchain
 
 # Actual build
 PHONY+=toolchain

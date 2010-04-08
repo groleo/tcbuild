@@ -19,7 +19,6 @@ do_mpc() {
     CT_Pushd "${CT_BUILD_DIR}/${PKG_SRC}"
 
     CT_DoStep INFO "Installing ${PKG_NAME}"
-    ${CT_GET_CONFIG_FLAGS} "${CT_SRC_DIR}/${PKG_SRC}/configure" ${CT_TOP_DIR}/_mpc.in
 
     CT_DoLog EXTRA "Configuring ${PKG_NAME}"
 

@@ -10,8 +10,6 @@ do_axTLS_extract() {
     CT_Extract "${PKG_SRC}"
     ln -sf "${CT_SRC_DIR}/${PKG_NAME}" "${CT_SRC_DIR}/${PKG_SRC}"
     CT_Patch "${CT_PKG_DIR}/${PKG_NAME}/${PKG_SRC}"
-    #rm -rf "${CT_SRC_DIR}/${PKG_SRC}"
-    #mv "${CT_SRC_DIR}/${PKG_NAME}" "${CT_SRC_DIR}/${PKG_SRC}"
 }
 
 do_axTLS_configure() {
@@ -31,7 +29,7 @@ do_axTLS() {
     mkdir -p "${CT_BUILD_DIR}/${PKG_SRC}"
     CT_Pushd "${CT_BUILD_DIR}/${PKG_SRC}"
 
-    CT_DoLog EXTRA "COPY sources to build dir ${CT_SRC_DIR}/${PKG_SRC}"
+    CT_DoLog EXTRA "COPY sources to build dir"
     { cd "${CT_SRC_DIR}/${PKG_SRC}"; tar cf - .; } |tar xf -
 
     do_axTLS_configure
