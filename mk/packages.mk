@@ -40,14 +40,14 @@ $(patsubst %,pkg_%,$(CT_PKG_COMPONENTS)):
 	$(SILENT)$(MAKE) V=$(V) RESTART=$(patsubst pkg_%,%,$@) STOP=$(patsubst pkg_%,%,$@) packages
 
 $(patsubst %,+pkg_%,$(CT_PKG_COMPONENTS)):
-	$(SILENT)$(MAKE) V=$(V) STOP=$(patsubst +pkg_%,%,$@) V=$(V) packages
+	$(SILENT)$(MAKE) V=$(V) STOP=$(patsubst +pkg_%,%,$@) packages
 
 $(patsubst %,pkg_%+,$(CT_PKG_COMPONENTS)):
-	$(SILENT)$(MAKE) V=$(V) RESTART=$(patsubst pkg_%+,%,$@) V=$(V) packages
+	$(SILENT)$(MAKE) V=$(V) RESTART=$(patsubst pkg_%+,%,$@) packages
 
 PHONY += packages
 packages: .config $(CT_LOG_DIR) $(CT_FS_DIR)
-	$(SILENT)CT_STEPS='$(CT_PKG_STEPS)' CT_PKG='y' CT_COMPONENTS='$(CT_PKG_COMPONENTS)' CT_COMPONENTS_DIR='${CT_PKG_DIR}' $(CT_LIB_DIR)/chainbuilder.sh
+	$(SILENT)$(CT_LIB_DIR)/chainbuilder.sh CT_STEPS=\'$(CT_PKG_STEPS)' CT_PKG='y' CT_COMPONENTS=\'$(CT_PKG_COMPONENTS)\' CT_COMPONENTS_DIR=\'${CT_PKG_DIR}\' 
 
 packages.%:
 	$(SILENT)$(MAKE) -rf $(CT_MAKEFILE) $(shell echo "$(@)" |$(sed) -r -e 's|^([^.]+)\.([[:digit:]]+)$$|\1 CT_JOBS=\2|;')

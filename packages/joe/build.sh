@@ -1,3 +1,7 @@
+# Copyright 2010 Marius Groleo <groleo@gmail.com> <http://groleo.wordpress.com>
+# Licensed under the GPL v2. See COPYING in the root of this package.
+
+
 PKG_NAME=joe
 PKG_SRC="${PKG_NAME}-${CT_JOE_VERSION}"
 PKG_URL="http://freefr.dl.sourceforge.net/sourceforge/joe-editor/"

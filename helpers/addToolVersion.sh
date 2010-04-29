@@ -1,4 +1,7 @@
 #!/bin/sh
+# Copyright 2007 Yann E. MORIN
+# Licensed under the GPL v2. See COPYING in the root of this package.
+
 set -e
 
 # Adds a new version to one of the toolchain component

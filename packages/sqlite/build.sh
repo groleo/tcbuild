@@ -1,3 +1,6 @@
+# Copyright 2010 Marius Groleo <groleo@gmail.com> <http://groleo.wordpress.com>
+# Licensed under the GPL v2. See COPYING in the root of this package.
+
 PKG_NAME=sqlite
 PKG_URL="http://www.sqlite-editor.org/dist/v2.0"
 PKG_URL="http://www.sqlite.org"

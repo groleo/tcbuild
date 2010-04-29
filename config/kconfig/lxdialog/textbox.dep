@@ -1,0 +1,2 @@
+config/kconfig/lxdialog/textbox.o config/kconfig/lxdialog/textbox.dep: config/kconfig/lxdialog/textbox.c \
+ config/kconfig/lxdialog/dialog.h

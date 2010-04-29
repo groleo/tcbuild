@@ -1,3 +1,7 @@
+# Copyright 2007 Yann E. MORIN
+# Copyright 2010 Marius Groleo <groleo@gmail.com> <http://groleo.wordpress.com>
+# Licensed under the GPL v2. See COPYING in the root of this package.
+
 PKG_NAME=linux
 PKG_SRC="${PKG_NAME}-${CT_KERNEL_VERSION}"
 PKG_URL={ftp,http}://ftp.{de.,eu.,}kernel.org/pub/linux/kernel/v2.{6{,/testing},4,2}

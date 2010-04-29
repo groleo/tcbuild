@@ -15,9 +15,9 @@ do_ppl() {
     mkdir -p "${CT_BUILD_DIR}/${PKG_SRC}"
     CT_Pushd "${CT_BUILD_DIR}/${PKG_SRC}"
 
-    CT_DoStep INFO "Installing ${PKG_NAME}"
+    CT_DoStep INFO "INSTALL ${PKG_SRC}"
 
-    CT_DoLog EXTRA "Configuring ${PKG_NAME}"
+    CT_DoLog EXTRA "CONFIG ${PKG_SRC}"
 
     rm -rf config.cache
     CFLAGS="${CT_CFLAGS_FOR_HOST}"		\
@@ -31,15 +31,15 @@ do_ppl() {
 	--with-gmpxx=${CT_PREFIX_DIR}		\
 	--enable-shared
 
-    CT_DoLog EXTRA "Building ${PKG_NAME}"
+    CT_DoLog EXTRA "BUILD ${PKG_SRC}"
     CT_DoExecLog ALL make ${PARALLELMFLAGS}
 
     if [ "${CT_PPL_CHECK}" = "y" ]; then
-        CT_DoLog EXTRA "Checking ${PKG_NAME}"
+        CT_DoLog EXTRA "CHECK ${PKG_SRC}"
         CT_DoExecLog ALL make ${PARALLELMFLAGS} -s check
     fi
 
-    CT_DoLog EXTRA "Installing ${PKG_NAME}"
+    CT_DoLog EXTRA "INSTALL ${PKG_SRC}"
     CT_DoExecLog ALL make install
 
     CT_EndStep

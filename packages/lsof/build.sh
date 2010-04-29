@@ -1,3 +1,6 @@
+# Copyright 2010 Marius Groleo <groleo@gmail.com> <http://groleo.wordpress.com>
+# Licensed under the GPL v2. See COPYING in the root of this package.
+
 PKG_NAME=lsof
 PKG_URL="ftp://ftp.cs.mun.ca/pub/mirror/gentoo/distfiles"
 PKG_SRC="${PKG_NAME}_${CT_LSOF_VERSION}"

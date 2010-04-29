@@ -1,0 +1,107 @@
+# Target Architecture menu
+# Generated file. Do not edit /home/mariusn/workspace/cross-compiling/chainbuilder_next/config/_arch.in!!!
+
+menu "Target Architecture"
+
+choice
+bool "Flavor"
+
+config ARCH_alpha
+    bool
+    prompt "alpha"
+config ARCH_arm
+    bool
+    prompt "arm"
+config ARCH_ia64
+    bool
+    prompt "ia64 (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+config ARCH_m68k
+    bool
+    prompt "m68k"
+config ARCH_mips
+    bool
+    prompt "mips"
+config ARCH_powerpc
+    bool
+    prompt "powerpc"
+config ARCH_powerpc64
+    bool
+    prompt "powerpc64 (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+config ARCH_sh
+    bool
+    prompt "sh (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+config ARCH_x86
+    bool
+    prompt "x86"
+config ARCH_x86_64
+    bool
+    prompt "x86_64"
+
+endchoice
+
+source /home/mariusn/workspace/cross-compiling/chainbuilder_next/config/common_arch.in
+
+if ARCH_alpha
+config ARCH
+    default "alpha" if ARCH_alpha
+source /home/mariusn/workspace/cross-compiling/chainbuilder_next/toolchain/arch/alpha/config.in
+endif
+
+if ARCH_arm
+config ARCH
+    default "arm" if ARCH_arm
+source /home/mariusn/workspace/cross-compiling/chainbuilder_next/toolchain/arch/arm/config.in
+endif
+
+if ARCH_ia64
+config ARCH
+    default "ia64" if ARCH_ia64
+source /home/mariusn/workspace/cross-compiling/chainbuilder_next/toolchain/arch/ia64/config.in
+endif
+
+if ARCH_m68k
+config ARCH
+    default "m68k" if ARCH_m68k
+source /home/mariusn/workspace/cross-compiling/chainbuilder_next/toolchain/arch/m68k/config.in
+endif
+
+if ARCH_mips
+config ARCH
+    default "mips" if ARCH_mips
+source /home/mariusn/workspace/cross-compiling/chainbuilder_next/toolchain/arch/mips/config.in
+endif
+
+if ARCH_powerpc
+config ARCH
+    default "powerpc" if ARCH_powerpc
+source /home/mariusn/workspace/cross-compiling/chainbuilder_next/toolchain/arch/powerpc/config.in
+endif
+
+if ARCH_powerpc64
+config ARCH
+    default "powerpc64" if ARCH_powerpc64
+source /home/mariusn/workspace/cross-compiling/chainbuilder_next/toolchain/arch/powerpc64/config.in
+endif
+
+if ARCH_sh
+config ARCH
+    default "sh" if ARCH_sh
+source /home/mariusn/workspace/cross-compiling/chainbuilder_next/toolchain/arch/sh/config.in
+endif
+
+if ARCH_x86
+config ARCH
+    default "x86" if ARCH_x86
+source /home/mariusn/workspace/cross-compiling/chainbuilder_next/toolchain/arch/x86/config.in
+endif
+
+if ARCH_x86_64
+config ARCH
+    default "x86_64" if ARCH_x86_64
+source /home/mariusn/workspace/cross-compiling/chainbuilder_next/toolchain/arch/x86_64/config.in
+endif
+endmenu
+

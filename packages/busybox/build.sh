@@ -1,3 +1,8 @@
+# Copyright 2007 Yann E. MORIN
+# Copyright 2010 Marius Groleo <groleo@gmail.com> <http://groleo.wordpress.com>
+# Licensed under the GPL v2. See COPYING in the root of this package.
+
+
 PKG_NAME=busybox
 PKG_SRC="${PKG_NAME}-${CT_BUSYBOX_VERSION}"
 PKG_URL="http://busybox.net/downloads/
@@ -38,7 +43,7 @@ do_busybox_configure() {
 do_busybox() {
     do_busybox_configure
 
-    CT_DoStep INFO "INSTALL ${PKG_NAME}"
+    CT_DoStep INFO "INSTALL ${PKG_SRC}"
 
     mkdir -p "${CT_BUILD_DIR}/${PKG_SRC}"
     CT_Pushd "${CT_BUILD_DIR}/${PKG_SRC}"
@@ -60,7 +65,7 @@ do_busybox() {
          ${CT_BUSYBOX_VERBOSITY}                \
          oldconfig
 
-    CT_DoLog EXTRA "BUILD ${PKG_NAME}"        \
+    CT_DoLog EXTRA "BUILD ${PKG_SRC}"        \
     CFLAGS="${CT_CFLAGS_FOR_HOST}"            \
     CFLAGS_FOR_TARGET="${CT_TARGET_CFLAGS}"   \
     CT_DoExecLog ALL                          \
@@ -70,7 +75,7 @@ do_busybox() {
          ${CT_BUSYBOX_VERBOSITY}                \
          all
 
-    CT_DoLog EXTRA "INSTALL ${PKG_NAME}"
+    CT_DoLog EXTRA "INSTALL ${PKG_SRC}"
     CT_DoExecLog ALL                \
     ${make} ${CT_BUSYBOX_PARALLEL:+${PARALLELMFLAGS}}  \
          CROSS_COMPILE="${CT_TARGET}-"                    \

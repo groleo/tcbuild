@@ -1,0 +1,22 @@
+# GMP library menu
+# Generated file. Do not edit /home/mariusn/workspace/cross-compiling/chainbuilder_next/config/_gmp.in!!!
+
+menu "GMP library"
+
+choice
+bool "Flavor"
+
+config GMP_gmp
+    bool
+    prompt "gmp"
+
+endchoice
+
+
+if GMP_gmp
+config GMP
+    default "gmp" if GMP_gmp
+source /home/mariusn/workspace/cross-compiling/chainbuilder_next/toolchain/gmp/config.in
+endif
+endmenu
+

@@ -1,0 +1,22 @@
+# PPL library menu
+# Generated file. Do not edit /home/mariusn/workspace/cross-compiling/chainbuilder_next/config/_ppl.in!!!
+
+menu "PPL library"
+
+choice
+bool "Flavor"
+
+config PPL_ppl
+    bool
+    prompt "ppl"
+
+endchoice
+
+
+if PPL_ppl
+config PPL
+    default "ppl" if PPL_ppl
+source /home/mariusn/workspace/cross-compiling/chainbuilder_next/toolchain/ppl/config.in
+endif
+endmenu
+

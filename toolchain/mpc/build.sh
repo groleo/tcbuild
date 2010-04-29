@@ -18,9 +18,9 @@ do_mpc() {
     mkdir -p "${CT_BUILD_DIR}/${PKG_SRC}"
     CT_Pushd "${CT_BUILD_DIR}/${PKG_SRC}"
 
-    CT_DoStep INFO "Installing ${PKG_NAME}"
+    CT_DoStep INFO "INSTALL ${PKG_SRC}"
 
-    CT_DoLog EXTRA "Configuring ${PKG_NAME}"
+    CT_DoStep EXTRA "CONFIG ${PKG_SRC}"
 
     rm -rf config.cache
     CFLAGS="${CT_CFLAGS_FOR_HOST}"		\
@@ -31,21 +31,19 @@ do_mpc() {
 	--prefix="${CT_PREFIX_DIR}"		\
 	--disable-shared			\
 	--enable-static				\
-	--enable-fft				\
-	--enable-mpbsd				\
-	--enable-cxx				\
-	 --with-ppl="${CT_PREFIX_DIR}"		\
-	 --with-gmp="${CT_PREFIX_DIR}"		\
+	--with-gmp="${CT_PREFIX_DIR}"
+    CT_EndStep
 
-    CT_DoLog EXTRA "Building ${PKG_NAME}"
+    CT_DoStep EXTRA "BUILD ${PKG_SRC}"
     CT_DoExecLog ALL make ${PARALLELMFLAGS}
+    CT_EndStep
 
     if [ "${CT_MPC_CHECK}" = "y" ]; then
-        CT_DoLog EXTRA "Checking ${PKG_NAME}"
+        CT_DoStep EXTRA "CHECK ${PKG_SRC}"
         CT_DoExecLog ALL make ${PARALLELMFLAGS} -s check
+	CT_EndStep
     fi
 
-    CT_DoLog EXTRA "Installing ${PKG_NAME}"
     CT_DoExecLog ALL make install
 
     CT_EndStep

@@ -15,7 +15,7 @@ do_binutils() {
     mkdir -p "${CT_BUILD_DIR}/${PKG_SRC}"
     CT_Pushd "${CT_BUILD_DIR}/${PKG_SRC}"
 
-    CT_DoStep INFO "Installing ${PKG_NAME}"
+    CT_DoStep INFO "INSTALL ${PKG_SRC}"
 
     binutils_opts=
     # If GMP and MPFR were configured, then use that,
@@ -25,7 +25,7 @@ do_binutils() {
     fi
     { cd "${CT_SRC_DIR}/${PKG_SRC}"; tar cf - .; } |tar xf -
 
-    CT_DoLog EXTRA "Configuring ${PKG_NAME}"
+    CT_DoStep EXTRA "CONFIGURE ${PKG_SRC}"
 
     rm -rf config.cache
     CFLAGS="${CT_CFLAGS_FOR_HOST}"		\
@@ -45,11 +45,12 @@ do_binutils() {
         ${CT_ARCH_WITH_FLOAT}                   \
         ${CT_BINUTILS_EXTRA_CONFIG}             \
         ${BINUTILS_SYSROOT_ARG}
+    CT_EndStep
 
-    CT_DoLog EXTRA "Building ${PKG_NAME}"
+    CT_DoStep EXTRA "BUILD ${PKG_SRC}"
     CT_DoExecLog ALL make ${PARALLELMFLAGS}
+    CT_EndStep
 
-    CT_DoLog EXTRA "Installing ${PKG_NAME}"
     CT_DoExecLog ALL make install
 
     # Make those new tools available to the core C compilers to come.
@@ -84,11 +85,11 @@ do_binutils_target() {
     fi
 
     if [ -n "${targets}" ]; then
-        CT_DoStep INFO "Installing ${PKG_NAME} for target"
+        CT_DoStep INFO "INSTALL ${PKG_NAME} for target"
         mkdir -p "${CT_BUILD_DIR}/${PKG_NAME}-for-target"
         CT_Pushd "${CT_BUILD_DIR}/${PKG_NAME}-for-target"
 
-        CT_DoLog EXTRA "Configuring ${PKG_NAME} for target"
+        CT_DoStep EXTRA "CONFIGURE ${PKG_NAME} for target"
         CT_DoExecLog ALL                                            \
         "${CT_SRC_DIR}/${PKG_SRC}/configure"   \
             --build=${CT_BUILD}                                     \
@@ -103,13 +104,14 @@ do_binutils_target() {
             ${binutils_opts}                                        \
             ${CT_ARCH_WITH_FLOAT}                                   \
             ${CT_BINUTILS_EXTRA_CONFIG}
-
+        CT_EndStep
         build_targets=$(echo "${targets}" |sed -r -e 's/(^| +)/\1all-/g;')
         install_targets=$(echo "${targets}" |sed -r -e 's/(^| +)/\1install-/g;')
 
-        CT_DoLog EXTRA "Building ${PKG_NAME}' libraries (${targets}) for target"
+        CT_DoStep EXTRA "BUILD ${PKG_NAME}' libraries (${targets}) for target"
         CT_DoExecLog ALL make ${PARALLELMFLAGS} ${build_targets}
-        CT_DoLog EXTRA "Installing ${PKG_NAME}' libraries (${targets}) for target"
+	CT_EndStep
+        CT_DoLog EXTRA "INSTALL ${PKG_NAME}' libraries (${targets}) for target"
         CT_DoExecLog ALL make DESTDIR="${CT_SYSROOT_DIR}" ${install_targets}
 
         CT_Popd

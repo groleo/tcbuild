@@ -1,3 +1,6 @@
+# Copyright 2010 Marius Groleo <groleo@gmail.com> <http://groleo.wordpress.com>
+# Licensed under the GPL v2. See COPYING in the root of this package.
+
 PKG_NAME=ppp
 PKG_URL="ftp://ftp.samba.org/pub/ppp"
 PKG_SRC="${PKG_NAME}-${CT_PPP_VERSION}"
@@ -41,7 +44,7 @@ do_ppp_configure() {
 }
 
 do_ppp() {
-	CT_DoStep INFO "INSTALL ${PKG_NAME}"
+	CT_DoStep INFO "INSTALL ${PKG_SRC}"
 
 	mkdir -p "${CT_BUILD_DIR}/${PKG_SRC}"
 	CT_Pushd "${CT_BUILD_DIR}/${PKG_SRC}"
@@ -51,7 +54,7 @@ do_ppp() {
 
 	do_ppp_configure
 
-	CT_DoLog EXTRA "BUILD ${PKG_NAME}"
+	CT_DoLog EXTRA "BUILD ${PKG_SRC}"
 	CT_DoExecLog ALL				\
 	${make} ${CT_PPP_PARALLEL:+${PARALLELMFLAGS}}	\
 	 CROSS=${CT_TARGET}-				\
@@ -59,7 +62,6 @@ do_ppp() {
 	 DESTDIR="${CT_FS_DIR}/"			\
 	 all
 
-	CT_DoLog EXTRA "INSTALL ${PKG_NAME}"
 	CT_DoExecLog ALL			\
 	${make} CROSS=${CT_TARGET}-		\
 	 DESTDIR="${CT_FS_DIR}/"		\

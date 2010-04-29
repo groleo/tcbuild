@@ -1,0 +1,2 @@
+config/kconfig/lxdialog/menubox.o config/kconfig/lxdialog/menubox.dep: config/kconfig/lxdialog/menubox.c \
+ config/kconfig/lxdialog/dialog.h

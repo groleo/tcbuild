@@ -4,7 +4,8 @@
 
 PKG_NAME=gcc
 PKG_SRC="${PKG_NAME}-${CT_CC_VERSION}"
-PKG_URL=ftp://ftp.irisa.fr/pub/mirrors/gcc.gnu.org/gcc{,{,/releases,/snapshots}/${PKG_SRC}}
+PKG_URL="ftp://ftp.irisa.fr/pub/mirrors/gcc.gnu.org/gcc/releases/${PKG_SRC}
+	ftp://ftp.irisa.fr/pub/mirrors/gcc.gnu.org/gcc/snapshots/${PKG_SRC}"
 # Download gcc
 do_compiler_get() {
     # Ah! gcc folks are kind of 'different': they store the tarballs in
@@ -13,7 +14,7 @@ do_compiler_get() {
     # Arrgghh! Some of those versions does not follow this convention:
     # gcc-3.3.3 lives in releases/gcc-3.3.3, while gcc-2.95.* isn't in a
     # subdirectory! You bastard!
-    CT_GetFile "${PKG_SRC}"  ${PKG_URL}
+    CT_GetFile "${PKG_SRC}"  `echo ${PKG_URL}`
 
     # Starting with GCC 4.3, ecj is used for Java, and will only be
     # built if the configure script finds ecj.jar at the top of the
@@ -56,7 +57,7 @@ do_compiler_core() {
     # In normal conditions, ( "${mode}" = "shared" ) implies
     # ( "${build_libgcc}" = "yes" ), but I won't check for that
 
-    CT_DoStep INFO "Installing ${mode} core C compiler"
+    CT_DoStep INFO "INSTALL ${mode} core C compiler"
     mkdir -p "${CT_BUILD_DIR}/compiler-core-${mode}"
     CT_Pushd "${CT_BUILD_DIR}/compiler-core-${mode}"
 
@@ -81,12 +82,12 @@ do_compiler_core() {
     esac
 
     if [ "${copy_headers}" = "y" ]; then
-        CT_DoLog DEBUG "Copying headers to install area of bootstrap gcc, so it can build libgcc2"
+        CT_DoLog DEBUG "COPY headers to install area of bootstrap gcc, so it can build libgcc2"
         CT_DoExecLog ALL mkdir -p "${core_prefix_dir}/${CT_TARGET}/include"
         CT_DoExecLog ALL cp -r "${CT_HEADERS_DIR}"/* "${core_prefix_dir}/${CT_TARGET}/include"
     fi
 
-    CT_DoLog EXTRA "Configuring ${mode} core C compiler"
+    CT_DoLog EXTRA "CONFIGURE ${mode} core C compiler"
 
     extra_config="${extra_config} ${CT_ARCH_WITH_ARCH}"
     extra_config="${extra_config} ${CT_ARCH_WITH_ABI}"
@@ -121,7 +122,7 @@ do_compiler_core() {
     CT_DoLog DEBUG CFLAGS_FOR_TARGET="${CT_TARGET_CFLAGS}"
     CT_DoLog DEBUG CXXFLAGS_FOR_TARGET="${CT_TARGET_CFLAGS}"
     CT_DoLog DEBUG LDFLAGS_FOR_TARGET="${CT_TARGET_LDFLAGS}"
-    CT_DoExecLog DEBUG export
+    #CT_DoExecLog DEBUG export
     # Use --with-local-prefix so older gccs don't look in /usr/local (http://gcc.gnu.org/PR10532)
     find . -iname 'config.cache' -exec rm {} \;
     CC_FOR_BUILD="${CT_BUILD}-gcc"                  \
@@ -133,6 +134,7 @@ do_compiler_core() {
         --target=${CT_TARGET}                       \
         --prefix="${core_prefix_dir}"               \
         --with-local-prefix="${CT_SYSROOT_DIR}"     \
+        --disable-multilib                          \
         ${CC_CORE_SYSROOT_ARG}                      \
         ${extra_config}                             \
         --disable-nls                               \
@@ -200,14 +202,14 @@ do_compiler_core() {
     fi   # ! build libgcc
 
     if [ "${CT_CANADIAN}" = "y" ]; then
-        CT_DoLog EXTRA "Building libiberty"
+        CT_DoLog EXTRA "BUILD libiberty"
         CT_DoExecLog ALL make ${PARALLELMFLAGS} all-build-libiberty
     fi
 
-    CT_DoLog EXTRA "Building ${mode} core C compiler"
+    CT_DoLog EXTRA "BUILD ${mode} core C compiler"
     CT_DoExecLog ALL make ${PARALLELMFLAGS} ${build_rules}
 
-    CT_DoLog EXTRA "Installing ${mode} core C compiler"
+    CT_DoLog EXTRA "INSTALL ${mode} core C compiler"
     CT_DoExecLog ALL make ${install_rules}
 
     CT_Popd
@@ -236,6 +238,7 @@ do_compiler_step2() {
     # In case we're NPTL, build the shared core gcc and the target libgcc.
     # In any other case, build the static core gcc and, if using gcc-4.3+,
     # also build the target libgcc.
+    #rm -rf ${CT_BIN_OVERIDE_DIR}/{as,ar,gcc,g++}
     case "${CT_BARE_METAL},${CT_THREADS}" in
         y,*)    ;;
         ,nptl)
@@ -255,12 +258,12 @@ do_compiler_step3() {
     # If building for bare metal, nothing to be done here, the static core conpiler is enough!
     [ "${CT_BARE_METAL}" = "y" ] && return 0
 
-    CT_DoStep INFO "Installing final compiler"
+    CT_DoStep INFO "INSTALL final compiler"
 
     mkdir -p "${CT_BUILD_DIR}/compiler_step3"
     CT_Pushd "${CT_BUILD_DIR}/compiler_step3"
 
-    CT_DoLog EXTRA "Configuring final compiler"
+    CT_DoLog EXTRA "CONFIGURE final compiler"
 
     # Enable selected languages
     lang_opt="c"
@@ -319,10 +322,11 @@ do_compiler_step3() {
     CT_DoLog DEBUG CFLAGS_FOR_TARGET="${CT_TARGET_CFLAGS}"
     CT_DoLog DEBUG CXXFLAGS_FOR_TARGET="${CT_TARGET_CFLAGS}"
     CT_DoLog DEBUG LDFLAGS_FOR_TARGET="${CT_TARGET_LDFLAGS}"
-    CT_DoExecLog DEBUG export
+    #CT_DoExecLog DEBUG export
 
     find . -iname 'config.cache' -exec rm {} \;
     CC_FOR_BUILD="${CT_BUILD}-gcc"                  \
+    CFLAGS="${CT_CFLAGS_FOR_HOST}"                  \
     CFLAGS_FOR_TARGET="${CT_TARGET_CFLAGS}"         \
     CXXFLAGS_FOR_TARGET="${CT_TARGET_CFLAGS}"       \
     LDFLAGS_FOR_TARGET="${CT_TARGET_LDFLAGS}"       \
@@ -350,14 +354,14 @@ do_compiler_step3() {
         #--with-headers=${CT_HEADERS_DIR}
 
     if [ "${CT_CANADIAN}" = "y" ]; then
-        CT_DoLog EXTRA "Building libiberty"
+        CT_DoLog EXTRA "BUILD libiberty"
         CT_DoExecLog ALL make ${PARALLELMFLAGS} all-build-libiberty
     fi
 
-    CT_DoLog EXTRA "Building final compiler"
+    CT_DoLog EXTRA "BUILD final compiler"
     CT_DoExecLog ALL make ${PARALLELMFLAGS} all
 
-    CT_DoLog EXTRA "Installing final compiler"
+    CT_DoLog EXTRA "INSTALL final compiler"
     CT_DoExecLog ALL make install
 
     # Create a symlink ${CT_TARGET}-cc to ${CT_TARGET}-gcc to always be able

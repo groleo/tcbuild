@@ -1,3 +1,7 @@
+# Copyright 2010 Marius Groleo <groleo@gmail.com> <http://groleo.wordpress.com>
+# Licensed under the GPL v2. See COPYING in the root of this package.
+
+
 PKG_NAME=oprofile
 PKG_URL="http://prdownloads.sourceforge.net/oprofile"
 PKG_SRC="${PKG_NAME}-${CT_OPROFILE_VERSION}"

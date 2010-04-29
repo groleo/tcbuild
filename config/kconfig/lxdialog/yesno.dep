@@ -1,0 +1,1 @@
+config/kconfig/lxdialog/yesno.o config/kconfig/lxdialog/yesno.dep: config/kconfig/lxdialog/yesno.c config/kconfig/lxdialog/dialog.h

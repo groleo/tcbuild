@@ -1,3 +1,6 @@
+# Copyright 2010 Marius Groleo <groleo@gmail.com> <http://groleo.wordpress.com>
+# Licensed under the GPL v2. See COPYING in the root of this package.
+
 PKG_NAME=minicom
 PKG_URL="http://alioth.debian.org/frs/download.php/2332/"
 PKG_SRC="${PKG_NAME}-${CT_MINICOM_VERSION}"

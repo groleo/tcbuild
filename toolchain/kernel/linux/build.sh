@@ -17,13 +17,11 @@ do_kernel_get() {
 
 # Extract kernel
 do_kernel_extract() {
-    CT_DoStep INFO "Extracting"
     if [ "${CT_KERNEL_LINUX_USE_CUSTOM_HEADERS}" = "y" ]; then
 	return 0
     fi
     CT_Extract "${PKG_SRC}"
     CT_Patch   "${CT_TLC_DIR}/kernel/${PKG_NAME}/${PKG_SRC}"
-    CT_EndStep
 }
 
 # Wrapper to the actual headers install method
@@ -53,7 +51,7 @@ do_kernel_install() {
 
     V_OPT="V=${CT_KERNEL_LINUX_VERBOSE_LEVEL}"
 
-    CT_DoLog EXTRA "Installing kernel headers"
+    CT_DoStep EXTRA "Installing kernel headers"
     CT_DoExecLog ALL                                    \
     ${make} -C "${CT_SRC_DIR}/${PKG_SRC}"		\
          O=$(pwd)                                       \
@@ -61,9 +59,11 @@ do_kernel_install() {
          INSTALL_HDR_PATH="${CT_SYSROOT_DIR}/usr"       \
          ${V_OPT}                                       \
          headers_install
+    CT_EndStep
 
+    #If you are in doubt that installed headers are buggy
     if [ "${CT_KERNEL_LINUX_INSTALL_CHECK}" = "y" ]; then
-        CT_DoLog EXTRA "Checking installed headers"
+        CT_DoStep EXTRA "Checking installed headers"
         CT_DoExecLog ALL                                    \
         ${make} -C "${CT_SRC_DIR}/${PKG_SRC}"  \
              O=$(pwd)                                       \
@@ -72,6 +72,7 @@ do_kernel_install() {
              ${V_OPT}                                       \
              headers_check
         find "${CT_SYSROOT_DIR}" -type f -name '.check*' -exec rm {} \;
+	CT_EndStep
     fi
 
     CT_Popd

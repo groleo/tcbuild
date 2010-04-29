@@ -1,3 +1,7 @@
+# Copyright 2010 Marius Groleo <groleo@gmail.com> <http://groleo.wordpress.com>
+# Licensed under the GPL v2. See COPYING in the root of this package.
+
+
 PKG_NAME=axTLS
 PKG_URL="http://garr.dl.sourceforge.net/sourceforge/axtls"
 PKG_SRC="${PKG_NAME}-${CT_AXTLS_VERSION}"
@@ -24,7 +28,7 @@ do_axTLS_configure() {
 }
 
 do_axTLS() {
-    CT_DoStep INFO "INSTALL ${PKG_NAME}"
+    CT_DoStep INFO "INSTALL ${PKG_SRC}"
 
     mkdir -p "${CT_BUILD_DIR}/${PKG_SRC}"
     CT_Pushd "${CT_BUILD_DIR}/${PKG_SRC}"
@@ -37,12 +41,11 @@ do_axTLS() {
     # Retrieve the config file
     CT_DoExecLog ALL cp "${CT_AXTLS_CONFIG_FILE}" config/.config
 
-    CT_DoLog EXTRA "BUILD ${PKG_NAME}"
+    CT_DoLog EXTRA "BUILD ${PKG_SRC}"
     CT_DoExecLog ALL                    \
     ${make} CC=${CT_TARGET}-gcc            \
          oldconfig all
 
-    CT_DoLog EXTRA "INSTALL ${PKG_NAME}"
     CT_DoExecLog ALL                    \
     ${make} CC=${CT_TARGET}-gcc            \
          PREFIX=${CT_FS_DIR}/usr install

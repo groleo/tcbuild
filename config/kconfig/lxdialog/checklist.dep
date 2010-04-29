@@ -1,0 +1,2 @@
+config/kconfig/lxdialog/checklist.o config/kconfig/lxdialog/checklist.dep: config/kconfig/lxdialog/checklist.c \
+ config/kconfig/lxdialog/dialog.h

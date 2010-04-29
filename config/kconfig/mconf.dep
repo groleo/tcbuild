@@ -1,0 +1,6 @@
+/home/mariusn/workspace/cross-compiling/chainbuilder_next/config/kconfig/mconf.o /home/mariusn/workspace/cross-compiling/chainbuilder_next/config/kconfig/mconf.dep: \
+ /home/mariusn/workspace/cross-compiling/chainbuilder_next/config/kconfig/mconf.c \
+ /home/mariusn/workspace/cross-compiling/chainbuilder_next/config/kconfig/lkc.h \
+ /home/mariusn/workspace/cross-compiling/chainbuilder_next/config/kconfig/expr.h \
+ /home/mariusn/workspace/cross-compiling/chainbuilder_next/config/kconfig/lkc_proto.h \
+ /home/mariusn/workspace/cross-compiling/chainbuilder_next/config/kconfig/lxdialog/dialog.h

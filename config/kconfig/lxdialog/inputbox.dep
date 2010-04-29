@@ -1,0 +1,2 @@
+config/kconfig/lxdialog/inputbox.o config/kconfig/lxdialog/inputbox.dep: config/kconfig/lxdialog/inputbox.c \
+ config/kconfig/lxdialog/dialog.h

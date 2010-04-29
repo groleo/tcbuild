@@ -15,9 +15,9 @@ do_cloog-ppl() {
     mkdir -p "${CT_BUILD_DIR}/${PKG_SRC}"
     CT_Pushd "${CT_BUILD_DIR}/${PKG_SRC}"
 
-    CT_DoStep INFO "Installing ${PKG_NAME}"
+    CT_DoStep INFO "INSTALL ${PKG_SRC}"
 
-    CT_DoLog EXTRA "Configuring ${PKG_NAME}"
+    CT_DoLog EXTRA "CONFIGURE ${PKG_SRC}"
 
     rm -rf config.cache
     CC="${CT_HOST}-gcc"				\
@@ -32,15 +32,14 @@ do_cloog-ppl() {
 	 --disable-shared			\
 	 --enable-static
 
-    CT_DoLog EXTRA "Building ${PKG_NAME}"
+    CT_DoLog EXTRA "BUILD ${PKG_SRC}"
     CT_DoExecLog ALL make ${PARALLELMFLAGS}
 
     if [ "${CT_CLOOG_PPL_CHECK}" = "y" ]; then
-        CT_DoLog EXTRA "Checking ${PKG_NAME}"
+        CT_DoLog EXTRA "CHECK ${PKG_SRC}"
         CT_DoExecLog ALL make ${PARALLELMFLAGS} -s check
     fi
 
-    CT_DoLog EXTRA "Installing ${PKG_NAME}"
     CT_DoExecLog ALL make install
 
     CT_EndStep
@@ -51,7 +50,7 @@ do_cloog-ppl_target() {
 	return
     fi
 
-    CT_DoStep INFO "Installing ${PKG_NAME} for the target"
+    CT_DoStep INFO "INSTALL ${PKG_SRC} for the target"
     mkdir -p "${CT_BUILD_DIR}/${PKG_SRC}-target"
     CT_Pushd "${CT_BUILD_DIR}/${PKG_SRC}-target"
 }

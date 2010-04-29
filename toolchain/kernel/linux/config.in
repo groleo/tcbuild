@@ -30,7 +30,7 @@ if KERNEL_LINUX_INSTALL
 config KERNEL_LINUX_INSTALL_CHECK
     bool
     prompt "Check installed headers"
-    default y
+    default n
     help
       If you are in doubt that installed headers are buggy, say 'Y'
       here to have an extra check passed onto the headers.

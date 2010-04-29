@@ -1,0 +1,49 @@
+# C library menu
+# Generated file. Do not edit /home/mariusn/workspace/cross-compiling/chainbuilder_next/config/_libc.in!!!
+
+menu "C library"
+
+choice
+bool "Flavor"
+
+config LIBC_eglibc
+    bool
+    prompt "eglibc"
+config LIBC_glibc
+    bool
+    prompt "glibc"
+config LIBC_newlib
+    bool
+    prompt "newlib"
+config LIBC_uClibc
+    bool
+    prompt "uClibc"
+
+endchoice
+
+
+if LIBC_eglibc
+config LIBC
+    default "eglibc" if LIBC_eglibc
+source /home/mariusn/workspace/cross-compiling/chainbuilder_next/toolchain/libc/eglibc/config.in
+endif
+
+if LIBC_glibc
+config LIBC
+    default "glibc" if LIBC_glibc
+source /home/mariusn/workspace/cross-compiling/chainbuilder_next/toolchain/libc/glibc/config.in
+endif
+
+if LIBC_newlib
+config LIBC
+    default "newlib" if LIBC_newlib
+source /home/mariusn/workspace/cross-compiling/chainbuilder_next/toolchain/libc/newlib/config.in
+endif
+
+if LIBC_uClibc
+config LIBC
+    default "uClibc" if LIBC_uClibc
+source /home/mariusn/workspace/cross-compiling/chainbuilder_next/toolchain/libc/uClibc/config.in
+endif
+endmenu
+

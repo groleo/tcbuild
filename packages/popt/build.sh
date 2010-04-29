@@ -1,3 +1,6 @@
+# Copyright 2010 Marius Groleo <groleo@gmail.com> <http://groleo.wordpress.com>
+# Licensed under the GPL v2. See COPYING in the root of this package.
+
 PKG_NAME=popt
 PKG_URL="http://ftp.de.debian.org/debian/pool/main/p/popt"
 PKG_SRC="${PKG_NAME}-${CT_POPT_VERSION}"

@@ -1,3 +1,7 @@
+# Copyright 2010 Marius Groleo <groleo@gmail.com> <http://groleo.wordpress.com>
+# Licensed under the GPL v2. See COPYING in the root of this package.
+
+
 PKG_NAME=ntpclient
 PKG_URL="http://doolittle.icarus.com/ntpclient"
 PKG_ARCHV="${PKG_NAME}_${CT_NTPCLIENT_VERSION}"
@@ -13,7 +17,7 @@ do_ntpclient_extract() {
 }
 
 do_ntpclient() {
-    CT_DoStep INFO "INSTALL ${PKG_NAME}"
+    CT_DoStep INFO "INSTALL ${PKG_SRC}"
 
     mkdir -p "${CT_BUILD_DIR}/${PKG_SRC}"
     CT_Pushd "${CT_BUILD_DIR}/${PKG_SRC}"
@@ -24,13 +28,11 @@ do_ntpclient() {
 
     CT_DoLog EXTRA "Applying patches"
 
-    CT_DoLog EXTRA "BUILD ${PKG_NAME}"
+    CT_DoLog EXTRA "BUILD ${PKG_SRC}"
     CT_DoExecLog ALL                                    \
     ${make} ${CT_NTPCLIENT_PARALLEL:+${PARALLELMFLAGS}}    \
          CC=${CT_TARGET}-gcc                            \
          all
-
-    CT_DoLog EXTRA "INSTALL ${PKG_NAME}"
 
     CT_DoExecLog ALL cp ntpclient "${CT_FS_DIR}/usr/bin"
 

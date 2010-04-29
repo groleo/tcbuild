@@ -1,6 +1,8 @@
 # This file contains some usefull common functions
 # Copyright 2007 Yann E. MORIN
-# Licensed under the GPL v2. See COPYING in the root of this package
+# Copyright 2010 Marius Groleo <groleo@gmail.com> <http://groleo.wordpress.com>
+# Licensed under the GPL v2. See COPYING in the root of this package.
+
 
 # Prepare the fault handler
 CT_OnError() {
@@ -10,25 +12,28 @@ CT_OnError() {
 
 	CT_DoLog ERROR "Report:-----------------------------------------------"
 	CT_DoLog ERROR ""
-	if [ "${CT_USE_EXTERNAL_TOOLCHAIN}" = "y" ] ; then
-	CT_DoLog ERROR "Using external compiler"
-	else
-	CT_DoLog ERROR "Using internal compiler"
-	fi
-
-	CT_DoLog ERROR "Using LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
-	CT_DoLog ERROR "Using PATH=${PATH}"
 	CT_DoLog ERROR "Build failed in step '${CT_STEP_MESSAGE[${CT_STEP_COUNT}]}'"
-	for ((step=(CT_STEP_COUNT-1); step>1; step--)); do
-		CT_DoLog ERROR "      called in step '${CT_STEP_MESSAGE[${step}]}'"
+	for ((s=(CT_STEP_COUNT-1); s>1; s--)); do
+		CT_DoLog ERROR "      called in step '${CT_STEP_MESSAGE[${s}]}'"
 	done
 
 	CT_DoLog ERROR "Error happened in '${BASH_SOURCE[1]}' in function '${FUNCNAME[1]}' (line unknown, sorry)"
 	for ((depth=2; ${BASH_LINENO[$((${depth}-1))]}>0; depth++)); do
-		CT_DoLog ERROR "      called from '${BASH_SOURCE[${depth}]}' at line # ${BASH_LINENO[${depth}-1]} in function '${FUNCNAME[${depth}]}'"
+		CT_DoLog ERROR "      called from ${BASH_SOURCE[${depth}]} +${BASH_LINENO[${depth}-1]} in function '${FUNCNAME[${depth}]}'"
 	done
 
 	[ "${CT_LOG_TO_FILE}" = "y" ] && CT_DoLog ERROR "Look at '${CT_LOG_FILE}' for more info on this error."
+
+	if [ "${CT_USE_EXTERNAL_TOOLCHAIN}" = "y" ] ; then
+		CT_DoLog ERROR "Using External compiler"
+	else
+		CT_DoLog ERROR "Using Internal compiler"
+	fi
+
+	CT_DoLog ERROR "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
+	CT_DoLog ERROR "PATH=${PATH}"
+	CT_DoLog ERROR "------------------------------------------------------"
+
 	CT_STEP_COUNT=1
 	CT_DoEnd ERROR
 	exit $ret
@@ -278,8 +283,8 @@ CT_Pushd() {
 	CT_DoLog DEBUG "pushd $1"
 }
 CT_Popd() {
-	popd >/dev/null 2>&1
-	CT_DoLog DEBUG "popd"
+	O="`popd 2>&1`"
+	CT_DoLog DEBUG "popd ${O}"
 }
 
 # Creates a temporary directory
@@ -674,16 +679,17 @@ CT_Extract() {
 	local ext=$(CT_GetFileExtension "${basename}")
 	CT_TestAndAbort "'${basename}' not found in '${CT_TARBALLS_DIR}'" -z "${ext}"
 	local full_file="${CT_TARBALLS_DIR}/${basename}${ext}"
+	CT_DoStep INFO "EXTRACT '${basename}'"
 
 	# Check if already extracted
 	if [ -e "${CT_SRC_DIR}/_${basename}.extracted" ]; then
 		CT_DoLog DEBUG "Already extracted '${basename}'"
+		CT_EndStep
 		return 0
 	fi
 
 	[ "${nochdir}" = "nochdir" ] || CT_Pushd "${CT_SRC_DIR}"
 
-	CT_DoLog EXTRA "EXTRACT '${basename}'"
 	case "${ext}" in
 		.tar.bz2)     CT_DoExecLog EXTRA ${tar} xvjf "${full_file}";;
 		.tar.gz|.tgz) CT_DoExecLog EXTRA ${tar} xvzf "${full_file}";;
@@ -699,6 +705,7 @@ CT_Extract() {
 	CT_DoExecLog DEBUG touch "${CT_SRC_DIR}/_${basename}.extracted"
 
 	[ "${nochdir}" = "nochdir" ] || CT_Popd
+	CT_EndStep
 }
 
 CT_SubGitApply() {

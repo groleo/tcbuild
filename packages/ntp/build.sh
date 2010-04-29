@@ -1,3 +1,7 @@
+# Copyright 2010 Marius Groleo <groleo@gmail.com> <http://groleo.wordpress.com>
+# Licensed under the GPL v2. See COPYING in the root of this package.
+
+
 PKG_NAME=ntp
 PKG_SRC="${PKG_NAME}-${CT_NTP_VERSION}"
 PKG_URL="http://www.eecis.udel.edu/~ntp/ntp_spool/ntp4/"
@@ -53,7 +57,7 @@ do_ntp_start_files() {
 
 do_ntp() {
 
-    CT_DoStep INFO "INSTALL ${PKG_NAME}"
+    CT_DoStep INFO "INSTALL ${PKG_SRC}"
 
     mkdir -p "${CT_BUILD_DIR}/${PKG_NAME}"
     CT_Pushd "${CT_BUILD_DIR}/${PKG_NAME}"
@@ -63,7 +67,7 @@ do_ntp() {
 
     do_ntp_configure
 
-    CT_DoLog EXTRA "BUILD ${PKG_NAME}"                \
+    CT_DoLog EXTRA "BUILD ${PKG_SRC}"                \
     CT_DoExecLog ALL                                    \
     ${make} ${CT_NTP_PARALLEL:+${PARALLELMFLAGS}}          \
          CROSS=${CT_TARGET}-                            \
@@ -71,7 +75,6 @@ do_ntp() {
          ${CT_NTP_VERBOSITY}                            \
          all
 
-    CT_DoLog EXTRA "INSTALL ${PKG_NAME}"
     CT_DoExecLog ALL                    \
     ${make} CROSS=${CT_TARGET}-            \
          DESTDIR="${CT_FS_DIR}/"                    \

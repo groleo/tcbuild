@@ -8,7 +8,7 @@ help_module::
 CLOOG_PPL=ppl cloog-ppl mpc
 
 
-
+# to know what packages to get
 CT_TLC_COMPONENTS := \
 	kernel		\
 	gmp		\
@@ -70,12 +70,12 @@ $(patsubst %,+toolchain_%,$(CT_TLC_STEPS)):
 	$(SILENT)$(MAKE) -r V=$(V) STOP=$(patsubst +%,%,$@) toolchain
 
 $(patsubst %,toolchain_%+,$(CT_TLC_STEPS)):
-	$(SILENT)$(MAKE) -r V=$(V) RESTART=$(patsubst %+,%,$@) toolchain
+	$(SILENT)$(MAKE) -r V=$(V) RESTART=$(patsubst toolchain_%+,%,$@) toolchain
 
 # Actual build
 PHONY+=toolchain
 toolchain: .config $(CT_LOG_DIR)
-	$(SILENT)CT_STEPS='$(CT_TLC_STEPS)' CT_MK_TOOLCHAIN=y CT_COMPONENTS='$(CT_TLC_COMPONENTS)'  CT_COMPONENTS_DIR='${CT_TLC_DIR}' $(CT_LIB_DIR)/chainbuilder.sh
+	$(SILENT)$(CT_LIB_DIR)/chainbuilder.sh CT_STEPS=\"$(CT_TLC_STEPS)\" CT_MK_TOOLCHAIN=y CT_COMPONENTS=\"$(CT_TLC_COMPONENTS)\"  CT_COMPONENTS_DIR=\"${CT_TLC_DIR}\" 
 
 toolchain.%:
 	$(SILENT)$(MAKE) -rf $(CT_MAKEFILE) $(shell echo "$(@)" |$(sed) -r -e 's|^([^.]+)\.([[:digit:]]+)$$|\1 CT_JOBS=\2|;')

@@ -45,7 +45,7 @@ do_mpfr_extract() {
 }
 
 do_mpfr() {
-    CT_DoStep INFO "Installing ${PKG_NAME}"
+    CT_DoStep INFO "INSTALL ${PKG_SRC}"
 
     mkdir -p "${CT_BUILD_DIR}/${PKG_SRC}"
     CT_Pushd "${CT_BUILD_DIR}/${PKG_SRC}"
@@ -57,7 +57,7 @@ do_mpfr() {
         *)			mpfr_opt="--enable-thread-safe";;
     esac
 
-    CT_DoLog EXTRA "Configuring ${PKG_NAME}"
+    CT_DoStep EXTRA "CONFIG ${PKG_SRC}"
 
     rm -rf config.cache
     CC="${CT_HOST}-gcc"			\
@@ -72,16 +72,18 @@ do_mpfr() {
 	--with-gmp="${CT_PREFIX_DIR}"	\
 	${mpfr_opt}			\
 	--disable-thread-safe
-
-    CT_DoLog EXTRA "Building ${PKG_NAME}"
+    CT_EndStep
+    
+    CT_DoStep EXTRA "BUILD ${PKG_SRC}"
     CT_DoExecLog ALL make ${PARALLELMFLAGS}
+    CT_EndStep
 
     if [ "${CT_MPFR_CHECK}" = "y" ]; then
-        CT_DoLog EXTRA "Checking ${PKG_NAME}"
+        CT_DoStep EXTRA "CHECK ${PKG_SRC}"
         CT_DoExecLog ALL make ${PARALLELMFLAGS} -s check
+	CT_EndStep
     fi
 
-    CT_DoLog EXTRA "Installing ${PKG_NAME}"
     CT_DoExecLog ALL make install
 
     CT_Popd
@@ -93,7 +95,7 @@ do_mpfr_target() {
 	return
     fi
 
-    CT_DoStep INFO "Installing ${PKG_NAME} for the target"
+    CT_DoStep INFO "INSTALL ${PKG_NAME} for the target"
 
     mkdir -p "${CT_BUILD_DIR}/${PKG_SRC}-target"
     CT_Pushd "${CT_BUILD_DIR}/${PKG_SRC}-target"
@@ -105,7 +107,7 @@ do_mpfr_target() {
         *)          mpfr_opt="--enable-thread-safe";;
     esac
 
-    CT_DoLog EXTRA "Configuring ${PKG_NAME}"
+    CT_DoStep EXTRA "CONFIG ${PKG_NAME}"
     CC="${CT_TARGET}-gcc"                               \
     CFLAGS="${CT_CFLAGS_FOR_TARGET}"                    \
     CT_DoExecLog ALL                                    \
@@ -117,13 +119,13 @@ do_mpfr_target() {
         --disable-shared                                \
         --enable-static                                 \
         --with-gmp="${CT_SYSROOT_DIR}/usr"
+    CT_EndStep
 
-    CT_DoLog EXTRA "Building ${PKG_NAME}"
+    CT_DoStep EXTRA "BUILD ${PKG_NAME}"
     CT_DoExecLog ALL make ${PARALLELMFLAGS}
-
+    CT_EndStep
     # Not possible to check MPFR while X-compiling
 
-    CT_DoLog EXTRA "Installing ${PKG_NAME}"
     CT_DoExecLog ALL make DESTDIR="${CT_SYSROOT_DIR}" install
 
     CT_Popd

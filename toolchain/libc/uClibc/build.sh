@@ -38,7 +38,7 @@ do_libc_extract() {
 }
 
 do_libc_check_config() {
-    CT_DoStep INFO "Checking C library configuration"
+    CT_DoStep INFO "CHECK C library configuration"
 
     if [ "${CT_LIBC_UCLIBC_RUN_CONFIG}" = "y" ]; then
 	if [ -f "${CT_LIBC_UCLIBC_CONFIG_FILE}" ]; then
@@ -71,7 +71,7 @@ do_libc_check_config() {
 
 # This functions installs uClibc's headers
 do_libc_headers() {
-    CT_DoStep INFO "Installing C library headers"
+    CT_DoStep INFO "INSTALL C library headers"
 
     mkdir -p "${CT_BUILD_DIR}/${PKG_SRC}-headers"
     CT_Pushd "${CT_BUILD_DIR}/${PKG_SRC}-headers"
@@ -87,22 +87,24 @@ do_libc_headers() {
     # compiler tools to use.  Setting it to the empty string forces
     # use of the native build host tools, which we need at this
     # stage, as we don't have target tools yet.
-    CT_DoLog EXTRA "Applying configuration"
+    CT_DoLog EXTRA "APPLY configuration"
     CT_DoYes "" |CT_DoExecLog ALL make CROSS= PREFIX="${CT_SYSROOT_DIR}/" oldconfig
 
-    CT_DoLog EXTRA "Building headers"
+    CT_DoStep EXTRA "BUILD headers"
     CT_DoExecLog ALL \
     make ${CT_LIBC_UCLIBC_VERBOSITY} \
 		CROSS= \
 		DEVEL_PREFIX="${CT_SYSROOT_DIR}/usr/" \
 	headers
+    CT_EndStep
 
-    CT_DoLog EXTRA "Installing headers"
+    CT_DoStep EXTRA "INSTALL headers"
     CT_DoExecLog ALL \
     make ${CT_LIBC_UCLIBC_VERBOSITY} \
 		CROSS= \
 		DEVEL_PREFIX="${CT_SYSROOT_DIR}/usr/" \
 	install_headers
+   CT_EndStep
 
     CT_Popd
     CT_EndStep
@@ -117,13 +119,13 @@ do_libc_finish() {
 
 
 do_libc() {
-    CT_DoStep INFO "Installing ${PKG_NAME}"
+    CT_DoStep INFO "INSTALL ${PKG_SRC}"
 
     mkdir -p "${CT_BUILD_DIR}/${PKG_SRC}"
     CT_Pushd "${CT_BUILD_DIR}/${PKG_SRC}"
 
     # Simply copy files until uClibc has the ablity to build out-of-tree
-    CT_DoLog EXTRA "Copying sources to build dir"
+    CT_DoLog EXTRA "COPY sources to build dir"
     { cd "${CT_SRC_DIR}/${PKG_SRC}"; tar cf - .; } |tar xf -
 
     # Retrieve the config file
@@ -136,7 +138,7 @@ do_libc() {
     # depending  on the configuration of the library. That is, they are tailored
     # to best fit the target. So it is useless and seems to be a bad thing to
     # use LIBC_EXTRA_CFLAGS here.
-    CT_DoLog EXTRA "Applying configuration"
+    CT_DoLog EXTRA "APPLY configuration"
     CT_DoYes "" |CT_DoExecLog ALL               \
     make ${CT_LIBC_UCLIBC_VERBOSITY} \
 		CROSS=${CT_TARGET}-       \
@@ -146,7 +148,7 @@ do_libc() {
     # We do _not_ want to strip anything for now, in case we specifically
     # asked for a debug toolchain, thus the STRIPTOOL= assignment
     # /Old/ versions can not build in //
-    CT_DoLog EXTRA "Building C library"
+    CT_DoStep EXTRA "BUILD C library"
     CFLAGS="${CT_CFLAGS_FOR_HOST}"                  \
     CFLAGS_FOR_TARGET="${CT_TARGET_CFLAGS}"		\
     CT_DoExecLog ALL                                    \
@@ -156,6 +158,7 @@ do_libc() {
 		PREFIX="${CT_SYSROOT_DIR}/"    \
 		STRIPTOOL=true                                 \
          all
+    CT_EndStep
 
     # YEM-FIXME: we want to install libraries in $SYSROOT/lib, but we don't want
     # to install headers in $SYSROOT/include, thus making only install_runtime.
@@ -165,7 +168,7 @@ do_libc() {
     # Note: PARALLELMFLAGS is not usefull for installation.
     # We do _not_ want to strip anything for now, in case we specifically
     # asked for a debug toolchain, hence the STRIPTOOL= assignment
-    CT_DoLog EXTRA "Installing C library"
+    CT_DoLog EXTRA "INSTALL C library"
     CT_DoExecLog ALL                    \
     make ${CT_LIBC_UCLIBC_VERBOSITY} \
 		CROSS=${CT_TARGET}-                            \
@@ -175,13 +178,13 @@ do_libc() {
 	install
 
     if [ "${CT_LIBC_UCLIBC_BUILD_CROSS_LDD}" = "y" ]; then
-	CT_DoLog EXTRA "Building C library cross-ldd"
+	CT_DoLog EXTRA "BUILD C library cross-ldd"
 	CT_DoExecLog ALL                    \
 	make ${CT_LIBC_UCLIBC_VERBOSITY} \
 		PREFIX="${CT_SYSROOT_DIR}/"    \
              -C utils hostutils
 
-        CT_DoLog EXTRA "Installing C library cross-ldd"
+        CT_DoLog EXTRA "INSTALL C library cross-ldd"
         CT_DoExecLog ALL install -m 0755 utils/ldd.host "${CT_PREFIX_DIR}/bin/${CT_TARGET}-ldd"
     fi
     CT_Popd

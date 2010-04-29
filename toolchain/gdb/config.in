@@ -1,0 +1,35 @@
+config GDB
+    string
+
+choice
+    bool
+    prompt "Version"
+
+
+config GDB_V_6_8
+    bool
+    prompt "6.8"
+
+# CT_INSERT_VERSION_ABOVE
+# Don't remove above line!
+
+config GDB_V_snapshot
+    bool
+    prompt "latest snapshot (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+config GDB_V_specific_date
+    bool
+    prompt "<specific date> (EXPERIMENTAL)"
+    depends on EXPERIMENTAL
+
+endchoice
+
+config GDB_VERSION
+    string
+    prompt "Enter date (YYYYMMDD)" if GDB_V_specific_date
+    default "snapshot" if GDB_V_snapshot
+    default "6.8" if GDB_V_6_8
+
+# CT_INSERT_VERSION_STRING_ABOVE
+# Don't remove above line!
