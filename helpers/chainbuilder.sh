@@ -25,6 +25,7 @@ createBinOveride()
 		fi
 	done
 	CT_DoLog ALL ${CT_BIN_OVERIDE_DIR}
+	export PATH="${CT_BIN_OVERIDE_DIR}"
 	CT_EndStep
 }
 buildEnv()
@@ -42,9 +43,10 @@ buildEnv()
 	export MAKEFLAGS=
 
 	# Other environment sanity checks
-	CT_TestAndAbort "Don't set LD_LIBRARY_PATH. It screws up the build." -n "${LD_LIBRARY_PATH}"
-	CT_TestAndAbort "Don't set CFLAGS. It screws up the build." -n "${CFLAGS}"
-	CT_TestAndAbort "Don't set CXXFLAGS. It screws up the build." -n "${CXXFLAGS}"
+	CT_Test "Don't set LD_LIBRARY_PATH ! It screws up the build." -n "${LD_LIBRARY_PATH}"
+	export LD_LIBRARY_PATH=
+	CT_Test "Don't set CFLAGS ! It screws up the build." -n "${CFLAGS}"
+	CT_Test "Don't set CXXFLAGS ! It screws up the build." -n "${CXXFLAGS}"
 	CT_Test "GREP_OPTIONS='${GREP_OPTIONS}' screws up the build. Resetting." -n "${GREP_OPTIONS}"
 	export GREP_OPTIONS=
 
@@ -194,7 +196,7 @@ redirectLog()
 	exec >/dev/null
 	case "${CT_LOG_TO_FILE}" in
 		y)  CT_LOG_FILE="${CT_BUILD_DIR}/build.log"
-			cat "${tmp_log_file}" >>"${CT_LOG_FILE}"
+			[ -f "${tmp_log_file}" ] && ${cat} "${tmp_log_file}" >>"${CT_LOG_FILE}"
 			rm -f "${tmp_log_file}"
 			exec >>"${CT_LOG_FILE}"
 			CT_DoLog INFO "Log file: ${CT_LOG_FILE}"
@@ -468,58 +470,7 @@ all_done()
 	trap - EXIT
 	exit
 }
-###################################################################################
-
-
-
-#########################################################
-# MAIN
-#########################################################
-# This is the main entry point to crosstool
-# This will:
-#   - download, extract and patch the toolchain components
-#   - build and install each components in turn
-#   - and eventually test the resulting toolchain
-
-# Parse the common functions
-# Note: some initialisation and sanitizing is done while parsing this file,
-# most notably:
-#  - set trap handler on errors,
-#  - don't hash commands lookups,
-#  - initialise logging.
-if [ -f "${CT_LIB_DIR}/functions.sh" ] ; then
-	source "${CT_LIB_DIR}/functions.sh"
-else
-	echo "Unable to find ${CT_LIB_DIR}/functions.sh"
-	exit
-fi
-
-# Parse the configuration file
-# It has some info about the logging facility, so include it early
-source ${CT_TOP_DIR}/.config
-
-step=setup
-
-# Overide the locale early
-[ -z "${CT_NO_OVERIDE_LC_MESSAGES}" ] && export LC_ALL=C
-
-# Where will we work? TODO
-CT_WORK_DIR="${CT_WORK_DIR:-${CT_TMP_DIR}/_targets}"
-CT_SRC_DIR="${CT_TMP_DIR}/_src"
-CT_TARBALLS_DIR="${CT_TMP_DIR}/_archives"
-
-# Start date. Can't be done until we know the locale
-CT_STAR_DATE=$(CT_DoDate +%s%N)
-CT_STAR_DATE_HUMAN=$(CT_DoDate +%Y%m%d.%H%M%S)
-CT_DoLog INFO "Build started ${CT_STAR_DATE_HUMAN}"
-createBinOveride
-export PATH="${CT_BIN_OVERIDE_DIR}"
-
-eval $*
-
-
-buildEnv
-if [ -z "${CT_RESTART}" ]; then
+restart_build(){
 	CT_DoLog INFO "Restarting Build"
 	# Setup the rest of the environment only if not restarting
 	prepareWorkingDirs
@@ -529,7 +480,7 @@ if [ -z "${CT_RESTART}" ]; then
 	dumpInternalConfig
 
 	for component in ${CT_COMPONENTS}; do
-		IT=${component%%_*}
+		local IT=${component%%_*}
 		# Skip package, if it's not enabled in config
 		# TODO: this will skip every non-package
 		eval COMPILE=\${CT_PKG_`echo ${IT}`}
@@ -551,6 +502,58 @@ if [ -z "${CT_RESTART}" ]; then
 		fi
 		do_${component}_extract
 	done
+}
+###################################################################################
+
+
+
+#########################################################
+# MAIN
+#########################################################
+# This is the main entry point to crosstool
+# This will:
+#   - download, extract and patch the toolchain components
+#   - build and install each components in turn
+#   - and eventually test the resulting toolchain
+
+# Parse the common functions
+# Note: some initialisation and sanitizing is done while parsing this file,
+# most notably:
+#  - set trap handler on errors,
+#  - don't hash commands lookups,
+#  - initialise logging.
+if [ ! -f "${CT_LIB_DIR}/functions.sh" ]; then
+	echo " Unable to source : ${CT_LIB_DIR}/functions.sh"
+	exit
+fi
+source "${CT_LIB_DIR}/functions.sh"
+
+# Parse the configuration file
+# It has some info about the logging facility, so include it early
+CT_Source ${CT_TOP_DIR}/.config
+
+step=setup
+
+# Overide the locale early
+[ -z "${CT_NO_OVERIDE_LC_MESSAGES}" ] && export LC_ALL=C
+
+# Where will we work? TODO
+CT_WORK_DIR="${CT_WORK_DIR:-${CT_TMP_DIR}/_targets}"
+CT_SRC_DIR="${CT_TMP_DIR}/_src"
+CT_TARBALLS_DIR="${CT_TMP_DIR}/_archives"
+
+# Start date. Can't be done until we know the locale
+CT_STAR_DATE=$(CT_DoDate +%s%N)
+CT_STAR_DATE_HUMAN=$(CT_DoDate +%Y%m%d.%H%M%S)
+CT_DoLog INFO "Build started ${CT_STAR_DATE_HUMAN}"
+createBinOveride
+
+eval $*
+
+
+buildEnv
+if [ -z "${CT_RESTART}" ]; then
+	restart_build
 fi
 
 # Building the targets
@@ -562,7 +565,16 @@ fi
 do_stop=0
 prev_step=
 
-[ -n "${CT_RESTART}" ] && do_it=0 || do_it=1
+if [ -n "${CT_RESTART}" ]; then
+	do_it=0
+else
+	do_it=1
+fi
+
+if [ "${CT_CALL}" = "nosave" ];then
+	export CT_DEBUG_CT_SAVE_STEPS=
+	export CT_CALL=
+fi
 
 for step in ${CT_STEPS}; do
 	#IT=`echo ${step}|cut -f1 -d'_'`
@@ -572,19 +584,28 @@ for step in ${CT_STEPS}; do
 	eval COMPILE=\${CT_PKG_`echo ${IT}`}
 	if [ "${CT_PKG}" = "y" ]; then
 		if [ "${COMPILE}" = "n" -o "${COMPILE}" = "" ]; then
+			CT_DoLog ALL "Skipping package: $step"
 			continue
 			:
 		fi
 	fi
 
-	. "${CT_COMPONENTS_DIR}/${IT}/build.sh"
 	if [ ${do_it} -eq 0 ]; then
-		if [ "${CT_RESTART}" = "${step}" ]; then
-			CT_DoLoadState "${step}"
-			#CT_SetLibPath "${CT_PREFIX_DIR}/lib:${CT_PREFIX_DIR}/${CT_TARGET}/lib" first
-			CT_DoLog INFO "Log File: ${CT_LOG_FILE}"
-			do_it=1
-			do_stop=0
+		if  [ "${CT_RESTART}" = "${step}" ]; then
+			if [ "${CT_CALL}" = "list-functions" ];then
+				CT_DoLog INFO "Functions you may call for step:${step}"
+				CT_DoExecLog INFO compgen -A function "do_${step}"
+				break
+			elif [ -n "${CT_CALL}" ];then
+				do_it=1
+				do_stop=0
+			else
+				CT_DoLoadState "${step}"
+				#CT_SetLibPath "${CT_PREFIX_DIR}/lib:${CT_PREFIX_DIR}/${CT_TARGET}/lib" first
+				CT_DoLog INFO "Log File: ${CT_LOG_FILE}"
+				do_it=1
+				do_stop=0
+			fi
 		fi
 	else
 		CT_DoSaveState ${step}
@@ -593,8 +614,19 @@ for step in ${CT_STEPS}; do
 			exit 0
 		fi
 	fi
+
 	if [ ${do_it} -eq 1 ]; then
-		do_${step}
+		if [ -n "${CT_CALL}" ]; then
+			restart_build
+			. "${CT_COMPONENTS_DIR}/${IT}/build.sh"
+			${CT_CALL}
+			do_stop=1
+			break
+		else
+			. "${CT_COMPONENTS_DIR}/${IT}/build.sh"
+			do_${step}
+		fi
+
 		if [ "${CT_STOP}" = "${step}" ]; then
 			do_stop=1
 		fi

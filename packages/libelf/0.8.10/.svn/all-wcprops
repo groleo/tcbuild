@@ -1,0 +1,11 @@
+K 25
+svn:wc:ra_dav:version-url
+V 59
+/svn/crosstool-ng/!svn/ver/1123/trunk/patches/libelf/0.8.10
+END
+100-fix-64-bit-detection.patch
+K 25
+svn:wc:ra_dav:version-url
+V 90
+/svn/crosstool-ng/!svn/ver/1123/trunk/patches/libelf/0.8.10/100-fix-64-bit-detection.patch
+END

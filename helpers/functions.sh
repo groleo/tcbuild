@@ -725,6 +725,7 @@ CT_SubPatch() {
 CT_Patch() {
 	local file="$1"
 	local nochdir="$2"
+
 	local base_dir=${file%/*}
 	local basename=${file##*/}
 	local base_file="${basename%%[_-]*}"
@@ -1022,4 +1023,12 @@ CT_DoLoadState(){
 		exec >>"${CT_LOG_FILE}"
 		rm -f "${state_dir}/tail.log"
 	fi
+}
+
+CT_Source() {
+	if [ ! -f "$1" ] ; then
+		CT_DoLog ALL "Unable to source $1"
+		exit
+	fi
+	source $1
 }

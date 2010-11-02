@@ -142,5 +142,8 @@ do_devs() {
 	CT_DoExecLog ALL sudo mknod ./dev/mtdblock0 b 31 0
 	CT_DoExecLog ALL sudo mknod ./dev/mtdblock1 b 31 1
 
+	CT_DoExecLog ALL mkdir ./dev/net
+	CT_DoExecLog ALL sudo mknod ./dev/net/tun c 10 200
+
 	CT_Popd
 }

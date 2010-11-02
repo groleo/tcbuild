@@ -21,7 +21,7 @@ do_mini-httpd_configure() {
 }
 
 do_mini-httpd() {
-	CT_DoStep INFO "INSTALL ${PKG_SRC}"
+	CT_DoStep INFO "INSTALL ${PKG_NAME}"
 
 	mkdir -p "${CT_BUILD_DIR}/${PKG_SRC}"
 	CT_Pushd "${CT_BUILD_DIR}/${PKG_SRC}"
@@ -31,7 +31,7 @@ do_mini-httpd() {
 
 	do_mini-httpd_configure
 
-	CT_DoLog EXTRA "BUILD ${PKG_SRC}"
+	CT_DoLog EXTRA "BUILD ${PKG_NAME}"
 
 	CFLAGS="-DCGI_NICE=0"			\
 	CT_DoExecLog ALL			\
@@ -39,6 +39,7 @@ do_mini-httpd() {
 		SSL_TREE=${CT_BUILD_DIR}/axTLS-${CT_AXTLS_VERSION}/ \
 	all
 
+	CT_DoLog EXTRA "INSTALL ${PKG_NAME}"
 	CT_DoExecLog ALL			\
 	${make} CC=${CT_TARGET}-gcc		\
 		BINDIR=${CT_FS_DIR}/usr/bin	\

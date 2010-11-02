@@ -57,7 +57,7 @@ do_ntp_start_files() {
 
 do_ntp() {
 
-    CT_DoStep INFO "INSTALL ${PKG_SRC}"
+    CT_DoStep INFO "INSTALL ${PKG_NAME}"
 
     mkdir -p "${CT_BUILD_DIR}/${PKG_NAME}"
     CT_Pushd "${CT_BUILD_DIR}/${PKG_NAME}"
@@ -67,7 +67,7 @@ do_ntp() {
 
     do_ntp_configure
 
-    CT_DoLog EXTRA "BUILD ${PKG_SRC}"                \
+    CT_DoLog EXTRA "BUILD ${PKG_NAME}"                \
     CT_DoExecLog ALL                                    \
     ${make} ${CT_NTP_PARALLEL:+${PARALLELMFLAGS}}          \
          CROSS=${CT_TARGET}-                            \
@@ -75,6 +75,7 @@ do_ntp() {
          ${CT_NTP_VERBOSITY}                            \
          all
 
+    CT_DoLog EXTRA "INSTALL ${PKG_NAME}"
     CT_DoExecLog ALL                    \
     ${make} CROSS=${CT_TARGET}-            \
          DESTDIR="${CT_FS_DIR}/"                    \

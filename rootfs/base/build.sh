@@ -11,6 +11,7 @@ do_base_extract() {
 }
 
 do_base() {
+	export CT_DEBUG_CT_SAVE_STEPS=n
 	CT_DoStep ALL "INSTALL base filesystem"
 
 	mkdir -p "${CT_FS_DIR}/"

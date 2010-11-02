@@ -43,6 +43,7 @@ libtool=\(GNU libtool.*\) (2[[:digit:]]*\.|1\.6[[:digit:]]*\.|1\.5\.[2-9][[:digi
 make:make=^GNU Make
 [
 gcc
+pod2man
 g++
 as
 ar
@@ -58,7 +59,6 @@ allcm
 allec
 allneeded
 sh
-arch
 automake
 autoconf
 awk
@@ -175,7 +175,6 @@ patch
 pathchk
 pdfetex
 pdftex
-pdftexi2dvi
 perl
 pinky
 pkfix
@@ -233,7 +232,6 @@ thumbpdf
 touch
 tr
 true
-truncate
 tsort
 tty
 uname
