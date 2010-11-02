@@ -1,0 +1,66 @@
+--- a/include/asm-m68k/cf_548x_cacheflush.h	2010-06-28 10:12:22.160639361 +0300
++++ b/include/asm-m68k/cf_548x_cacheflush.h	2010-07-05 15:15:20.104166421 +0300
+@@ -81,6 +81,48 @@
+   }								\
+ })
+ 
++/**
++ * cf_dcache_flush_range - Push dirty data cache in range out and invalidate
++ * @vstart - starting virtual address
++ * @vend: ending virtual address
++ */
++static inline void cf_dcache_flush_range(unsigned long vstart, unsigned long vend)
++{
++        unsigned long start_line;
++        unsigned long end_line;
++        unsigned long sets;
++        unsigned long i;
++        unsigned long paddr = __pa(vstart);
++        unsigned long len = vend - vstart;
++
++	if (len == 0)
++		return;
++
++        if (len > DCACHE_WAY_SIZE) {
++                len = DCACHE_WAY_SIZE;
++        }
++
++        end_line = ((paddr & (DCACHE_WAY_SIZE - 1)) + len + (CACHE_LINE_SIZE - 1)) & ~(CACHE_LINE_SIZE - 1);
++        start_line = paddr & _DCACHE_SET_MASK;
++        sets = (end_line - start_line) / CACHE_LINE_SIZE;
++
++        for (i = 0; i < sets; i++ , start_line = (start_line + (CACHE_LINE_SIZE - 3)) & _DCACHE_SET_MASK) {
++                asm volatile("cpushl %%dc,(%0)\n"
++                             "addq%.l #1,%0\n"
++                             "cpushl %%dc,(%0)\n"
++                             "addq%.l #1,%0\n"
++                             "cpushl %%dc,(%0)\n"
++                             "addq%.l #1,%0\n"
++                             "cpushl %%dc,(%0)" : "=a" (start_line) : "0" (start_line));
++        }
++}
++
++
++
++
++
++
++
+ /*
+  * invalidate the cache for the specified memory range.
+  * It starts at the physical address specified for
+--- a/include/asm-m68k/cfcache.h	2010-06-28 10:12:22.148638563 +0300
++++ b/include/asm-m68k/cfcache.h	2010-07-06 10:23:39.379165721 +0300
+@@ -84,8 +84,11 @@
+ #define DCACHE_SIZE 0x8000		/* data - 32k */
+ 
+ #define CACHE_LINE_SIZE 0x0010		/* 16 bytes */
+-#define CACHE_SETS 0x0200		/* 512 sets */
+ #define CACHE_WAYS 0x0004		/* 4 way */
++#define DCACHE_WAY_SIZE (DCACHE_SIZE / CACHE_WAYS)
++#define ICACHE_WAY_SIZE (ICACHE_SIZE / CACHE_WAYS)
++#define CACHE_SETS (DCACHE_WAY_SIZE / CACHE_LINE_SIZE)  /* 512 sets */
++
+ 
+ /* in for the old cpushl caching code */
+ #define _DCACHE_SET_MASK ((DCACHE_SIZE/64-1)<<CACHE_WAYS)

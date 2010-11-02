@@ -1,6 +1,6 @@
 PKG_NAME=gdb
-PKG_URL="ftp://sourceware.org/pub/gdb/releases/"
 PKG_SRC="${PKG_NAME}-${CT_GDB_VERSION}"
+PKG_URL="ftp://sourceware.org/pub/gdb/releases/"
 
 do_gdb_get() {
     CT_GetFile "${PKG_SRC}" ${PKG_URL}
@@ -24,18 +24,18 @@ do_gdb_configure() {
 	 --build=${CT_BUILD} \
 	 --target=${CT_TARGET} \
 	 --host=${CT_BUILD} \
-	 --prefix=/usr \
-	 --exec-prefix=/usr \
-	 --bindir=/usr/bin \
-	 --sbindir=/usr/sbin \
-	 --libdir=/usr/lib \
-	 --libexecdir=/usr/lib \
+	 --prefix=/ \
+	 --exec-prefix=/ \
+	 --bindir=/bin \
+	 --sbindir=/sbin \
+	 --libdir=/lib \
+	 --libexecdir=/lib \
 	 --sysconfdir=/etc \
-	 --datadir=/usr/share \
+	 --datadir=/share \
 	 --localstatedir=/var \
-	 --includedir=/usr/include \
-	 --mandir=/usr/man \
-	 --infodir=/usr/info \
+	 --includedir=/include \
+	 --mandir=/share/man \
+	 --infodir=/info \
 	 --without-uiout \
 	 --disable-tui \
 	 --disable-gdbtk \
@@ -72,7 +72,7 @@ do_gdb() {
     CT_DoLog EXTRA "INSTALL ${PKG_NAME}"
     CT_DoExecLog ALL                    \
     ${make} CROSS=${CT_TARGET}-            \
-         DESTDIR="${CT_FS_DIR}/"    \
+         DESTDIR="${CT_PREFIX_DIR}/"    \
          install
 
     do_gdb_finish

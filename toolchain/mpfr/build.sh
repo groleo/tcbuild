@@ -45,7 +45,7 @@ do_mpfr_extract() {
 }
 
 do_mpfr() {
-    CT_DoStep INFO "INSTALL ${PKG_SRC}"
+    CT_DoStep INFO "Installing ${PKG_SRC}"
 
     mkdir -p "${CT_BUILD_DIR}/${PKG_SRC}"
     CT_Pushd "${CT_BUILD_DIR}/${PKG_SRC}"
@@ -57,7 +57,7 @@ do_mpfr() {
         *)			mpfr_opt="--enable-thread-safe";;
     esac
 
-    CT_DoStep EXTRA "CONFIG ${PKG_SRC}"
+    CT_DoStep EXTRA "Configuring ${PKG_SRC}"
 
     rm -rf config.cache
     CC="${CT_HOST}-gcc"			\
@@ -74,14 +74,14 @@ do_mpfr() {
 	--disable-thread-safe
     CT_EndStep
     
-    CT_DoStep EXTRA "BUILD ${PKG_SRC}"
+    CT_DoStep EXTRA "Building ${PKG_SRC}"
     CT_DoExecLog ALL make ${PARALLELMFLAGS}
     CT_EndStep
 
     if [ "${CT_MPFR_CHECK}" = "y" ]; then
-        CT_DoStep EXTRA "CHECK ${PKG_SRC}"
+        CT_DoStep EXTRA "Checking ${PKG_SRC}"
         CT_DoExecLog ALL make ${PARALLELMFLAGS} -s check
-	CT_EndStep
+        CT_EndStep
     fi
 
     CT_DoExecLog ALL make install
@@ -95,7 +95,7 @@ do_mpfr_target() {
 	return
     fi
 
-    CT_DoStep INFO "INSTALL ${PKG_NAME} for the target"
+    CT_DoStep INFO "Installing ${PKG_NAME} for the target"
 
     mkdir -p "${CT_BUILD_DIR}/${PKG_SRC}-target"
     CT_Pushd "${CT_BUILD_DIR}/${PKG_SRC}-target"
@@ -107,7 +107,7 @@ do_mpfr_target() {
         *)          mpfr_opt="--enable-thread-safe";;
     esac
 
-    CT_DoStep EXTRA "CONFIG ${PKG_NAME}"
+    CT_DoStep EXTRA "Configuring ${PKG_NAME}"
     CC="${CT_TARGET}-gcc"                               \
     CFLAGS="${CT_CFLAGS_FOR_TARGET}"                    \
     CT_DoExecLog ALL                                    \
@@ -121,7 +121,7 @@ do_mpfr_target() {
         --with-gmp="${CT_SYSROOT_DIR}/usr"
     CT_EndStep
 
-    CT_DoStep EXTRA "BUILD ${PKG_NAME}"
+    CT_DoStep EXTRA "Building ${PKG_NAME}"
     CT_DoExecLog ALL make ${PARALLELMFLAGS}
     CT_EndStep
     # Not possible to check MPFR while X-compiling

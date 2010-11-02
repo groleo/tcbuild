@@ -1,0 +1,58 @@
+--- a/drivers/net/fec/fec.c	2010-06-28 16:08:45.400139015 +0300
++++ b/drivers/net/fec/fec.c	2010-06-28 16:07:54.593138865 +0300
+@@ -25,6 +25,7 @@
+ 
+ #include <asm/coldfire.h>
+ #include <asm/mcfsim.h>
++#include <asm/cf_cacheflush.h>
+ 
+ #include <asm/dma.h>
+ #include <asm/MCD_dma.h>
+@@ -509,6 +510,7 @@
+ /* JKM -- currently running with cache turned off */
+ 	DcacheFlushInvalidate();
+ #endif
++	flush_dcache();
+ 	
+ 	MCD_startDma(fp->fecpriv_fec_rx_channel, (char *) fp->fecpriv_rxdesc, 0,
+ 		     (unsigned char *) &(FEC_FECRFDR(base_addr)), 0,
+@@ -759,6 +761,7 @@
+ /* JKM -- currently running with cache turned off */
+ 	DcacheFlushInvalidateCacheBlock((void*)virt_to_phys(data_aligned), skb->len);
+ #endif
++	flush_dcache();
+ 
+ 	spin_lock_irq(&fp->fecpriv_lock);
+ 
+@@ -972,6 +975,7 @@
+     		    /* flush data cache before initializing the descriptor and starting DMA */
+ //		    DcacheFlushInvalidateCacheBlock((void*)virt_to_phys(fp->askb_rx[fp->fecpriv_current_rx]->tail), fp->askb_rx[fp->fecpriv_current_rx]->len);
+ 
++			flush_dcache();
+     			skb_put(skb, fp->fecpriv_rxdesc[fp->fecpriv_current_rx].length - 4);
+     			skb->protocol = eth_type_trans(skb, dev);
+     			netif_rx(skb);
+@@ -993,6 +997,7 @@
+ /* JKM -- currently running with cache turned off */
+ 			DcacheFlushInvalidateCacheBlock((void*)virt_to_phys(fp->askb_rx[fp->fecpriv_current_rx]->tail), FEC_MAXBUF_SIZE);
+ #endif
++			flush_dcache();
+ 
+     	    	fp->fecpriv_rxdesc[fp->fecpriv_current_rx].dataPointer = (unsigned int) virt_to_phys(fp->askb_rx[fp->fecpriv_current_rx]->tail);
+     	    	fp->fecpriv_rxdesc[fp->fecpriv_current_rx].length = FEC_MAXBUF_SIZE;
+@@ -1000,6 +1005,7 @@
+ 
+     		    // flush data cache before initializing the descriptor and starting DMA
+ //		    DcacheFlushInvalidateCacheBlock((void*)virt_to_phys(fp->askb_rx[fp->fecpriv_current_rx]->tail), FEC_MAXBUF_SIZE);
++		flush_dcache();
+     	    }
+         }
+ 
+@@ -1143,6 +1149,7 @@
+ /* JKM -- currently running with cache turned off */
+ 	DcacheFlushInvalidate();
+ #endif
++	flush_dcache();
+ 	
+ 	/* restart DMA from beginning */
+ 	MCD_startDma(fp->fecpriv_fec_rx_channel,

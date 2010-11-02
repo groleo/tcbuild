@@ -57,7 +57,7 @@ do_compiler_core() {
     # In normal conditions, ( "${mode}" = "shared" ) implies
     # ( "${build_libgcc}" = "yes" ), but I won't check for that
 
-    CT_DoStep INFO "INSTALL ${mode} core C compiler"
+    CT_DoStep INFO "Installing ${mode} core C compiler"
     mkdir -p "${CT_BUILD_DIR}/compiler-core-${mode}"
     CT_Pushd "${CT_BUILD_DIR}/compiler-core-${mode}"
 
@@ -82,12 +82,12 @@ do_compiler_core() {
     esac
 
     if [ "${copy_headers}" = "y" ]; then
-        CT_DoLog DEBUG "COPY headers to install area of bootstrap gcc, so it can build libgcc2"
+        CT_DoLog DEBUG "Copying headers to install area of bootstrap gcc, so it can build libgcc2"
         CT_DoExecLog ALL mkdir -p "${core_prefix_dir}/${CT_TARGET}/include"
         CT_DoExecLog ALL cp -r "${CT_HEADERS_DIR}"/* "${core_prefix_dir}/${CT_TARGET}/include"
     fi
 
-    CT_DoLog EXTRA "CONFIGURE ${mode} core C compiler"
+    CT_DoLog EXTRA "Configuring ${mode} core C compiler"
 
     extra_config="${extra_config} ${CT_ARCH_WITH_ARCH}"
     extra_config="${extra_config} ${CT_ARCH_WITH_ABI}"
@@ -202,14 +202,14 @@ do_compiler_core() {
     fi   # ! build libgcc
 
     if [ "${CT_CANADIAN}" = "y" ]; then
-        CT_DoLog EXTRA "BUILD libiberty"
+        CT_DoLog EXTRA "Building libiberty"
         CT_DoExecLog ALL make ${PARALLELMFLAGS} all-build-libiberty
     fi
 
-    CT_DoLog EXTRA "BUILD ${mode} core C compiler"
+    CT_DoLog EXTRA "Building ${mode} core C compiler"
     CT_DoExecLog ALL make ${PARALLELMFLAGS} ${build_rules}
 
-    CT_DoLog EXTRA "INSTALL ${mode} core C compiler"
+    CT_DoLog EXTRA "Installing ${mode} core C compiler"
     CT_DoExecLog ALL make ${install_rules}
 
     CT_Popd
@@ -258,12 +258,12 @@ do_compiler_step3() {
     # If building for bare metal, nothing to be done here, the static core conpiler is enough!
     [ "${CT_BARE_METAL}" = "y" ] && return 0
 
-    CT_DoStep INFO "INSTALL final compiler"
+    CT_DoStep INFO "Installing final compiler"
 
     mkdir -p "${CT_BUILD_DIR}/compiler_step3"
     CT_Pushd "${CT_BUILD_DIR}/compiler_step3"
 
-    CT_DoLog EXTRA "CONFIGURE final compiler"
+    CT_DoLog EXTRA "Configuring final compiler"
 
     # Enable selected languages
     lang_opt="c"
@@ -354,14 +354,14 @@ do_compiler_step3() {
         #--with-headers=${CT_HEADERS_DIR}
 
     if [ "${CT_CANADIAN}" = "y" ]; then
-        CT_DoLog EXTRA "BUILD libiberty"
+        CT_DoLog EXTRA "Building libiberty"
         CT_DoExecLog ALL make ${PARALLELMFLAGS} all-build-libiberty
     fi
 
-    CT_DoLog EXTRA "BUILD final compiler"
+    CT_DoLog EXTRA "Building final compiler"
     CT_DoExecLog ALL make ${PARALLELMFLAGS} all
 
-    CT_DoLog EXTRA "INSTALL final compiler"
+    CT_DoLog EXTRA "Installing final compiler"
     CT_DoExecLog ALL make install
 
     # Create a symlink ${CT_TARGET}-cc to ${CT_TARGET}-gcc to always be able

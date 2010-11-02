@@ -1,0 +1,84 @@
+--- linux-2.6.25.20/mm/oom_kill.c	2010-06-03 14:39:38.476616584 +0300
++++ linux-2.6.25.20_vanilla/mm/oom_kill.c	2008-11-10 20:50:34.000000000 +0200
+@@ -32,8 +32,6 @@
+ int sysctl_oom_dump_tasks;
+ static DEFINE_SPINLOCK(zone_scan_mutex);
+ /* #define DEBUG */
+-unsigned long VM_is_OOM;
+-static unsigned long last_tif_memdie_jiffies;
+ 
+ /**
+  * badness - calculate a numeric value for how bad this task has been
+@@ -232,19 +230,8 @@
+ 		 * blocked waiting for another task which itself is waiting
+ 		 * for memory. Is there a better alternative?
+ 		 */
+-		/*
+ 		if (test_tsk_thread_flag(p, TIF_MEMDIE))
+ 			return ERR_PTR(-1UL);
+-		*/
+-		if (unlikely(test_tsk_thread_flag(p, TIF_MEMDIE))) {
+-			/*
+-			 * Either we already waited long enough,
+-			 * or exit_mm already run, so we must
+-			 * try to kill another task.
+-			 */
+-			continue;
+-		}
+-
+ 
+ 		/*
+ 		 * This is in the process of releasing memory so wait for it
+@@ -338,18 +325,13 @@
+ 		printk(KERN_ERR "Killed process %d (%s)\n",
+ 				task_pid_nr(p), p->comm);
+ 
+-	if (!test_and_set_tsk_thread_flag(p, TIF_MEMDIE)) {
+-		last_tif_memdie_jiffies = jiffies;
+-		set_bit(0, &VM_is_OOM);
+-	}
+-
+ 	/*
+ 	 * We give our sacrificial lamb high priority and access to
+ 	 * all the memory it needs. That way it should be able to
+ 	 * exit() and clear out its resources quickly...
+ 	 */
+ 	p->rt.time_slice = HZ;
+-/*	set_tsk_thread_flag(p, TIF_MEMDIE); */
++	set_tsk_thread_flag(p, TIF_MEMDIE);
+ 
+ 	force_sig(SIGKILL, p);
+ }
+@@ -557,19 +539,6 @@
+ 	constraint = constrained_alloc(zonelist, gfp_mask);
+ 	read_lock(&tasklist_lock);
+ 
+-	/*
+-	 * This holds the down(OOM_lock)+read_lock(tasklist_lock), so it's
+-	 * equivalent to write_lock_irq(tasklist_lock) as far as VM_is_OOM
+-	 * is concerned.
+-	 */
+-	if (unlikely(test_bit(0, &VM_is_OOM))) {
+-		if (time_before(jiffies, last_tif_memdie_jiffies + 10*HZ))
+-			goto out;
+-		printk("detected probable OOM deadlock, so killing another task\n");
+-		last_tif_memdie_jiffies = jiffies;
+-	}
+-
+-
+ 	switch (constraint) {
+ 	case CONSTRAINT_MEMORY_POLICY:
+ 		oom_kill_process(current, gfp_mask, order, points, NULL,
+@@ -592,10 +561,10 @@
+ 		 * issues we may have.
+ 		 */
+ 		p = select_bad_process(&points, NULL);
+-/*
++
+ 		if (PTR_ERR(p) == -1UL)
+ 			goto out;
+-*/
++
+ 		/* Found nothing?!?! Either we hang forever, or we panic. */
+ 		if (!p) {
+ 			read_unlock(&tasklist_lock);

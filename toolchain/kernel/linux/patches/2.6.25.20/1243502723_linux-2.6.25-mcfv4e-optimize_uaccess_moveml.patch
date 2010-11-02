@@ -1,5 +1,5 @@
---- a/arch/m68k/lib/uaccess.c	2009-10-09 14:01:59.096618833 +0300
-+++ b/arch/m68k/lib/uaccess.c	2009-10-09 13:48:01.000000000 +0300
+--- a/arch/m68k/lib/uaccess.c	2010-06-28 10:13:32.385638371 +0300
++++ b/arch/m68k/lib/uaccess.c	2010-06-28 10:17:32.108218968 +0300
 @@ -60,6 +60,7 @@
  }
  EXPORT_SYMBOL(__generic_copy_from_user);
@@ -8,7 +8,7 @@
  unsigned long __generic_copy_to_user(void __user *to, const void *from,
  				     unsigned long n)
  {
-@@ -226,108 +227,155 @@
+@@ -226,108 +227,156 @@
  
  #include <asm/cf_uaccess.h>
  
@@ -104,10 +104,10 @@
 +	 "7:  jra 3b\n"				/*  return			*/
 +	 "8:  jra 4b\n"				/*  return			*/
 +	 "9: move.l %2, %3\n"			/* Clear the remaining bytes	*/
-+	 "   clr.b (%0)+\n"			/**/
-+	 "  subq.l #1,%3\n"			/**/
-+	 "  jne 9b\n"				/**/
-+	 "  jra 5b\n"				/*  return			*/
++	 "91:clr.b (%0)+\n"			/**/
++	 "   subq.l #1,%3\n"			/**/
++	 "   jne 91b\n"				/**/
++	 "92:jra 5b\n"				/*  return			*/
 +	 ".previous\n"				/********************************/
 +	 ".section __ex_table,\"a\"\n"		/* Exception Table		*/
 +	 "   .align 4\n"			/*  Force loop on 0-mod-4 address*/
@@ -126,6 +126,7 @@
 +	 "   .long 40b, 9b\n"			/**/
 +	 "   .long 41b, 9b\n"			/**/
 +	 "   .long 42b, 9b\n"			/**/
++	 "   .long 91b, 92b\n"			/**/
  	 ".previous"
 -	 : "=a"(to), "=a"(from), "=d"(n), "=&d"(tmp)
 -	 : "d"(n & 3), "0"(to), "1"(from), "2"(n/4)

@@ -18,13 +18,22 @@ do_gmp() {
     mkdir -p "${CT_BUILD_DIR}/${PKG_SRC}"
     CT_Pushd "${CT_BUILD_DIR}/${PKG_SRC}"
 
-    CT_DoStep INFO "INSTALL ${PKG_SRC}"
+    CT_DoStep INFO "Installing ${PKG_SRC}"
 
-     CT_DoStep EXTRA "CONFIGURE ${PKG_SRC}"
+    do_gmp_configure
+    do_gmp_make
+    do_gmp_install
+    CT_EndStep
+}
 
-      rm -rf config.cache
-      CFLAGS="${CT_CFLAGS_FOR_HOST}"		\
-      CT_DoExecLog ALL				\
+do_gmp_target() {
+	:
+}
+do_gmp_configure() {
+    CT_DoStep EXTRA "Configuring ${PKG_SRC}"
+	rm -rf config.cache
+	CFLAGS="${CT_CFLAGS_FOR_HOST}"		\
+	CT_DoExecLog ALL			\
 	"${CT_SRC_DIR}/${PKG_SRC}/configure"	\
 	--build=${CT_BUILD}			\
 	--host=${CT_HOST}			\
@@ -34,22 +43,17 @@ do_gmp() {
 	--enable-fft				\
 	--enable-mpbsd				\
 	--enable-cxx
-      CT_EndStep
-
-    CT_DoStep EXTRA "BUILD ${PKG_SRC}"
-      CT_DoExecLog ALL make ${PARALLELMFLAGS}
-    CT_EndStep
-
-    if [ "${CT_GMP_CHECK}" = "y" ]; then
-        CT_DoLog EXTRA "CHECK ${PKG_SRC}"
-        CT_DoExecLog ALL make ${PARALLELMFLAGS} -s check
-    fi
-
-    CT_DoExecLog ALL make install
-
     CT_EndStep
 }
-
-do_gmp_target() {
-	:
+do_gmp_make() {
+    CT_DoStep EXTRA "Building ${PKG_SRC}"
+	CT_DoExecLog ALL make ${PARALLELMFLAGS}
+	if [ "${CT_GMP_CHECK}" = "y" ]; then
+		CT_DoLog EXTRA "Checking ${PKG_SRC}"
+		CT_DoExecLog ALL make ${PARALLELMFLAGS} -s check
+	fi
+    CT_EndStep
+}
+do_gmp_install() {
+    CT_DoExecLog ALL make install
 }

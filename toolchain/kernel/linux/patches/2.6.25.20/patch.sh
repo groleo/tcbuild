@@ -1,8 +1,10 @@
-CT_SubPatch ${pkg_patch_dir}/004-extra_optimization.patch
+#drop 1 - personal patches
+CT_SubGitApply ${pkg_patch_dir}/0001-use-gcc-funit-at-a-time.patch
 #CT_SubPatch ${pkg_patch_dir}/204-jffs2_eofdetect.patch
 CT_SubPatch ${pkg_patch_dir}/1240846620_linux-2.6.25-pagemap_h.patch
 #linux-2.6.25-m547x-8x-pci-reset-usb-fix.patch
 
+#drop 2 - freescale patches
 CT_SubGitApply ${pkg_patch_dir}/1193870211_linux-2.6.25-mcfv4e-checkfiles-script.git
 CT_SubGitApply ${pkg_patch_dir}/1193870371_linux-2.6.25-mcfv4e-coldfire-headers.git
 CT_SubGitApply ${pkg_patch_dir}/1193870501_linux-2.6.25-mcfv4e-coldfire-headers2.git
@@ -130,12 +132,28 @@ CT_SubGitApply ${pkg_patch_dir}/1218231944_linux-2.6.25-m547x-8x-fec-rxfifo-chec
 CT_SubGitApply ${pkg_patch_dir}/1256826990_getline.git
 
 CT_SubPatch ${pkg_patch_dir}/kernel-2.6.25-block2mtd_init.patch
+
+#drop 3 - mariusn patches1
 CT_SubPatch ${pkg_patch_dir}/1240900315_linux-2.6.25-m547x-8x-remove-i2c-debug-msgs.patch
 CT_SubPatch ${pkg_patch_dir}/1243502723_linux-2.6.25-mcfv4e-optimize_string_memset.patch
 CT_SubPatch ${pkg_patch_dir}/1243502723_linux-2.6.25-mcfv4e-optimize_uaccess_moveml.patch
-CT_SubPatch ${pkg_patch_dir}/1257329293_cfV4e-enable-memory-cache.patch
-CT_SubPatch ${pkg_patch_dir}/1257852157_make_it_work.patch
-CT_SubPatch ${pkg_patch_dir}/1257945567_kk.patch
-CT_SubPatch ${pkg_patch_dir}/1258614578_yuppy.patch
 CT_SubGitApply ${pkg_patch_dir}/1259154699_jffs2_read_inode_range.git
+
+
+#drop 4 - mariusn patches2
+CT_SubGitApply ${pkg_patch_dir}/0003-activate-instruction-and-data-cache.patch
+CT_SubPatch ${pkg_patch_dir}/1257329293_0002-cfV4e-enable-memory-cache.patch
+CT_SubPatch ${pkg_patch_dir}/add_cf_dcache_flush.patch
+CT_SubGitApply ${pkg_patch_dir}/0007-flush-data-cache-in-FEC-driver.patch
+#CT_SubPatch ${pkg_patch_dir}/1257329293_0001-cfV4e-add-dma-zone.patch
+
+#drop 5 - freescale speed improvements and (failed)attempts at fixing the hang
+#Patches below were added after the PCI hang
+#CT_SubPatch ${pkg_patch_dir}/1257852157_make_it_work.patch
+#CT_SubPatch ${pkg_patch_dir}/1257945567_kk.patch
+#CT_SubPatch ${pkg_patch_dir}/1258614578_yuppy.patch
+
+#drop 6 - mariusn patches2 - extra functionality
+#CT_SubPatch ${pkg_patch_dir}/1275565383_fallback_killing_more_tasks_if_tif-memdie_doesn_go.patch
+#CT_SubGitApply ${pkg_patch_dir}/1271755619_memory-usage-limit-notification-addition-to-memcg.git
 #CT_SubGitApply ${pkg_patch_dir}/jffs2_retval.git

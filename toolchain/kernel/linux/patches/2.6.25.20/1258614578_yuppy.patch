@@ -1,3 +1,14 @@
+diff -ruN linux-2.6.25.20/arch/m68k/coldfire/head.S linux-2.6.25.20.last/arch/m68k/coldfire/head.S
+--- linux-2.6.25.20/arch/m68k/coldfire/head.S	2009-11-19 09:04:32.787379895 +0200
++++ linux-2.6.25.20.last/arch/m68k/coldfire/head.S	2009-11-12 15:22:08.618455816 +0200
+@@ -343,6 +343,7 @@
+ 	   change in paging_init(cf-mmu.c) to zones_size[]. */
+ 
+ #if CONFIG_SDRAM_BASE != PAGE_OFFSET
++
+ #if defined(CONFIG_M5445X)
+ 	/* Map 256MB as code */
+ 	mmu_map	(PAGE_OFFSET+0*0x1000000),  (PHYS_OFFSET+0*0x1000000), \
 diff -ruN linux-2.6.25.20/arch/m68k/kernel/bios32_mcf548x.c linux-2.6.25.20.last/arch/m68k/kernel/bios32_mcf548x.c
 --- linux-2.6.25.20/arch/m68k/kernel/bios32_mcf548x.c	2009-11-19 09:04:31.922880072 +0200
 +++ linux-2.6.25.20.last/arch/m68k/kernel/bios32_mcf548x.c	2009-11-12 15:49:21.059042617 +0200
@@ -55,6 +66,24 @@ diff -ruN linux-2.6.25.20/arch/m68k/kernel/head.S linux-2.6.25.20.last/arch/m68k
  /*nodbg: q40_do_debug is 0 by default*/
  2:
  #endif
+diff -ruN linux-2.6.25.20/arch/m68k/kernel/sys_m68k.c linux-2.6.25.20.last/arch/m68k/kernel/sys_m68k.c
+--- linux-2.6.25.20/arch/m68k/kernel/sys_m68k.c	2009-11-19 09:04:30.698380116 +0200
++++ linux-2.6.25.20.last/arch/m68k/kernel/sys_m68k.c	2009-11-17 19:06:40.767519683 +0200
+@@ -80,6 +80,14 @@
+ 	unsigned long prot, unsigned long flags,
+ 	unsigned long fd, unsigned long pgoff)
+ {
++	/* Make shift for mmap2 should be 12, no matter the PAGE_SIZE is.
++	   Don't silently break if we're trying to map something we can't.
++	   Original FRV code. */
++	if (pgoff & ((1<<(PAGE_SHIFT-12))-1))
++		return -EINVAL;
++	pgoff >>= (PAGE_SHIFT - 12);
++
++
+ 	return do_mmap2(addr, len, prot, flags, fd, pgoff);
+ }
+ 
 diff -ruN linux-2.6.25.20/arch/m68k/lib/string.c linux-2.6.25.20.last/arch/m68k/lib/string.c
 --- linux-2.6.25.20/arch/m68k/lib/string.c	2009-11-19 09:04:32.743379801 +0200
 +++ linux-2.6.25.20.last/arch/m68k/lib/string.c	2009-11-10 17:33:13.000000000 +0200
@@ -195,3 +224,45 @@ diff -ruN linux-2.6.25.20/arch/m68k/lib/string.c linux-2.6.25.20.last/arch/m68k/
  
  #if 0
  
+diff -ruN linux-2.6.25.20/arch/m68k/mm/cf-mmu.c linux-2.6.25.20.last/arch/m68k/mm/cf-mmu.c
+--- linux-2.6.25.20/arch/m68k/mm/cf-mmu.c	2009-11-19 09:04:32.791380102 +0200
++++ linux-2.6.25.20.last/arch/m68k/mm/cf-mmu.c	2009-11-17 19:08:23.876019363 +0200
+@@ -135,9 +135,7 @@
+ 	/* JKM - this should be changed to allocate from the TOP (0x4f,0x4e) but the
+ 	 * allocator is being a bit challenging */
+         zones_size[ZONE_DMA] = CONFIG_DMA_SIZE >> PAGE_SHIFT;
+-        zones_size[ZONE_NORMAL] = (((unsigned long)high_memory -
+-                                    PAGE_OFFSET) >> PAGE_SHIFT) -
+-                                   zones_size[ZONE_DMA];
++        zones_size[ZONE_NORMAL] = (((unsigned long)high_memory - PAGE_OFFSET) >> PAGE_SHIFT) - zones_size[ZONE_DMA];
+ 
+ 
+ 	free_area_init(zones_size);
+diff -ruN linux-2.6.25.20/include/asm-m68k/page_offset.h linux-2.6.25.20.last/include/asm-m68k/page_offset.h
+--- linux-2.6.25.20/include/asm-m68k/page_offset.h	2009-11-19 09:04:31.639379916 +0200
++++ linux-2.6.25.20.last/include/asm-m68k/page_offset.h	2009-11-12 14:51:48.633057066 +0200
+@@ -3,7 +3,7 @@
+  */
+ #if defined(CONFIG_SUN3)
+ #define PAGE_OFFSET_RAW		0x0E000000
+-
++#error ysbh
+ #elif defined(CONFIG_M5445X) || defined(CONFIG_M547X_8X)
+ #define	PHYS_OFFSET		CONFIG_SDRAM_BASE
+ #define PAGE_OFFSET_RAW		(PHYS_OFFSET)
+diff -ruN linux-2.6.25.20/include/asm-m68k/ucontext.h linux-2.6.25.20.last/include/asm-m68k/ucontext.h
+--- linux-2.6.25.20/include/asm-m68k/ucontext.h	2008-11-10 20:50:34.000000000 +0200
++++ linux-2.6.25.20.last/include/asm-m68k/ucontext.h	2009-11-17 19:12:11.064519688 +0200
+@@ -7,7 +7,11 @@
+ 
+ typedef struct fpregset {
+ 	int f_fpcntl[3];
+-	int f_fpregs[8*3];
++	#ifdef CONFIG_CFV4E
++	        int f_fpregs[8][2];
++	#else
++	        int f_fpregs[8*3];
++	#endif
+ } fpregset_t;
+ 
+ struct mcontext {

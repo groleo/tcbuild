@@ -235,6 +235,18 @@ config CC_V_4_4_1
     select CC_GCC_4_3_or_later
     select CC_GCC_4_4_or_later
 
+config CC_V_4_4_2
+    bool
+    prompt "4.4.2"
+    select CC_GCC_4_3_or_later
+    select CC_GCC_4_4_or_later
+
+config CC_V_4_4_3
+    bool
+    prompt "4.4.3"
+    select CC_GCC_4_3_or_later
+    select CC_GCC_4_4_or_later
+
 config CC_V_4_5_0
     bool
     prompt "4.5.0"
@@ -287,6 +299,8 @@ config CC_VERSION
     default "4.3.3" if CC_V_4_3_3
     default "4.4.0" if CC_V_4_4_0
     default "4.4.1" if CC_V_4_4_1
+    default "4.4.2" if CC_V_4_4_2
+    default "4.4.3" if CC_V_4_4_3
     default "4.5.0" if CC_V_4_5_0
     default "4.3-54" if CC_V_4_3_54
 

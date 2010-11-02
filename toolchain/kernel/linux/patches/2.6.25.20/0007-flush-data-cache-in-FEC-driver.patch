@@ -1,0 +1,120 @@
+--- a/drivers/net/fec/fec.c	2010-06-28 16:07:54.593138865 +0300
++++ b/drivers/net/fec/fec.c	2010-07-05 21:00:45.447165860 +0300
+@@ -761,7 +761,7 @@
+ /* JKM -- currently running with cache turned off */
+ 	DcacheFlushInvalidateCacheBlock((void*)virt_to_phys(data_aligned), skb->len);
+ #endif
+-	flush_dcache();
++	cf_dcache_flush_range( (unsigned)(data_aligned), (unsigned)(data_aligned) + skb->len    );
+ 
+ 	spin_lock_irq(&fp->fecpriv_lock);
+ 
+@@ -951,10 +951,11 @@
+ 	if(!(fp->fecpriv_rxdesc[fp->fecpriv_current_rx].statCtrl & MCD_FEC_END_FRAME))
+ 	{
+ 		// Find a valid index
+-		for(i = 0; i < FEC_RX_BUF_NUMBER && !(fp->fecpriv_rxdesc[fp->fecpriv_current_rx].statCtrl & MCD_FEC_END_FRAME); i++, fp->fecpriv_current_rx = (fp->fecpriv_current_rx + 1) & FEC_RX_INDEX_MASK);
++		for( i = 0
++		   ; i < FEC_RX_BUF_NUMBER && !(fp->fecpriv_rxdesc[fp->fecpriv_current_rx].statCtrl & MCD_FEC_END_FRAME)
++		   ; i++, fp->fecpriv_current_rx = (fp->fecpriv_current_rx + 1) & FEC_RX_INDEX_MASK);
+ 
+-		if(i == FEC_RX_BUF_NUMBER)
+-		{
++		if(i == FEC_RX_BUF_NUMBER) {
+ 			// There are no data to process
+ 			// Tell the DMA to continue the reception
+ 			MCD_continDma(fp->fecpriv_fec_rx_channel);
+@@ -965,50 +966,53 @@
+ 		}
+ 	}
+ 
+-	for (; fp->fecpriv_rxdesc[fp->fecpriv_current_rx].statCtrl & MCD_FEC_END_FRAME;	fp->fecpriv_current_rx = (fp->fecpriv_current_rx + 1) & FEC_RX_INDEX_MASK) {
+-	    if( (fp->fecpriv_rxdesc[fp->fecpriv_current_rx].length <= FEC_MAXBUF_SIZE) &&
+-		    (fp->fecpriv_rxdesc[fp->fecpriv_current_rx].length > 4)) { /* --tym-- */
+-    		skb = fp->askb_rx[fp->fecpriv_current_rx];
+-    		if (!skb)
+-			fp->fecpriv_stat.rx_dropped++;
+-    		else {
+-    		    /* flush data cache before initializing the descriptor and starting DMA */
+-//		    DcacheFlushInvalidateCacheBlock((void*)virt_to_phys(fp->askb_rx[fp->fecpriv_current_rx]->tail), fp->askb_rx[fp->fecpriv_current_rx]->len);
+-
+-			flush_dcache();
+-    			skb_put(skb, fp->fecpriv_rxdesc[fp->fecpriv_current_rx].length - 4);
+-    			skb->protocol = eth_type_trans(skb, dev);
+-    			netif_rx(skb);
+-		}
+-		fp->fecpriv_rxdesc[fp->fecpriv_current_rx].statCtrl &= ~MCD_FEC_END_FRAME;
+-    		/* allocate new skbuff */
+-    		fp->askb_rx[fp->fecpriv_current_rx] = alloc_skb(FEC_MAXBUF_SIZE + 16, /*GFP_ATOMIC |*/ GFP_DMA);
+-		if (!fp->askb_rx[fp->fecpriv_current_rx]) {
+-			fp->fecpriv_rxdesc[fp->fecpriv_current_rx].dataPointer = 0;
+-			fp->fecpriv_rxdesc[fp->fecpriv_current_rx].length = 0;
+-			fp->fecpriv_stat.rx_dropped++;
+-		}
+-    		else {
+-			skb_reserve(fp->askb_rx[fp->fecpriv_current_rx], 16);
+-			fp->askb_rx[fp->fecpriv_current_rx]->dev = dev;
++	for (; fp->fecpriv_rxdesc[fp->fecpriv_current_rx].statCtrl & MCD_FEC_END_FRAME
++			;fp->fecpriv_current_rx = (fp->fecpriv_current_rx + 1) & FEC_RX_INDEX_MASK) {
++		if( (fp->fecpriv_rxdesc[fp->fecpriv_current_rx].length <= FEC_MAXBUF_SIZE) &&
++				(fp->fecpriv_rxdesc[fp->fecpriv_current_rx].length > 4)) { /* --tym-- */
++			skb = fp->askb_rx[fp->fecpriv_current_rx];
++			if (!skb)
++				fp->fecpriv_stat.rx_dropped++;
++			else {
++				/* flush data cache before initializing the descriptor and starting DMA */
++				//DcacheFlushInvalidateCacheBlock((void*)virt_to_phys(fp->askb_rx[fp->fecpriv_current_rx]->tail),
++				//fp->askb_rx[fp->fecpriv_current_rx]->len);
++				cf_dcache_flush_range((unsigned)(fp->askb_rx[fp->fecpriv_current_rx]->tail),
++						(unsigned)(fp->askb_rx[fp->fecpriv_current_rx]->tail) + fp->askb_rx[fp->fecpriv_current_rx]->len    );
++				skb_put(skb, fp->fecpriv_rxdesc[fp->fecpriv_current_rx].length - 4);
++				skb->protocol = eth_type_trans(skb, dev);
++				netif_rx(skb);
++			}
++			fp->fecpriv_rxdesc[fp->fecpriv_current_rx].statCtrl &= ~MCD_FEC_END_FRAME;
++			/* allocate new skbuff */
++			fp->askb_rx[fp->fecpriv_current_rx] = alloc_skb(FEC_MAXBUF_SIZE + 16, /*GFP_ATOMIC |*/ GFP_DMA);
++			if (!fp->askb_rx[fp->fecpriv_current_rx]) {
++				fp->fecpriv_rxdesc[fp->fecpriv_current_rx].dataPointer = 0;
++				fp->fecpriv_rxdesc[fp->fecpriv_current_rx].length = 0;
++				fp->fecpriv_stat.rx_dropped++;
++			}
++			else {
++				skb_reserve(fp->askb_rx[fp->fecpriv_current_rx], 16);
++				fp->askb_rx[fp->fecpriv_current_rx]->dev = dev;
+ 
+-			/* flush data cache before initializing the descriptor and starting DMA */
++				/* flush data cache before initializing the descriptor and starting DMA */
+ #if 0
+-/* JKM -- currently running with cache turned off */
+-			DcacheFlushInvalidateCacheBlock((void*)virt_to_phys(fp->askb_rx[fp->fecpriv_current_rx]->tail), FEC_MAXBUF_SIZE);
++				/* JKM -- currently running with cache turned off */
++				DcacheFlushInvalidateCacheBlock((void*)virt_to_phys(fp->askb_rx[fp->fecpriv_current_rx]->tail), FEC_MAXBUF_SIZE);
+ #endif
+-			flush_dcache();
+-
+-    	    	fp->fecpriv_rxdesc[fp->fecpriv_current_rx].dataPointer = (unsigned int) virt_to_phys(fp->askb_rx[fp->fecpriv_current_rx]->tail);
+-    	    	fp->fecpriv_rxdesc[fp->fecpriv_current_rx].length = FEC_MAXBUF_SIZE;
+-		fp->fecpriv_rxdesc[fp->fecpriv_current_rx].statCtrl |= MCD_FEC_BUF_READY;
+-
+-    		    // flush data cache before initializing the descriptor and starting DMA
+-//		    DcacheFlushInvalidateCacheBlock((void*)virt_to_phys(fp->askb_rx[fp->fecpriv_current_rx]->tail), FEC_MAXBUF_SIZE);
+-		flush_dcache();
+-    	    }
+-        }
++				cf_dcache_flush_range((unsigned)(fp->askb_rx[fp->fecpriv_current_rx]->tail),
++						(unsigned)(fp->askb_rx[fp->fecpriv_current_rx]->tail) + FEC_MAXBUF_SIZE );
+ 
++				fp->fecpriv_rxdesc[fp->fecpriv_current_rx].dataPointer = (unsigned int) virt_to_phys(fp->askb_rx[fp->fecpriv_current_rx]->tail);
++				fp->fecpriv_rxdesc[fp->fecpriv_current_rx].length = FEC_MAXBUF_SIZE;
++				fp->fecpriv_rxdesc[fp->fecpriv_current_rx].statCtrl |= MCD_FEC_BUF_READY;
++
++				// flush data cache before initializing the descriptor and starting DMA
++				//DcacheFlushInvalidateCacheBlock((void*)virt_to_phys(fp->askb_rx[fp->fecpriv_current_rx]->tail), FEC_MAXBUF_SIZE);
++				cf_dcache_flush_range((unsigned)(fp->askb_rx[fp->fecpriv_current_rx]->tail),
++						(unsigned)(fp->askb_rx[fp->fecpriv_current_rx]->tail) + FEC_MAXBUF_SIZE );
++			}
++		}
+ 	}
+ 
+ 	/* Tell the DMA to continue the reception */

@@ -1,0 +1,26 @@
+From 4bb5a9816c06d7a7b9d671909d11b32f5db8ab43 Mon Sep 17 00:00:00 2001
+From: mariusn <groleo@gmail.com>
+Date: Mon, 5 Jul 2010 20:40:49 +0300
+Subject: [PATCH 1/6] use-gcc-funit-at-a-time
+
+---
+ Makefile |    3 +++
+ 1 files changed, 3 insertions(+), 0 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 008391f..f9f6a86 100644
+--- a/Makefile
++++ b/Makefile
+@@ -533,6 +533,9 @@ endif
+ NOSTDINC_FLAGS += -nostdinc -isystem $(shell $(CC) -print-file-name=include)
+ CHECKFLAGS     += $(NOSTDINC_FLAGS)
+ 
++# improve gcc optimization
++CFLAGS += $(call cc-option,-funit-at-a-time,)
++
+ # warn about C99 declaration after statement
+ KBUILD_CFLAGS += $(call cc-option,-Wdeclaration-after-statement,)
+ 
+-- 
+1.7.0.4
+

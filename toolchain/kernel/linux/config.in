@@ -7,7 +7,11 @@ config KERNEL_VERSION
 
 config BARE_METAL
     bool
-        default n
+    default n
+
+config PKG_kernel
+    bool
+    default y
 
 
 config KERNEL_linux

@@ -1,0 +1,27 @@
+diff -ruN a/arch/m68k/coldfire/head.S b/arch/m68k/coldfire/head.S
+--- a/arch/m68k/coldfire/head.S	2009-11-06 10:49:20.000000000 +0200
++++ b/arch/m68k/coldfire/head.S	2009-11-06 11:21:01.950088339 +0200
+@@ -5,6 +5,11 @@
+  *    Matt Waddel Matt.Waddel@freescale.com
+  *    Kurt Mahan kmahan@freescale.com
+  *  Copyright Freescale Semiconductor, Inc. 2007, 2008
++ *
++ *  Create DMA memory area (no cache) by
++ *    Lanttor.Guo@freescale.com
++ *
++ *  Copyright (C) 2007-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  *  Phys kernel mapping Copyright Daniel Krueger, SYSTEC electornic GmbH 2008
+  *
+  *  This program is free software; you can redistribute it and/or modify
+@@ -104,9 +109,9 @@
+ #define ACR3_DEFAULT	#0x400FA008   /* SDRAM cached */
+ #elif defined(CONFIG_M547X_8X)
+ #define ACR0_DEFAULT	#0xF00FA048   /* System Regs */
+-#define ACR1_DEFAULT	#0x000FA048   /* SDRAM uncached */
++#define ACR1_DEFAULT	#0x000FA028   /* SDRAM data chache copy-back */
+ #define ACR2_DEFAULT	#0x00000000   /* Not mapped */
+-#define ACR3_DEFAULT	#0x000FA008   /* SDRAM cached */
++#define ACR3_DEFAULT	#0x000FA028   /* SDRAM code cache copy-back */
+ #endif
+ #endif
+ 

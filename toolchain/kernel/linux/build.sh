@@ -72,7 +72,7 @@ do_kernel_install() {
              ${V_OPT}                                       \
              headers_check
         find "${CT_SYSROOT_DIR}" -type f -name '.check*' -exec rm {} \;
-	CT_EndStep
+        CT_EndStep
     fi
 
     CT_Popd

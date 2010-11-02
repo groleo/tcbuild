@@ -1,0 +1,185 @@
+diff -ruN a/libc/string/m68k/Makefile b/libc/string/m68k/Makefile
+--- a/libc/string/m68k/Makefile	1970-01-01 02:00:00.000000000 +0200
++++ b/libc/string/m68k/Makefile	2006-02-04 01:29:34.000000000 +0200
+@@ -0,0 +1,13 @@
++# Makefile for uClibc
++#
++# Copyright (C) 2000-2005 Erik Andersen <andersen@uclibc.org>
++#
++# Licensed under the LGPL v2.1, see the file COPYING.LIB in this tarball.
++#
++
++top_srcdir:=../../../
++top_builddir:=../../../
++all: objs
++include $(top_builddir)Rules.mak
++include ../Makefile.in
++include $(top_srcdir)Makerules
+diff -ruN a/libc/string/m68k/bcopy.c b/libc/string/m68k/bcopy.c
+--- a/libc/string/m68k/bcopy.c	1970-01-01 02:00:00.000000000 +0200
++++ b/libc/string/m68k/bcopy.c	2010-07-21 16:00:01.000000000 +0300
+@@ -0,0 +1,11 @@
++/*
++ * Copyright (C) 2010 Marius Negreanu <groleo@gmail.com>
++ *
++ * Licensed under the LGPL v2.1, see the file COPYING.LIB in this tarball.
++ */
++
++#include <string.h>
++void bcopy(const void*src, void*dest,size_t len)
++{
++	memmove(dest,src,len);
++}
+diff -ruN a/libc/string/m68k/memcpy.c b/libc/string/m68k/memcpy.c
+--- a/libc/string/m68k/memcpy.c	1970-01-01 02:00:00.000000000 +0200
++++ b/libc/string/m68k/memcpy.c	2010-07-21 16:00:07.000000000 +0300
+@@ -0,0 +1,12 @@
++/*
++ * Copyright (C) 2010 Marius Negreanu <groleo@gmail.com>
++ *
++ * Licensed under the LGPL v2.1, see the file COPYING.LIB in this tarball.
++ */
++
++#include <string.h>
++void* memcpy(void*dest, const void*src,size_t len)
++{
++	return memmove(dest,src,len);
++}
++libc_hidden_def(memcpy)
+diff -ruN a/libc/string/m68k/memmove.c b/libc/string/m68k/memmove.c
+--- a/libc/string/m68k/memmove.c	1970-01-01 02:00:00.000000000 +0200
++++ b/libc/string/m68k/memmove.c	2010-07-21 16:28:32.000000000 +0300
+@@ -0,0 +1,133 @@
++/*
++ * Copyright (C) 2010 Marius Negreanu <groleo@gmail.com>
++ *
++ * Licensed under the LGPL v2.1, see the file COPYING.LIB in this tarball.
++ */
++
++/*
++ * All labels are prefixed with Lmemmove_
++ * The labels within the code copying forward, has an F postfix,
++ * while labels within the code copying backward, has an B postfix.
++ * Following the copying direction postfix, is a size postfix:
++ * 	M: move 48 bytes at a time, using movem.l instruction
++ * 	4: move 4 bytes at a time
++ * 	2: move 2 bytes at a time
++ * 	1: move 1 byte at a time
++ */
++#include <string.h>
++
++void* memmove(void*dest, const void*src,size_t len)
++{
++	__asm__ volatile(
++	"	move.l	16(%fp),%d0		/*  get len			*/\n"
++	"	jeq	Lmemmove_exit		/*  if len==0, return		*/\n"
++	"	move.l	12(%fp),%a0		/*  get src address		*/\n"
++	"	move.l	8(%fp),%a1		/*  get dest address		*/\n"
++	"	cmp.l	%a1,%a0			/*  if src==dst, return		*/\n"
++	"	jeq	Lmemmove_exit\n"
++	"	lea -12*4(%sp),%sp		/*  Save regs			*/\n"
++	"	movem.l %d1-%d7/%a2-%a6,(%sp)	/*  Save regs			*/\n"
++	"	cmp.l	%a1,%a0			/*  if src < dest,		*/\n"
++	"	jlt	Lmemmove_Backwards	/*  then avoid overlap		*/\n"
++	"	move.l	%a0,%d1\n"
++	"	btst	#0,%d1			/*  src address unaligned?	*/\n"
++	"	jeq	Lmemmove_Forward	/*  No, go check dest		*/\n"
++	"	move.b	%a0@+,%a1@+		/*  Yes, copy 1 byte		*/\n"
++	"	subq.l	#1,%d0			/*  len--			*/\n"
++	"	jeq	Lmemmove_exit		/*  if len==0, return		*/\n"
++	"Lmemmove_Forward:\n"
++	"	move.l	%a1,%d1\n"
++	"	btst	#0,%d1			/*  dest address unaligned?	*/\n"
++	"	jne	Lmemmove_F1		/*  Yes, copy 1 byte at a time	*/\n"
++	"Lmemmove_FM:\n"
++	"	cmpi.l #48,%d0			/*  len ? 48( 12regs * 4bytes)	*/\n"
++	"	jlt Lmemmove_F4			/*  IF (len-48) < 0 GOTO F4; ELSE*/\n"
++	"	movem.l (%a0),%d1-%d7/%a2-%a6	/*  move *src to regs		*/\n"
++	"	movem.l %d1-%d7/%a2-%a6,(%a1)	/*  move regs to *dest	*/\n"
++	"	lea.l (48,%a0),%a0		/*  src  = src + 48		*/\n"
++	"	lea.l (48,%a1),%a1		/*  dest = dest+ 48		*/\n"
++	"	subi.l #48,%d0			/*  len -= 48			*/\n"
++	"	jra Lmemmove_FM			/*  one more iteration		*/\n"
++	"Lmemmove_F4:\n"
++	"	cmpi.l #4, %d0			/*  Copy 4 bytes at a time?	*/\n"
++	"	jlt Lmemmove_F2			/*  No, then goto F2		*/\n"
++	"	move.l (%a0),%d1		/*  move *src to reg		*/\n"
++	"	move.l %d1,(%a1)		/*  move reg to *dest		*/\n"
++	"	lea.l (4,%a0),%a0		/*  src  = src + 4		*/\n"
++	"	lea.l (4,%a1),%a1		/*  dest = dest+ 4		*/\n"
++	"	subq.l #4,%d0			/*  len -= 4			*/\n"
++	"	jra Lmemmove_F4			/*  one more iteration		*/\n"
++	"Lmemmove_F2:\n"
++	"	cmpi.l #2, %d0			/*  Copy 2 bytes at a time?	*/\n"
++	"	jlt Lmemmove_F1			/*  No, then goto F1		*/\n"
++	"	move.w (%a0),%d1		/*  move *src to reg;		*/\n"
++	"	move.w %d1,(%a1)		/*  move reg to *dest;		*/\n"
++	"	lea.l (2,%a0),%a0		/*  src  = src + 2		*/\n"
++	"	lea.l (2,%a1),%a1		/*  dest = dest+ 2		*/\n"
++	"	subq.l #2,%d0			/*  len -= 2			*/\n"
++	"	jra Lmemmove_F2			/*  one more iteration		*/\n"
++	"Lmemmove_F1:\n"
++	"	tst.l %d0			/*  if len==0,			*/\n"
++	"	jeq Lmemmove_pop		/*  return			*/\n"
++	"	move.b (%a0),%d1		/*  move *src to reg		*/\n"
++	"	move.b %d1,(%a1)		/*  move reg to *dest		*/\n"
++	"	lea.l (1,%a0),%a0		/*  src  = src + 1		*/\n"
++	"	lea.l (1,%a1),%a1		/*  dest = dest+ 1		*/\n"
++	"	subq.l #1,%d0			/*  len--			*/\n"
++	"	jra Lmemmove_F1			/*  one more iteration		*/\n"
++	"Lmemmove_Backwards:\n"
++	"	add.l	%d0,%a0			/*  src += len			*/\n"
++	"	add.l	%d0,%a1			/*  dest+= len			*/\n"
++	"	move.l	%a0,%d1\n"
++	"	btst	#0,%d1			/*  src address odd?		*/\n"
++	"	jeq	Lmemmove_Beven		/*  No, go check dest		*/\n"
++	"	movb	%a0@-,%a1@-		/*  Yes, copy 1 byte		*/\n"
++	"	subq.l	#1,%d0			/*  len--			*/\n"
++	"	jeq	Lmemmove_exit		/*  if len==0, return		*/\n"
++	"Lmemmove_Beven:\n"
++	"	move.l	%a1,%d1\n"
++	"	btst	#0,%d1			/*  dest address odd?		*/\n"
++	"	jne	 Lmemmove_B1		/*  yes, must copy by bytes	*/\n"
++	"Lmemmove_BM:\n"
++	"	cmpi.l #48,%d0			/*  len ? 48( 12regs * 4bytes)	*/\n"
++	"	jlt Lmemmove_B4			/*  if (len-48) < 0 goto 2f; else*/\n"
++	"	lea.l (-12*4,%a0),%a0		/*  src  = src - 48		*/\n"
++	"	lea.l (-12*4,%a1),%a1		/*  dest = dest- 48		*/\n"
++	"	movem.l (%a0),%d1-%d7/%a2-%a6	/*  move *src to regs		*/\n"
++	"	movem.l %d1-%d7/%a2-%a6,(%a1)	/*  move regs to *dest		*/\n"
++	"	subi.l #48,%d0			/*  len -= 48			*/\n"
++	"	jra Lmemmove_BM			/*  one more iteration		*/\n"
++	"Lmemmove_B4:\n"
++	"	cmpi.l #4, %d0			/*  Copy 4 bytes at a time?	*/\n"
++	"	jlt Lmemmove_B2			/*  No, goto B2			*/\n"
++	"	lea.l (-4,%a0),%a0		/*  src  = src - 4		*/\n"
++	"	lea.l (-4,%a1),%a1		/*  dest = dest- 4		*/\n"
++	"	move.l (%a0),%d1		/*  move *src to reg		*/\n"
++	"	move.l %d1,(%a1)		/*  move reg to *dest		*/\n"
++	"	subq.l #4,%d0			/*  len -= 4			*/\n"
++	"	jra Lmemmove_B4			/*  one more iteration		*/\n"
++	"Lmemmove_B2:\n"
++	"	cmpi.l #2, %d0			/*  Copy 2 bytes at a time?	*/\n"
++	"	jlt Lmemmove_B1			/*  No, then goto B1		*/\n"
++	"	lea.l (-2,%a0),%a0		/*  src  = src - 2		*/\n"
++	"	lea.l (-2,%a1),%a1		/*  dest = dest- 2		*/\n"
++	"	move.w (%a0),%d1		/*  move *src to reg;		*/\n"
++	"	move.w %d1,(%a1)		/*  move reg to *dest;		*/\n"
++	"	subq.l #2,%d0			/*  len -= 2			*/\n"
++	"	jra Lmemmove_B2			/*  one more iteration		*/\n"
++	"Lmemmove_B1:\n"
++	"	tst.l %d0			/*  if len==0,			*/\n"
++	"	jeq Lmemmove_pop		/*  return			*/\n"
++	"	lea.l (-1,%a0),%a0		/*  src  = src - 1		*/\n"
++	"	lea.l (-1,%a1),%a1		/*  dest = dest- 1		*/\n"
++	"	move.b (%a0),%d1		/*  move *src to reg		*/\n"
++	"	move.b %d1,(%a1)		/*  move reg to *dest		*/\n"
++	"	subq.l #1,%d0			/*  len--			*/\n"
++	"	jra Lmemmove_B1			/*  one more iteration		*/\n"
++	"Lmemmove_pop:\n"
++	"	movem.l (%sp),%d1-%d7/%a2-%a6	/*  Restore registers		*/\n"
++	"	lea 12*4(%sp),%sp		/*  Restore Stack		*/\n"
++	"Lmemmove_exit:\n");
++	return dest;
++}
++libc_hidden_def(memmove)
