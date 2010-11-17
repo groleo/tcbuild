@@ -1,0 +1,29 @@
+From d37a6c509797fc3dc636efb68258b7c5b374b853 Mon Sep 17 00:00:00 2001
+From: Shrek Wu <b16972@freescale.com>
+Date: Wed, 18 Aug 2010 13:54:11 +0800
+Subject: [PATCH 2/2] Set the SDRAM XBS priority settings to rr.
+
+This patch set the SDRAM XBS arbitration mode to round robin.
+This kind of setting can fix the USB OTG reset issue when reading big
+file from the USB devices.
+
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ arch/m68k/coldfire/m5445x/config.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m5445x/config.c b/arch/m68k/coldfire/m5445x/config.c
+index 473a39e..f77d7d3 100644
+--- a/arch/m68k/coldfire/m5445x/config.c
++++ b/arch/m68k/coldfire/m5445x/config.c
+@@ -188,6 +188,7 @@ asmlinkage void __init cf_early_init(void)
+ 	MCF_SDRAMC_SDCS(1) = (256*1024*1024) | 0x1B;
+ #endif
+ 
++	MCF_XBS_CRS2 = 0x100;
+ 	/* Setup SDRAM crossbar(XBS) priorities */
+ 	MCF_XBS_PRS2 = (MCF_XBS_PRS_M0(MCF_XBS_PRI_2) |  /*CPU*/
+ 			MCF_XBS_PRS_M1(MCF_XBS_PRI_3) |  /*eDMA*/
+-- 
+1.6.4
+

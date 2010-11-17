@@ -1,0 +1,50 @@
+From f1bfe6dec344b7e6c7e1055099b55f359cc6bd21 Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Thu, 19 Aug 2010 18:04:28 +0800
+Subject: [PATCH 4/5] Add cpu dma sync function for coldfire platform
+
+This patch add dma_sync_sg_for_cpu() and dma_sync_single_for_cpu()
+for coldfire platform. The previous empty function do not flush the
+cache for the ram used for DMA.
+
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ arch/m68k/include/asm/dma-mapping_mm.h |    2 ++
+ arch/m68k/kernel/dma.c                 |    3 +++
+ 2 files changed, 5 insertions(+), 0 deletions(-)
+
+diff --git a/arch/m68k/include/asm/dma-mapping_mm.h b/arch/m68k/include/asm/dma-mapping_mm.h
+index 26f5054..9d45126 100644
+--- a/arch/m68k/include/asm/dma-mapping_mm.h
++++ b/arch/m68k/include/asm/dma-mapping_mm.h
+@@ -85,11 +85,13 @@ static inline void dma_sync_single_range_for_device(struct device *dev,
+ static inline void dma_sync_single_for_cpu(struct device *dev, dma_addr_t handle,
+ 					   size_t size, enum dma_data_direction dir)
+ {
++	dma_sync_single_for_device(dev, handle, size, dir);
+ }
+ 
+ static inline void dma_sync_sg_for_cpu(struct device *dev, struct scatterlist *sg,
+ 				       int nents, enum dma_data_direction dir)
+ {
++	dma_sync_sg_for_device(dev, sg, nents, dir);
+ }
+ 
+ static inline void dma_sync_single_range_for_cpu(struct device *dev,
+diff --git a/arch/m68k/kernel/dma.c b/arch/m68k/kernel/dma.c
+index 6b87bf2..9e7fffc 100644
+--- a/arch/m68k/kernel/dma.c
++++ b/arch/m68k/kernel/dma.c
+@@ -98,6 +98,9 @@ void dma_sync_single_for_device(struct device *dev, dma_addr_t handle,
+ 	case DMA_FROM_DEVICE:
+ 		cache_clear(handle, size);
+ 		break;
++	case PCI_DMA_BIDIRECTIONAL:
++		flush_cache_all();
++		break;
+ 	default:
+ 		if (printk_ratelimit())
+ 			printk("dma_sync_single_for_device: unsupported dir %u\n", dir);
+-- 
+1.6.4
+

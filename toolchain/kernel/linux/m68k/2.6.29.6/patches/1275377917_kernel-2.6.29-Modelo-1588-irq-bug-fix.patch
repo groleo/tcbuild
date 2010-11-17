@@ -1,0 +1,200 @@
+From 543d8ac69ae59c8efba280aa3c1f8ebc48aa9b41 Mon Sep 17 00:00:00 2001
+From: Shrek Wu <b16972@freescale.com>
+Date: Tue, 1 Jun 2010 15:38:37 +0800
+Subject: [PATCH] Modelo 1588 irq bug fix
+
+This patch enabled the Modelo 1588 interrupt.
+
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ arch/m68k/coldfire/m5441x/fec.c |   12 ++++++++++--
+ drivers/net/fec.c               |   17 ++++++++---------
+ drivers/net/fec_1588.c          |   26 +++++++++++++-------------
+ drivers/net/fec_1588.h          |    5 +++++
+ 4 files changed, 36 insertions(+), 24 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m5441x/fec.c b/arch/m68k/coldfire/m5441x/fec.c
+index 2fc9801..fc80646 100644
+--- a/arch/m68k/coldfire/m5441x/fec.c
++++ b/arch/m68k/coldfire/m5441x/fec.c
+@@ -79,6 +79,14 @@ static void fec_request_intrs(struct net_device *dev,
+ 			printk(KERN_ERR "FEC: Could not alloc %s IRQ(%d)!\n",
+ 				idp->name, b+idp->irq);
+ 	}
++#ifdef CONFIG_FEC_1588
++	b = (fep->index) ? (64 + 64 + 64 + 7) : (64 + 64 + 64);
++	if (request_irq(b + 48, fec_net_irq_handler, IRQF_DISABLED,
++			"1588 TS AVAIL", irq_privatedata) != 0)
++		printk(KERN_ERR "FEC: Could not alloc "
++			"FEC %x 1588 TS AVAIL IRQ(%d)!\n",
++			fep->index, b + 48);
++#endif
+ }
+ 
+ static void fec_set_mii(struct net_device *dev)
+@@ -88,7 +96,7 @@ static void fec_set_mii(struct net_device *dev)
+ 
+ 	fecp = fep->hwp;
+ 	fecp->fec_r_cntrl = OPT_FRAME_SIZE | 0x104;
+-        fecp->fec_x_cntrl = 0x00;
++	fecp->fec_x_cntrl = 0x00;
+ 
+ 	/*
+ 	* Set MII speed to 2.5 MHz
+@@ -118,7 +126,7 @@ static void fec_get_mac(struct net_device *dev)
+ 		iap = &tmpaddr[0];
+ 	}
+ 
+-	if(!is_valid_ether_addr(iap))
++	if (!is_valid_ether_addr(iap))
+ 		iap = fec_mac_default;
+ 
+ 	memcpy(dev->dev_addr, iap, ETH_ALEN);
+diff --git a/drivers/net/fec.c b/drivers/net/fec.c
+index c20f2f5..3c1240a 100644
+--- a/drivers/net/fec.c
++++ b/drivers/net/fec.c
+@@ -261,7 +261,7 @@ fec_enet_start_xmit(struct sk_buff *skb, struct net_device *dev)
+ 		else
+ 			estatus = 0;
+ 
+-		bdp->cbd_esc = estatus;
++		bdp->cbd_esc = (estatus | BD_ENET_TX_INT);
+ 		bdp->cbd_bdu = BD_ENET_TX_BDU;
+ 	}
+ #endif
+@@ -357,7 +357,6 @@ fec_enet_interrupt(int irq, void *dev_id)
+ 	do {
+ 		int_events = fecp->fec_ievent;
+ 		fecp->fec_ievent = int_events;
+-
+ 		/* Handle receive event in its own function.
+ 		 */
+ 		if (int_events & FEC_ENET_RXF) {
+@@ -559,19 +558,13 @@ while (!((status = bdp->cbd_sc) & BD_ENET_RX_EMPTY)) {
+ 	 * include that when passing upstream as it messes up
+ 	 * bridging applications.
+ 	 */
+-#ifdef CONFIG_FEC_1588
+-	skb = dev_alloc_skb(pkt_len - 4 + NET_IP_ALIGN);
+-#else
+ 	skb = dev_alloc_skb(pkt_len-4);
+-#endif
++
+ 	if (skb == NULL) {
+ 		printk(KERN_ERR "%s: Memory squeeze, "
+ 			"dropping packet.\n", dev->name);
+ 		dev->stats.rx_dropped++;
+ 	} else {
+-#ifdef CONFIG_FEC_1588
+-		skb_reserve(skb, NET_IP_ALIGN);
+-#endif
+ 		skb_put(skb, pkt_len-4);	/* Make room */
+ 		skb_copy_to_linear_data(skb, data, pkt_len-4);
+ 		skb->protocol = eth_type_trans(skb, dev);
+@@ -1049,6 +1042,9 @@ int __init fec_enet_init(struct net_device *dev,
+ 		*/
+ 		for (j = 0; j < FEC_ENET_RX_FRPPG; j++) {
+ 			bdp->cbd_sc = BD_ENET_RX_EMPTY;
++#ifdef CONFIG_FEC_1588
++			bdp->cbd_esc = BD_ENET_RX_INT;
++#endif
+ 			bdp->cbd_bufaddr = __pa(mem_addr);
+ 			mem_addr += FEC_ENET_RX_FRSIZE;
+ 			bdp++;
+@@ -1076,6 +1072,9 @@ int __init fec_enet_init(struct net_device *dev,
+ 		/* Initialize the BD for every fragment in the page.
+ 		*/
+ 		bdp->cbd_sc = 0;
++#ifdef CONFIG_FEC_1588
++		bdp->cbd_esc = BD_ENET_RX_INT;
++#endif
+ 		bdp->cbd_bufaddr = 0;
+ 		bdp++;
+ 	}
+diff --git a/drivers/net/fec_1588.c b/drivers/net/fec_1588.c
+index 37b1b01..9781294 100644
+--- a/drivers/net/fec_1588.c
++++ b/drivers/net/fec_1588.c
+@@ -154,13 +154,13 @@ int fec_ptp_start(struct fec_ptp_private *priv)
+ 	struct fec_ptp_private *fpp = priv;
+ 
+ 	/* Select 1588 Timer source and enable module for starting Tmr Clock */
+-	writel(FEC_T_CTRL_RESTART, fpp->hwp + FEC_ATIME_CTRL);
+-	writel(FEC_T_INC_40MHZ << FEC_T_INC_OFFSET, fpp->hwp + FEC_ATIME_INC);
+-	writel(FEC_T_PERIOD_ONE_SEC, fpp->hwp + FEC_ATIME_EVT_PERIOD);
++	fec_writel(FEC_T_CTRL_RESTART, fpp->hwp + FEC_ATIME_CTRL);
++	fec_writel(FEC_T_INC_40MHZ << FEC_T_INC_OFFSET,
++			fpp->hwp + FEC_ATIME_INC);
++	fec_writel(FEC_T_PERIOD_ONE_SEC, fpp->hwp + FEC_ATIME_EVT_PERIOD);
+ 	/* start counter */
+-	writel(FEC_T_CTRL_PERIOD_RST | FEC_T_CTRL_ENABLE,
++	fec_writel(FEC_T_CTRL_PERIOD_RST | FEC_T_CTRL_ENABLE,
+ 			fpp->hwp + FEC_ATIME_CTRL);
+-
+ 	return 0;
+ }
+ 
+@@ -170,19 +170,19 @@ void fec_ptp_stop(struct fec_ptp_private *priv)
+ {
+ 	struct fec_ptp_private *fpp = priv;
+ 
+-	writel(0, fpp->hwp + FEC_ATIME_CTRL);
+-	writel(FEC_T_CTRL_RESTART, fpp->hwp + FEC_ATIME_CTRL);
++	fec_writel(0, fpp->hwp + FEC_ATIME_CTRL);
++	fec_writel(FEC_T_CTRL_RESTART, fpp->hwp + FEC_ATIME_CTRL);
+ 
+ }
+ 
+ static void fec_get_curr_cnt(struct fec_ptp_private *priv,
+ 			struct ptp_rtc_time *curr_time)
+ {
+-	writel(FEC_T_CTRL_CAPTURE, priv->hwp + FEC_ATIME_CTRL);
+-	curr_time->rtc_time.nsec = readl(priv->hwp + FEC_ATIME);
++	fec_writel(FEC_T_CTRL_CAPTURE, priv->hwp + FEC_ATIME_CTRL);
++	curr_time->rtc_time.nsec = fec_readl(priv->hwp + FEC_ATIME);
+ 	curr_time->rtc_time.sec = priv->prtc;
+-	writel(FEC_T_CTRL_CAPTURE, priv->hwp + FEC_ATIME_CTRL);
+-	if (readl(priv->hwp + FEC_ATIME) < curr_time->rtc_time.nsec)
++	fec_writel(FEC_T_CTRL_CAPTURE, priv->hwp + FEC_ATIME_CTRL);
++	if (fec_readl(priv->hwp + FEC_ATIME) < curr_time->rtc_time.nsec)
+ 		curr_time->rtc_time.sec++;
+ }
+ 
+@@ -197,7 +197,7 @@ static void fec_set_1588cnt(struct fec_ptp_private *priv,
+ 	priv->prtc = fec_time->rtc_time.sec;
+ 
+ 	tempval = fec_time->rtc_time.nsec;
+-	writel(tempval, priv->hwp + FEC_ATIME);
++	fec_writel(tempval, priv->hwp + FEC_ATIME);
+ 	spin_unlock_irqrestore(&priv->cnt_lock, flags);
+ }
+ 
+@@ -226,7 +226,7 @@ void fec_ptp_store_txstamp(struct fec_ptp_private *priv)
+ 	struct fec_ptp_private *fpp = priv;
+ 	unsigned int reg;
+ 
+-	reg = readl(fpp->hwp + FEC_TS_TIMESTAMP);
++	reg = fec_readl(fpp->hwp + FEC_TS_TIMESTAMP);
+ 	fpp->txstamp.nsec = reg;
+ 	fpp->txstamp.sec = fpp->prtc;
+ }
+diff --git a/drivers/net/fec_1588.h b/drivers/net/fec_1588.h
+index d3ee431..abb9dde 100644
+--- a/drivers/net/fec_1588.h
++++ b/drivers/net/fec_1588.h
+@@ -24,6 +24,11 @@
+ 
+ #include <linux/circ_buf.h>
+ 
++#define fec_readl(addr) \
++	({ unsigned int __v = (*(volatile unsigned int *) (addr)); __v; })
++
++#define fec_writel(b, addr) (void)((*(volatile unsigned int *) (addr)) = (b))
++
+ /* FEC 1588 register bits */
+ #define FEC_T_CTRL_CAPTURE		0x00000800
+ #define FEC_T_CTRL_RESTART		0x00000200
+-- 
+1.6.4
+

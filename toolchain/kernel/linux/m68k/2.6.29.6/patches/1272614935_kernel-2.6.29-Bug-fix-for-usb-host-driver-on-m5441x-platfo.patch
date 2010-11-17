@@ -1,0 +1,54 @@
+From ab7e504aad47645ac975545ba71c01382b0c930d Mon Sep 17 00:00:00 2001
+From: Lanttor Guo <lanttor.guo@freescale.com>
+Date: Fri, 30 Apr 2010 16:08:55 +0800
+Subject: [PATCH] Bug fix for usb host driver on m5441x platform
+
+This bug fix reslove following issue:
+USB device inserted could not be auto-detected after Linux system booting up
+
+Signed-off-by: Lanttor Guo <lanttor.guo@freescale.com>
+---
+ arch/m68k/coldfire/m5441x/xcvr.c     |    7 +++----
+ arch/m68k/include/asm/mcf5441x_ccm.h |    1 +
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m5441x/xcvr.c b/arch/m68k/coldfire/m5441x/xcvr.c
+index b56ebac..79a20d9 100644
+--- a/arch/m68k/coldfire/m5441x/xcvr.c
++++ b/arch/m68k/coldfire/m5441x/xcvr.c
+@@ -33,10 +33,6 @@
+ static void xcvr_fsls_init(struct fsl_xcvr_ops *this)
+ {
+ 	pr_debug("%s: name=%s\n", __func__, this->name);
+-	/* Slew rate setting for OTG */
+-	MCF_GPIO_SRCR_FEC = 0x0f;
+-	MCF_GPIO_SRCR_TIMER = 0xc3;
+-	MCF_GPIO_SRCR_IRQ0 = 0x03;
+ 
+ 	/* Configure USB_DP_PDOWN/USB_DM_PDOWN */
+ 	MCF_GPIO_PAR_DBGH1 &= ~MCF_GPIO_PAR_DEBUGH1_DAT0;
+@@ -53,6 +49,9 @@ static void xcvr_fsls_init(struct fsl_xcvr_ops *this)
+ 		MCF_GPIO_PAR_TIMER_T0IN_MASK) |
+ 		MCF_GPIO_PAR_TIMER_T0IN_USBO_VBUSOC;
+ 
++	/* Enable on-chip transceiver pull-down */
++	MCF_CCM_UOCSR |= MCF_CCM_UOCSR_XPDE;
++
+ 	/* Setup USB_VBUS_OC signal to be active-low */
+ 	MCF_CCM_MISCCR &= (~MCF_CCM_MISCCR_USBOOC);
+ 	MCF_CCM_MISCCR |= MCF_CCM_MISCCR_USBPUE;
+diff --git a/arch/m68k/include/asm/mcf5441x_ccm.h b/arch/m68k/include/asm/mcf5441x_ccm.h
+index c3b3d7a..0c74575 100644
+--- a/arch/m68k/include/asm/mcf5441x_ccm.h
++++ b/arch/m68k/include/asm/mcf5441x_ccm.h
+@@ -63,6 +63,7 @@
+ #define MCF_CCM_MISCCR_LIMP		(0x1000)
+ #define MCF_CCM_MISCCR_BME		(0x0800)
+ #define MCF_CCM_MISCCR_BMT(x)		(((x)&0x0007)<<8)
++#define MCF_CCM_MISCCR_BMT_MASK		(0xF8FF)
+ #define MCF_CCM_MISCCR_BMT_65536	(0)
+ #define MCF_CCM_MISCCR_BMT_32768	(1)
+ #define MCF_CCM_MISCCR_BMT_16384	(2)
+-- 
+1.6.4
+

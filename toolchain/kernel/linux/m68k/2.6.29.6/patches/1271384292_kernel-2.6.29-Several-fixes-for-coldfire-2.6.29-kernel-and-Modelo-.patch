@@ -1,0 +1,183 @@
+From 46e261f00b128c3a3a05963fc4c4ce0a568ff2b5 Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Fri, 16 Apr 2010 10:18:12 +0800
+Subject: [PATCH 02/16] Several fixes for coldfire 2.6.29 kernel and Modelo platform
+
+Fix kernel build flags for m5441x and add m5441x page_mm support.
+Fix run time loader error on 5441x by setting the correct value for rambar1
+Fix the insmod error issue on 5441x by changing the PAGE authority
+
+Signed-off-by: Lanttor Guo <lanttor.guo@freescale.com>
+---
+ arch/m68k/Kconfig                  |    1 +
+ arch/m68k/Makefile                 |    4 ++--
+ arch/m68k/coldfire/common/head.S   |   21 +++++++++++----------
+ arch/m68k/include/asm/cf_pgtable.h |   11 +++++------
+ arch/m68k/include/asm/cfmmu.h      |    2 +-
+ arch/m68k/include/asm/page_mm.h    |    2 +-
+ 6 files changed, 21 insertions(+), 20 deletions(-)
+
+diff --git a/arch/m68k/Kconfig b/arch/m68k/Kconfig
+index b7162c2..e475515 100644
+--- a/arch/m68k/Kconfig
++++ b/arch/m68k/Kconfig
+@@ -423,6 +423,7 @@ endchoice
+ config M5441X
+ 	bool "MCF5441x support"
+ 	depends on COLDFIRE
++	select GENERIC_TIME
+ 	help
+ 	  This option will add support for the MCF5441x processor with mmu.
+ 
+diff --git a/arch/m68k/Makefile b/arch/m68k/Makefile
+index d87f3b3..45193bc 100644
+--- a/arch/m68k/Makefile
++++ b/arch/m68k/Makefile
+@@ -70,8 +70,8 @@ KBUILD_AFLAGS += -mcfv4e
+ endif
+ 
+ ifdef CONFIG_M5441X
+-KBUILD_CFLAGS += -march=isac -mcpu=54455 -msoft-float -g
+-KBUILD_AFLAGS += -march=isac -mcpu=54455 -msoft-float
++KBUILD_CFLAGS += -march=isac -mcpu=54418 -msoft-float -g
++KBUILD_AFLAGS += -march=isac -mcpu=54418 -msoft-float
+ endif
+ 
+ ifdef CONFIG_KGDB
+diff --git a/arch/m68k/coldfire/common/head.S b/arch/m68k/coldfire/common/head.S
+index cf6de1d..103ee44 100644
+--- a/arch/m68k/coldfire/common/head.S
++++ b/arch/m68k/coldfire/common/head.S
+@@ -57,7 +57,7 @@
+  *
+  * M5445x:
+  *    Data[0]: 0xF0000000 -> 0xFFFFFFFF	System regs
+- *    Data[1]: 0x40000000 -> 0x4FFFFFFF	SDRAM - uncached
++ *    Data[1]: 0x40000000 -> 0x4FFFFFFF	SDRAM - cached
+  *    Code[0]: Not Mapped
+  *    Code[1]: 0x40000000 -> 0x4FFFFFFF	SDRAM - cached
+  *
+@@ -66,6 +66,12 @@
+  *    Data[1]: 0x00000000 -> 0x0FFFFFFF	SDRAM - uncached
+  *    Code[0]: Not Mapped
+  *    Code[1]: 0x00000000 -> 0x0FFFFFFF	SDRAM - cached
++ *
++ * M5441X:
++ *    Data[0]: 0xE0000000 -> 0xFFFFFFFF System regs
++ *    Data[1]: 0x40000000 -> 0x4FFFFFFF SDRAM - cached
++ *    Code[0]: Not Mapped
++ *    Code[1]: 0x40000000 -> 0x4FFFFFFF SDRAM - cached
+  */
+ #if defined(CONFIG_M5445X)
+ #define ACR0_DEFAULT	#0xF00FA048   /* System Regs uncached/precise */
+@@ -82,8 +88,8 @@
+ #define ACR1_DEFAULT	#0x400FA028   /* SDRAM cached/copyback */
+ #define ACR4_DEFAULT	#0x00000000   /* Not mapped */
+ #define ACR5_DEFAULT	#0x00000000   /* Not mapped */
+-#define ACR2_DEFAULT	#0x400FA028   /* Instruction cached/copy-back */
+-#define ACR3_DEFAULT	#0x00000000   /* Not mapped */
++#define ACR2_DEFAULT	#0x00000000   /* Not mapped */
++#define ACR3_DEFAULT	#0x400FA028   /* Instruction cached/copy-back */
+ #define ACR6_DEFAULT	#0x00000000   /* Not mapped */
+ #define ACR7_DEFAULT	#0x00000000   /* Not mapped */
+ #endif
+@@ -249,11 +255,7 @@ ENTRY(_stext)
+ 
+ 	.long	BOOTINFOV_MAGIC
+ 	.long	0
+-#if CONFIG_SDRAM_BASE != PAGE_OFFSET
+-1:	jmp	__start-(0xc0000000-CONFIG_SDRAM_BASE)
+-#else
+ 1:	jmp	__start
+-#endif
+ 
+ .equ	kernel_pg_dir,_stext
+ .equ	.,_stext+0x1000
+@@ -274,7 +276,7 @@ ENTRY(__start)
+ 	subl	%a0,%a0
+ 	movel	%a0,%usp
+ 
+-#if defined(CONFIG_M5445X)
++#if defined(CONFIG_M5445X) || defined (CONFIG_M5441X)
+ #if defined(CONFIG_SRAM)
+ 	movel	#(CONFIG_SRAM_BASE+0x221), %d0
+ #else
+@@ -353,8 +355,7 @@ _loop_bss:
+ 		CONFIG_SDRAM_BASE, 0, 0, \
+ 		MMUTR_SG, MMUDR_SZ16M, MMUDR_DNCP, MMUDR_SP, MMUDR_R, MMUDR_W, \
+ 		0, MMUDR_LK, %d0
+-#endif
+-#if defined(CONFIG_M547X_8X)
++#elif defined(CONFIG_M547X_8X)
+         mmu_map (CONFIG_DMA_BASE + 0*1024*1024), \
+                 (CONFIG_SDRAM_BASE + 0*1024*1024), 0, 0, \
+                 MMUTR_SG, MMUDR_SZ1M, MMUDR_DNCP, MMUDR_SP, MMUDR_R, \
+diff --git a/arch/m68k/include/asm/cf_pgtable.h b/arch/m68k/include/asm/cf_pgtable.h
+index 652750a..6566838 100644
+--- a/arch/m68k/include/asm/cf_pgtable.h
++++ b/arch/m68k/include/asm/cf_pgtable.h
+@@ -68,6 +68,7 @@
+ #define _PAGE_DIRTY	(CF_PAGE_DIRTY)
+ #define _PAGE_READWRITE (CF_PAGE_WRITABLE \
+ 			| CF_PAGE_READABLE \
++			| CF_PAGE_SHARED \
+ 			| CF_PAGE_SYSTEM)
+ 
+ /* Compound page protection values. */
+@@ -83,23 +84,21 @@
+ 				 | CF_PAGE_WRITABLE \
+ 				 | CF_PAGE_READABLE \
+ 				 | CF_PAGE_EXEC \
+-				 | CF_PAGE_SYSTEM)
++				 | CF_PAGE_SYSTEM \
++				 | CF_PAGE_SHARED)
+ 
+ #define PAGE_KERNEL	__pgprot(CF_PAGE_VALID \
+ 				 | CF_PAGE_WRITABLE \
+ 				 | CF_PAGE_READABLE \
+ 				 | CF_PAGE_EXEC \
+ 				 | CF_PAGE_SYSTEM \
++				 | CF_PAGE_SHARED \
+ 				 | CF_PAGE_ACCESSED)
+ 
+ #define PAGE_COPY	__pgprot(CF_PAGE_VALID \
+ 				 | CF_PAGE_ACCESSED \
+-				 | CF_PAGE_DIRTY)
++				 | CF_PAGE_READABLE)
+ 
+-#define PAGE_COPY_X	__pgprot(CF_PAGE_VALID \
+-				 | CF_PAGE_ACCESSED \
+-				 | CF_PAGE_EXEC \
+-				 | CF_PAGE_DIRTY)
+ /*
+  * Page protections for initialising protection_map.  See mm/mmap.c
+  * for use.  In general, the bit positions are xwr, and P-items are
+diff --git a/arch/m68k/include/asm/cfmmu.h b/arch/m68k/include/asm/cfmmu.h
+index 9a6c4eb..6b445f8 100644
+--- a/arch/m68k/include/asm/cfmmu.h
++++ b/arch/m68k/include/asm/cfmmu.h
+@@ -8,7 +8,7 @@
+ #define __CF_MMU_H__
+ 
+ 
+-#if defined(CONIFG_M5445X) || defined(CONFIG_M547X_8X)
++#if defined(CONFIG_M5445X) || defined(CONFIG_M547X_8X)
+ #define MMU_BASE 0xE8000000
+ #elif defined(CONFIG_M5441X)
+ #define MMU_BASE 0xD8000000
+diff --git a/arch/m68k/include/asm/page_mm.h b/arch/m68k/include/asm/page_mm.h
+index e584163..47ba28e 100644
+--- a/arch/m68k/include/asm/page_mm.h
++++ b/arch/m68k/include/asm/page_mm.h
+@@ -2,7 +2,7 @@
+ #define _M68K_PAGE_H
+ 
+ /*#if defined(CONFIG_COLDFIRE)*/
+-#if defined(CONFIG_M5445X) || defined(CONFIG_M547X_8X)
++#if defined(CONFIG_M5445X) || defined(CONFIG_M547X_8X) || defined(CONFIG_M5441X)
+ #include <asm/cf_page.h>
+ #else
+ 
+-- 
+1.6.4
+

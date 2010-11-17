@@ -1,0 +1,86 @@
+From f6d17766732a833febe1058a4afb77afd9c6b5fd Mon Sep 17 00:00:00 2001
+From: Shrek Wu <b16972@freescale.com>
+Date: Fri, 6 Aug 2010 11:25:10 +0800
+Subject: [PATCH 2/4] Adjust the PCI ioremap on M54455EVB board
+
+The PCI map window need to be aligned, For example, PCI sata device BAT0
+need 256k aligned, BAT1 need 1M aligned, and BAT2 need 4M aligned
+after ioremap, otherwise some pci device cannot work, This patch try to make
+the PCI ioremp first to match this requirement.
+
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ arch/m68k/coldfire/m5445x/devices.c |   10 ++++++++++
+ arch/m68k/coldfire/m5445x/pci.c     |   10 ++++++++++
+ 2 files changed, 20 insertions(+), 0 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m5445x/devices.c b/arch/m68k/coldfire/m5445x/devices.c
+index 28da59b..b288114 100644
+--- a/arch/m68k/coldfire/m5445x/devices.c
++++ b/arch/m68k/coldfire/m5445x/devices.c
+@@ -32,6 +32,10 @@
+ #include <asm/mcfdspi.h>
+ #include <asm/cf_io.h>
+ 
++#ifndef CONFIG_M54455_PCI_initcall
++extern int pci_init(void);
++extern int pcibios_init(void);
++#endif
+ /* ATA Interrupt */
+ #define IRQ_ATA		(64 + 64 + 54)
+ 
+@@ -511,6 +515,12 @@ void m5445x_uarts_init(void)
+ 
+ static int __init init_BSP(void)
+ {
++#ifndef CONFIG_M54455_PCI_initcall
++#ifdef CONFIG_M54455
++	pci_init();
++	pcibios_init();
++#endif
++#endif
+ 	m5445x_uarts_init();
+ 	platform_add_devices(m5445x_devices, ARRAY_SIZE(m5445x_devices));
+ 	return 0;
+diff --git a/arch/m68k/coldfire/m5445x/pci.c b/arch/m68k/coldfire/m5445x/pci.c
+index 1787d06..ec3e3df 100644
+--- a/arch/m68k/coldfire/m5445x/pci.c
++++ b/arch/m68k/coldfire/m5445x/pci.c
+@@ -190,7 +190,11 @@ pcibios_fixup_bus(struct pci_bus *bus)
+  *
+  * Allocate/initialize low level pci bus/devices.
+  */
++#ifdef CONFIG_M54455_PCI_initcall
+ static int __init
++#else
++int
++#endif
+ pcibios_init(void)
+ {
+ 	struct pci_bus *bus;
+@@ -226,7 +230,11 @@ pcibios_init(void)
+  *
+  * Initialize the PCI Hardware.
+  */
++#ifdef CONFIG_M54455_PCI_initcall
+ static int __init
++#else
++int
++#endif
+ pci_init(void)
+ {
+ 	printk(KERN_INFO "pci_init\n");
+@@ -239,8 +247,10 @@ pci_init(void)
+ 	return 0;
+ }
+ 
++#ifdef CONFIG_M54455_PCI_initcall
+ /* low level hardware (first) */
+ arch_initcall(pci_init);
+ 
+ /* basic bios init (second) */
+ subsys_initcall(pcibios_init);
++#endif
+-- 
+1.6.4
+

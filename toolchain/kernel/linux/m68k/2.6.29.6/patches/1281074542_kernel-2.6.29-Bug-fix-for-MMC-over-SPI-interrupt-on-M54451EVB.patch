@@ -1,0 +1,40 @@
+From 043182be74a0649d43ac1937fd254de37ceb6640 Mon Sep 17 00:00:00 2001
+From: Shrek Wu <b16972@freescale.com>
+Date: Fri, 6 Aug 2010 14:02:22 +0800
+Subject: [PATCH 1/4] Bug fix for MMC over SPI interrupt on M54451EVB
+
+This patch fix the mmc over SPI interrupt issue on M54451EVB board.
+
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ arch/m68k/coldfire/m5445x/devices.c |    1 +
+ drivers/mmc/host/Kconfig            |    1 +
+ 2 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m5445x/devices.c b/arch/m68k/coldfire/m5445x/devices.c
+index 62ddbc0..28da59b 100644
+--- a/arch/m68k/coldfire/m5445x/devices.c
++++ b/arch/m68k/coldfire/m5445x/devices.c
+@@ -121,6 +121,7 @@ int mmc_spi_init(struct device *mmc_spi_device,
+ 				"eport_irq_lines[%d] IRQ\n", 7);
+ 		return -EBUSY;
+ 	}
++	printk(KERN_INFO " extern irq7 as sd card detect\n");
+ #endif
+ 	return 0;
+ }
+diff --git a/drivers/mmc/host/Kconfig b/drivers/mmc/host/Kconfig
+index c821bf8..e2bf44e 100644
+--- a/drivers/mmc/host/Kconfig
++++ b/drivers/mmc/host/Kconfig
+@@ -186,6 +186,7 @@ config MMC_SPI
+ 	  If unsure, or if your system has no SPI master driver, say N.
+ 
+ config M54451_SD_HW_DETECT
++	tristate "use extern IRQ7 to detect SD/MMC card"
+ 	depends on MMC_SPI && M54451
+ 	default y
+ 	help
+-- 
+1.6.4
+

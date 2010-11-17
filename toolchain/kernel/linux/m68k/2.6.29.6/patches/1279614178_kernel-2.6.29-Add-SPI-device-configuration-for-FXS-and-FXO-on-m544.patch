@@ -1,0 +1,126 @@
+From be33fa9e310efb2b4035f1cd8c179cd04353c413 Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Tue, 20 Jul 2010 16:22:58 +0800
+Subject: [PATCH 07/14] Add SPI device configuration for FXS and FXO on m54451 platform
+
+Add SPI device configuration for VOIP FXS and FXO on m54451 platform.
+So FXS and FXO drivers can use SPI subsystem interfaces for the SPI
+read and write operations. So as to fix the confliction between FXO/FXS
+with other SPI devices.
+
+Signed-off-by: Wang Huan <b18965@freescale.com>
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ arch/m68k/coldfire/m5445x/devices.c |   56 ++++++++++++++++++++++++++++++++++-
+ drivers/spi/Kconfig                 |   14 +++++++++
+ 2 files changed, 69 insertions(+), 1 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m5445x/devices.c b/arch/m68k/coldfire/m5445x/devices.c
+index 6833c96..37d23e1 100644
+--- a/arch/m68k/coldfire/m5445x/devices.c
++++ b/arch/m68k/coldfire/m5445x/devices.c
+@@ -5,7 +5,7 @@
+  *
+  * Based on the Freescale MXC devices.c
+  *
+- * Copyright 2007-2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2007-2010 Freescale Semiconductor, Inc. All Rights Reserved.
+  *	Kurt Mahan <kmahan@freescale.com>
+  *      Jason Jin Jason.Jin@freescale.com
+  *      Shrek Wu B16972@freescale.com
+@@ -146,6 +146,40 @@ static struct mmc_spi_platform_data mcf54451_mmc_pdata = {
+ };
+ #endif
+ 
++#if defined(CONFIG_VOIP_FXS) || defined(CONFIG_VOIP_FXS_MODULE)
++static struct coldfire_dspi_chip fxs_chip_info = {
++	.mode = SPI_MODE_3,
++	.bits_per_word = 8,
++	.void_write_data = 0,
++	.dbr = 0,
++	.pbr = 1,
++	.br = 1,
++	.pcssck = 0,
++	.pasc = 0,
++	.pdt = 0,
++	.cssck = 0,
++	.asc = 0,
++	.dt = 0,
++};
++#endif
++
++#if defined(CONFIG_VOIP_FXO) || defined(CONFIG_VOIP_FXO_MODULE)
++static struct coldfire_dspi_chip fxo_chip_info = {
++	.mode = SPI_MODE_3,
++	.bits_per_word = 8,
++	.void_write_data = 0,
++	.dbr = 0,
++	.pbr = 1,
++	.br = 1,
++	.pcssck = 0,
++	.pasc = 0,
++	.pdt = 0,
++	.cssck = 0,
++	.asc = 0,
++	.dt = 0,
++};
++#endif
++
+ static struct spi_board_info spi_board_info[] = {
+ #if defined(CONFIG_SND_COLDFIRE) || defined(CONFIG_SND_COLDFIRE_MODULE)
+ 	{
+@@ -159,6 +193,26 @@ static struct spi_board_info spi_board_info[] = {
+ 	},
+ #endif
+ 
++#if defined(CONFIG_VOIP_FXS) || defined(CONFIG_VOIP_FXS_MODULE)
++	{
++		.modalias = "spi_fxs",
++		.max_speed_hz = 10000000, /* max spi clock in HZ */
++		.bus_num = 1,
++		.chip_select = 2,
++		.controller_data = &fxs_chip_info
++	},
++#endif
++
++#if defined(CONFIG_VOIP_FXO) || defined(CONFIG_VOIP_FXO_MODULE)
++	{
++		.modalias = "spi_fxo",
++		.max_speed_hz = 10000000, /* max spi clock in HZ */
++		.bus_num = 1,
++		.chip_select = 3,
++		.controller_data = &fxo_chip_info
++	},
++#endif
++
+ #if defined(CONFIG_SPI_SPIDEV) || defined(CONFIG_SPI_SPIDEV_MODULE)
+ 	{
+ 		.modalias = "spidev",
+diff --git a/drivers/spi/Kconfig b/drivers/spi/Kconfig
+index 404835d..631452f 100644
+--- a/drivers/spi/Kconfig
++++ b/drivers/spi/Kconfig
+@@ -151,6 +151,20 @@ config SPI_COLDFIRE_DSPI_EDMA
+ 	help
+ 	  Say "yes" if you want DSPI master driver to use eDMA for transfers.
+ 
++config VOIP_FXS
++	boolean "Coldfire VoIP FXS driver"
++	depends on SPI_MASTER && COLDFIRE && SPI_DSPI
++	default n
++	help
++	  Say "yes" if you want VoIP FXS driver to use DSPI for transfers.
++
++config VOIP_FXO
++	boolean "Coldfire VoIP FXO driver"
++	depends on SPI_MASTER && COLDFIRE && SPI_DSPI
++	default n
++	help
++	  Say "yes" if you want VoIP FXO driver to use DSPI for transfers.
++
+ config SPI_IMX
+ 	tristate "Freescale iMX SPI controller"
+ 	depends on ARCH_IMX && EXPERIMENTAL
+-- 
+1.6.4
+

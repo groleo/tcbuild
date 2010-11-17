@@ -1,0 +1,429 @@
+From d12cedfc1e60b84ca369595075b71f22115ecbb0 Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Wed, 18 Aug 2010 16:30:29 +0800
+Subject: [PATCH 1/2] m547x pci code and compile warning clean up
+
+This patch clean up the m547x pci code. fixed the pci configuration
+read/write bug, Alloc space for the globally used pci_bus_info instead
+of the local variable. Set the PCI XLB priority to highest to avoid the
+occasional booting hang-up. But for watchdog reset, the coldfire core
+need to be set to high priority, so the XLB priority need to be disabled
+for watchdog reset.
+
+This patch also clean up some compiling warnings.
+
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ arch/m68k/coldfire/m547x/config.c   |    5 ++
+ arch/m68k/coldfire/m547x/pci.c      |  128 ++++++++++++++++++-----------------
+ arch/m68k/include/asm/548x_pci.h    |    2 +-
+ arch/m68k/include/asm/cf_io.h       |    4 +-
+ arch/m68k/include/asm/cf_tlbflush.h |    2 +-
+ arch/m68k/kernel/dma.c              |    2 +-
+ drivers/watchdog/mcf_wdt.c          |    6 ++
+ 7 files changed, 83 insertions(+), 66 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m547x/config.c b/arch/m68k/coldfire/m547x/config.c
+index 2e61375..a1a3111 100644
+--- a/arch/m68k/coldfire/m547x/config.c
++++ b/arch/m68k/coldfire/m547x/config.c
+@@ -303,6 +303,11 @@ void coldfire_reboot(void)
+ {
+ 	/* disable interrupts and enable the watchdog */
+ 	printk(KERN_INFO "Rebooting\n");
++
++	/*Disable the XLB priority settings, then set the core to same priority level
++	 * as other XLB masters, otherwise the watchdog may fail to reset.*/
++	MCF_XARB_PRIEN = 0;
++	asm("tpf");
+ 	asm("movew #0x2700, %sr\n");
+ 	MCF_GPT_GMS0 = MCF_GPT_GMS_WDEN | MCF_GPT_GMS_CE | MCF_GPT_GMS_TMS(4);
+ 	MCF_GPT_GCIR0 = (0x0A << 16) | 0x01;
+diff --git a/arch/m68k/coldfire/m547x/pci.c b/arch/m68k/coldfire/m547x/pci.c
+index 3d1ae67..c3da2cb 100644
+--- a/arch/m68k/coldfire/m547x/pci.c
++++ b/arch/m68k/coldfire/m547x/pci.c
+@@ -1,7 +1,7 @@
+ /*
+  * ColdFire 547x/548x PCI Host Controller functions
+  *
+- * Copyright 2005-2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2005-2010 Freescale Semiconductor, Inc. All Rights Reserved.
+  * Shrek Wu b16972@freescale.com
+  * This code is based on the 2.6.10 version of pci.c
+  *
+@@ -41,8 +41,7 @@
+ 
+ 
+ #undef DEBUG
+-/*#define DEBUG*/
+-
++/*define DEBUG*/
+ #ifdef DEBUG
+ /*#define DBG(x...) printk(KERN_DEBUG x)*/
+ #define DBG(x...) printk(x)
+@@ -175,7 +174,8 @@ static int read_config_byte(/*struct pci_dev *dev*/
+ 	slot = PCI_SLOT(devfn);
+ 	if (slot == BRIDGE_SLOT) {
+ 		if (where <= 0x40)
+-			*value = *(volatile u8 *) (PCI_HDR_BASE + (where ^ 3));
++			*value = *(volatile u8 *) (PCI_HDR_BASE +
++						(where & 0xfc) + (where & 3));
+ 		else
+ 			*value = 0;
+ 	} else {
+@@ -187,13 +187,12 @@ static int read_config_byte(/*struct pci_dev *dev*/
+ 			*value = *(volatile u8 *) (HOST_CFG_BASE + (where & 3));
+ 		}
+ 	}
+-	__asm__ __volatile__("nop");
+-	__asm__ __volatile__("nop");
++	__asm("tpf");
+ 	MCF_PCICAR &= ~MCF_PCICAR_E;
+ 
+-	DBG("PCI: read_config_byte bus=%d, devfn=%d,"
++	DBG("PCI: read_config_byte bus=%d, dev=%d, fn=%d,"
+ 		" addr=0x%02X, val=0x%02X, ret=%02X\n",
+-	    bus->number, devfn, where, *value, result);
++	bus->number, PCI_SLOT(devfn), PCI_FUNC(devfn), where, *value, result);
+ 
+ 	return result;
+ }
+@@ -221,7 +220,7 @@ static int read_config_word(/*struct pci_dev *dev*/
+ 			if (where <= 0x3f)
+ 				*value =
+ 				    *(volatile u16 *) (PCI_HDR_BASE +
+-						       (where ^ 2));
++					(where & 0xfc) + (where & 2));
+ 			else
+ 				*value = 0;
+ 		} else {
+@@ -236,13 +235,12 @@ static int read_config_word(/*struct pci_dev *dev*/
+ 			}
+ 		}
+ 	}
+-	__asm__ __volatile__("nop");
+-	__asm__ __volatile__("nop");
++	__asm("tpf");
+ 	MCF_PCICAR &= ~MCF_PCICAR_E;
+ 
+-	DBG("PCI: read_config_word bus=%d, devfn=%d,"
++	DBG("PCI: read_config_word bus=%d, dev=%d, fn=%d,"
+ 		" addr=0x%02X, val=0x%04X ret=%02X\n",
+-	    bus->number, devfn, where, *value, result);
++	bus->number, PCI_SLOT(devfn), PCI_FUNC(devfn), where, *value, result);
+ 
+ 	return result;
+ }
+@@ -272,8 +270,7 @@ static int read_config_dword(/*struct pci_dev *dev*/
+ 				    *(volatile u32 *) (PCI_HDR_BASE + where);
+ 			else
+ 				*value = 0;
+-			__asm__ __volatile__("nop");
+-			__asm__ __volatile__("nop");
++			__asm("tpf");
+ 		} else {
+ 			address = mk_conf_addr(bus, devfn, where);
+ 			if (!address)
+@@ -282,11 +279,9 @@ static int read_config_dword(/*struct pci_dev *dev*/
+ 				MCF_PCICAR = address;
+ 				*value = le32_to_cpu(*(volatile u32 *)
+ 						     (HOST_CFG_BASE));
+-				__asm__ __volatile__("nop");
+-				__asm__ __volatile__("nop");
++				__asm("tpf");
+ 				if (bus->number != 0 && revision < 1) {
+ 					volatile u32 temp;
+-
+ 					MCF_PCICAR |= 0xff0000;
+ 					temp = *(volatile u32 *)
+ 						(HOST_CFG_BASE);
+@@ -297,9 +292,9 @@ static int read_config_dword(/*struct pci_dev *dev*/
+ 
+ 	MCF_PCICAR &= ~MCF_PCICAR_E;
+ 
+-	DBG("PCI: read_config_dword bus=%d, devfn=%d, "
++	DBG("PCI: read_config_dword bus=%d, dev=%d, fn=%d, "
+ 		"addr=0x%02X, value=0x%08X ret=%02X\n",
+-	     bus->number, devfn, where, *value, result);
++	bus->number, PCI_SLOT(devfn), PCI_FUNC(devfn), where, *value, result);
+ 
+ 	return result;
+ }
+@@ -321,7 +316,8 @@ static int write_config_byte(/*struct pci_dev *dev*/
+ 	slot = PCI_SLOT(devfn);
+ 	if (slot == BRIDGE_SLOT) {
+ 		if (where <= 0x40)
+-			*(volatile u8 *) (PCI_HDR_BASE + (where ^ 3)) = value;
++			*(volatile u8 *) (PCI_HDR_BASE + (where & 0xfc)
++					+ (where & 3)) = value;
+ 	} else {
+ 		address = mk_conf_addr(bus, devfn, where);
+ 		if (!address)
+@@ -331,13 +327,12 @@ static int write_config_byte(/*struct pci_dev *dev*/
+ 			*(volatile u8 *) (HOST_CFG_BASE + (where & 3)) = value;
+ 		}
+ 	}
+-	__asm__ __volatile__("nop");
+-	__asm__ __volatile__("nop");
++	__asm("tpf");
+ 	MCF_PCICAR &= ~MCF_PCICAR_E;
+ 
+-	DBG("PCI: write_config_byte bus=%d, devfn=%d, "
++	DBG("PCI: write_config_byte bus=%d, dev=%d, fn=%d, "
+ 		"addr=0x%02X, value=0x%02X ret=%02X\n",
+-	     bus->number, devfn, where, value, result);
++	bus->number, PCI_SLOT(devfn), PCI_FUNC(devfn), where, value, result);
+ 
+ 	return result;
+ }
+@@ -362,8 +357,8 @@ static int write_config_word(/*struct pci_dev *dev*/
+ 		slot = PCI_SLOT(devfn);
+ 		if (slot == BRIDGE_SLOT) {
+ 			if (where <= 0x3f)
+-				*(volatile u16 *) (PCI_HDR_BASE + (where ^ 2)) =
+-				    value;
++				*(volatile u16 *) (PCI_HDR_BASE +
++					(where & 0xfc) + (where & 2)) = value;
+ 		} else {
+ 			address = mk_conf_addr(bus, devfn, where);
+ 			if (!address)
+@@ -376,13 +371,12 @@ static int write_config_word(/*struct pci_dev *dev*/
+ 			}
+ 		}
+ 	}
+-	__asm__ __volatile__("nop");
+-	__asm__ __volatile__("nop");
++	__asm("tpf");
+ 	MCF_PCICAR &= ~MCF_PCICAR_E;
+ 
+-	DBG("PCI: write_config_word bus=%d, devfn=%d, "
++	DBG("PCI: write_config_word bus=%d, dev=%d, fn=%d, "
+ 		"addr=0x%02X, value=0x%04X ret=%02X\n",
+-	     bus->number, devfn, where, value, result);
++	bus->number, PCI_SLOT(devfn), PCI_FUNC(devfn), where, value, result);
+ 
+ 	return result;
+ }
+@@ -420,8 +414,7 @@ static int write_config_dword(/*struct pci_dev *dev*/
+ 			}
+ 		}
+ 	}
+-	__asm__ __volatile__("nop");
+-	__asm__ __volatile__("nop");
++	__asm("tpf");
+ 	MCF_PCICAR &= ~MCF_PCICAR_E;
+ 
+ 	DBG("PCI: write_config_dword dev=%d, fn=%d,"
+@@ -822,12 +815,17 @@ static void __init configure_device(struct pci_dev *dev)
+ 			PCI_CACHE_LINE_SIZE, PCI_CACHE_LINE);
+ #else
+ 	pci_write_config_byte(dev, PCI_CACHE_LINE_SIZE, PCI_CACHE_LINE);
++
++	MCF_PCICR1 = MCF_PCICR1_LATTIMER(0xF8) |
++		MCF_PCICR1_CACHELINESIZE(PCI_CACHE_LINE);
++
+ #endif
+ }
+ 
++
+ struct pci_bus_info *__init init_coldfire_pci(void)
+ {
+-	static struct pci_bus_info bus;
++	struct pci_bus_info *bus;
+ 	int i;
+ 	int pci_mem_va;
+ 	static char irq_name[N_IRQS][15];
+@@ -840,25 +838,32 @@ struct pci_bus_info *__init init_coldfire_pci(void)
+ 		revision, HOST_MEM_BASE,
+ 		PCI_MEM_SIZE - 1, 0, PCI_IO_SIZE - 1);
+ 
++	bus = (struct pci_bus_info *)kmalloc(sizeof(struct pci_bus_info),
++			GFP_KERNEL);
++	if (!bus) {
++		printk(KERN_ERR "can not alloc mem for pci bus!\n");
++		return NULL;
++	}
++
+ 	/* Setup bus info structure. */
+-	memset(&bus, 0, sizeof(struct pci_bus_info));
++	memset(bus, 0, sizeof(struct pci_bus_info));
+ 
+ 	/* Request intiator memory resource */
+-	bus.mem_space.start = PCI_MEM_BASE;/*HOST_MEM_BASE;*/
+-	bus.mem_space.end = bus.mem_space.start + PCI_MEM_SIZE - 1;
+-	bus.mem_space.name = "PCI Bus #0";
++	bus->mem_space.start = PCI_MEM_BASE;/*HOST_MEM_BASE;*/
++	bus->mem_space.end = bus->mem_space.start + PCI_MEM_SIZE - 1;
++	bus->mem_space.name = "PCI Bus #0";
+ 	if (request_resource(&iomem_resource,
+-				&bus.mem_space) != 0) {
++				&(bus->mem_space)) != 0) {
+ 		printk("Failed to request bridge iomem resource\n");
+ 		return NULL;
+ 	}
+ 
+ 	/* Request intiator memory resource */
+-	bus.io_space.start = 0;
+-	bus.io_space.end = bus.io_space.start + PCI_IO_SIZE - 1;
+-	bus.io_space.name =  "PCI Bus #0";
++	bus->io_space.start = 0;
++	bus->io_space.end = bus->io_space.start + PCI_IO_SIZE - 1;
++	bus->io_space.name =  "PCI Bus #0";
+ 	if (request_resource(&ioport_resource,
+-				&bus.io_space) != 0) {
++				&(bus->io_space)) != 0) {
+ 		printk(KERN_ERR "Failed to request bridge "
+ 			"ioport resource\n");
+ 		return NULL;
+@@ -868,25 +873,22 @@ struct pci_bus_info *__init init_coldfire_pci(void)
+ 	 * problem in linux when it tries to configure/find resources
+ 	 * for the pci devices.  Both registers need to be reset.
+ 	 */
+-	MCF_PCIGSCR = 0x1;
++	MCF_PCIGSCR |= 0x1;
+ 	MCF_PCITCR = 0x00000000;
+ 
+ 	/* Set up the arbiter */
+-	MCF_PCIARB_PACR = 0 /*MCF_PCIARB_PACR_PKMD*/
+-		| MCF_PCIARB_PACR_INTMPRI
+-		| MCF_PCIARB_PACR_INTMINTEN
+-		| MCF_PCIARB_PACR_EXTMPRI(0x1F)
+-		| MCF_PCIARB_PACR_EXTMINTEN(0x1F);
++	MCF_PCIARB_PACR = 0; /*MCF_PCIARB_PACR_PKMD*/
+ 
+ 	/* GNT and REQ */
+ 	MCF_PAR_PCIBG = 0x3FF;
+ 	MCF_PAR_PCIBR = 0x3FF;
+ 
+ 	/* Enable bus mastering, memory access and MWI */
+-	MCF_PCISCR = MCF_PCISCR_B | MCF_PCISCR_M | MCF_PCISCR_MW;
++	MCF_PCISCR = (MCF_PCISCR_B | MCF_PCISCR_M);
+ 
+ 	/* Setup burst parameters */
+-	MCF_PCICR1 = MCF_PCICR1_LATTIMER(32) |
++	/*The offset 0x0e normally was header_type, set it to 0 and fix later*/
++	MCF_PCICR1 = MCF_PCICR1_LATTIMER(0x00) |
+ 		MCF_PCICR1_CACHELINESIZE(PCI_CACHE_LINE);
+ 
+ 	MCF_PCICR2 = 0;
+@@ -910,11 +912,7 @@ struct pci_bus_info *__init init_coldfire_pci(void)
+ 	/* Target PCI DMA Windows */
+ 	MCF_PCIBAR1   = PCI_DMA_BASE;
+ 	MCF_PCITBATR1 = HOST_DMA_BASE | MCF_PCITBATR1_EN;
+-	MCF_PCIBAR0   = MCF_RAMBAR0;;
+-	MCF_PCITBATR0 = MCF_RAMBAR0 | MCF_PCITBATR0_EN;
+-	DBG("PCI TCR %x,MCF_PCIBAR1 %x,MCF_PCITBATR1 %x."
+-		"MCF_PCIBAR0 %x,MCF_PCITBATR9 %x\n", MCF_PCITCR, MCF_PCIBAR1,
+-		MCF_PCITBATR1, MCF_PCIBAR0, MCF_PCITBATR0);
++
+ 	/* Enable internal PCI controller interrupts */
+ 	MCF_ICR(ISC_PCI_XLB) = ILP_PCI_XLB;
+ 	/*request_irq(64+ISC_PCI_XLB, xlb_interrupt,
+@@ -976,7 +974,7 @@ struct pci_bus_info *__init init_coldfire_pci(void)
+ 
+ 	/* Clear PCI Reset and wait for devices to reset */
+ 	MCF_PCIGSCR &= ~MCF_PCIGSCR_PR;
+-	schedule_timeout((5 * HZ) / 10);
++	schedule_timeout((5 * HZ));
+ 	/* Remap initiator windows (should be 1:1 to the physical memory) */
+ 	pci_mem_va = (int) ioremap_nocache(HOST_MEM_BASE,
+ 			PCI_MEM_SIZE + PCI_IO_SIZE);
+@@ -988,10 +986,18 @@ struct pci_bus_info *__init init_coldfire_pci(void)
+ 	BUG_ON(pci_mem_va != HOST_MEM_BASE);
+ 
+ 	/* Setup bios32 and pci bus driver callbacks */
+-	bus.m68k_pci_ops = &bus_ops;
+-	bus.fixup = coldfire_fixup;
+-	bus.conf_device = configure_device;
++	bus->m68k_pci_ops = &bus_ops;
++	bus->fixup = coldfire_fixup;
++	bus->conf_device = configure_device;
++
++	/*
++	* improve the PCI priority on XLB bus, otherwise the pci configuration space
++	* access may hang-up the linux kernel booting up, disable the priority if want
++	* to use the watchdog reset.
++	*/
++	MCF_XARB_PRIEN = 0xff;
++	MCF_XARB_PRI &= 0xffff0fff;
+ 
+-	return &bus;
++	return bus;
+ }
+ 
+diff --git a/arch/m68k/include/asm/548x_pci.h b/arch/m68k/include/asm/548x_pci.h
+index 6cd883f..9423af1 100644
+--- a/arch/m68k/include/asm/548x_pci.h
++++ b/arch/m68k/include/asm/548x_pci.h
+@@ -93,7 +93,7 @@ struct scatterlist;
+ 
+ static inline void pcibios_align_resource(
+ 	void *data, struct resource *res,
+-	unsigned long size, unsigned long align)
++	resource_size_t size, resource_size_t align)
+ {
+ }
+ 
+diff --git a/arch/m68k/include/asm/cf_io.h b/arch/m68k/include/asm/cf_io.h
+index b2c7a46..2f0a124 100644
+--- a/arch/m68k/include/asm/cf_io.h
++++ b/arch/m68k/include/asm/cf_io.h
+@@ -74,9 +74,9 @@
+ #define insb(a, b, c)  \
+ 	pci_insb((volatile unsigned char *)a, (unsigned char *)b, c)
+ #define insw(a, b, c)  \
+-	pci_insw((volatile unsigned short *)a, (const unsigned short *)b, c)
++	pci_insw((volatile unsigned short *)a, (unsigned short *)b, c)
+ #define insl(a, b, c)  \
+-	pci_insl((volatile unsigned long *)a, (const unsigned long *)b, c)
++	pci_insl((volatile unsigned long *)a, (unsigned long *)b, c)
+ #define outsb(a, b, c) \
+ 	pci_outsb((volatile unsigned char *)a, (const unsigned char *)b, c)
+ #define outsw(a, b, c) \
+diff --git a/arch/m68k/include/asm/cf_tlbflush.h b/arch/m68k/include/asm/cf_tlbflush.h
+index ae253d4..f568e8f 100644
+--- a/arch/m68k/include/asm/cf_tlbflush.h
++++ b/arch/m68k/include/asm/cf_tlbflush.h
+@@ -32,7 +32,7 @@ static inline void flush_tlb_page(struct vm_area_struct *vma,
+ }
+ /* Flush a range of pages from TLB. */
+ 
+-static inline void flush_tlb_range(struct mm_struct *mm,
++static inline void flush_tlb_range(struct vm_area_struct *mm,
+ 		      unsigned long start, unsigned long end)
+ {
+ 	preempt_disable();
+diff --git a/arch/m68k/kernel/dma.c b/arch/m68k/kernel/dma.c
+index d07541a..8ea5c0c 100644
+--- a/arch/m68k/kernel/dma.c
++++ b/arch/m68k/kernel/dma.c
+@@ -126,7 +126,7 @@ EXPORT_SYMBOL(dma_sync_sg_for_device);
+ dma_addr_t dma_map_single(struct device *dev, void *addr, size_t size,
+ 			  enum dma_data_direction dir)
+ {
+-	dma_addr_t handle = virt_to_bus(addr);
++	dma_addr_t handle = (dma_addr_t)virt_to_bus(addr);
+ 
+ 	dma_sync_single_for_device(dev, handle, size, dir);
+ 	return handle;
+diff --git a/drivers/watchdog/mcf_wdt.c b/drivers/watchdog/mcf_wdt.c
+index 4a8e432..c0a465a 100644
+--- a/drivers/watchdog/mcf_wdt.c
++++ b/drivers/watchdog/mcf_wdt.c
+@@ -222,6 +222,12 @@ mcf_wdt_release(struct inode *inode, struct file *file)
+ 	clear_bit(WDT_IN_USE, &wdt_status);
+ 	clear_bit(WDT_OK_TO_CLOSE, &wdt_status);
+ 
++#ifdef CONFIG_M547X_8X
++	/*disable the XLB priority, otherwise the watchdog reset may fail*/
++	MCF_XARB_PRIEN = 0;
++	asm("tpf");
++#endif
++
+ 	return 0;
+ }
+ 
+-- 
+1.6.4
+

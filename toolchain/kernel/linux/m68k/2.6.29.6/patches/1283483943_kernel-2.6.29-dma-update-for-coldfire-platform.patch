@@ -1,0 +1,88 @@
+From 741ba54687a2bf7f27a44cad8302d0dc8621f58f Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Fri, 3 Sep 2010 11:19:03 +0800
+Subject: [PATCH 2/3] dma update for coldfire platform
+
+add dma unmap for coldfire platform.
+
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ arch/m68k/include/asm/dma-mapping_mm.h |    9 +++++++--
+ arch/m68k/kernel/dma.c                 |    4 ++--
+ 2 files changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/arch/m68k/include/asm/dma-mapping_mm.h b/arch/m68k/include/asm/dma-mapping_mm.h
+index 9d45126..7ee7e85 100644
+--- a/arch/m68k/include/asm/dma-mapping_mm.h
++++ b/arch/m68k/include/asm/dma-mapping_mm.h
+@@ -31,6 +31,9 @@ extern void *dma_alloc_coherent(struct device *, size_t,
+ extern void dma_free_coherent(struct device *, size_t,
+ 			      void *, dma_addr_t);
+ 
++extern void dma_sync_single_for_device(struct device *, dma_addr_t, size_t,
++				       enum dma_data_direction);
++
+ static inline void *dma_alloc_noncoherent(struct device *dev, size_t size,
+ 					  dma_addr_t *handle, gfp_t flag)
+ {
+@@ -41,6 +44,7 @@ static inline void dma_free_noncoherent(struct device *dev, size_t size,
+ {
+ 	dma_free_coherent(dev, size, addr, handle);
+ }
++
+ static inline void dma_cache_sync(struct device *dev, void *vaddr, size_t size,
+ 				  enum dma_data_direction dir)
+ {
+@@ -52,6 +56,7 @@ extern dma_addr_t dma_map_single(struct device *, void *, size_t,
+ static inline void dma_unmap_single(struct device *dev, dma_addr_t addr,
+ 				    size_t size, enum dma_data_direction dir)
+ {
++	dma_sync_single_for_device(dev, addr, size, dir);
+ }
+ 
+ extern dma_addr_t dma_map_page(struct device *, struct page *,
+@@ -60,6 +65,7 @@ extern dma_addr_t dma_map_page(struct device *, struct page *,
+ static inline void dma_unmap_page(struct device *dev, dma_addr_t address,
+ 				  size_t size, enum dma_data_direction dir)
+ {
++	dma_sync_single_for_device(dev, address, size, dir);
+ }
+ 
+ extern int dma_map_sg(struct device *, struct scatterlist *, int,
+@@ -67,10 +73,9 @@ extern int dma_map_sg(struct device *, struct scatterlist *, int,
+ static inline void dma_unmap_sg(struct device *dev, struct scatterlist *sg,
+ 				int nhwentries, enum dma_data_direction dir)
+ {
++	dma_map_sg(dev, sg, nhwentries, dir);
+ }
+ 
+-extern void dma_sync_single_for_device(struct device *, dma_addr_t, size_t,
+-				       enum dma_data_direction);
+ extern void dma_sync_sg_for_device(struct device *, struct scatterlist *, int,
+ 				   enum dma_data_direction);
+ 
+diff --git a/arch/m68k/kernel/dma.c b/arch/m68k/kernel/dma.c
+index 8fea5df..17940ec 100644
+--- a/arch/m68k/kernel/dma.c
++++ b/arch/m68k/kernel/dma.c
+@@ -81,7 +81,7 @@ void dma_free_coherent(struct device *dev, size_t size,
+ 	pr_debug("dma_free_coherent: %p, %x\n", addr, handle);
+ #if defined(CONFIG_M5445X) || defined(CONFIG_M547X_8X) || \
+     defined(CONFIG_M5441X)
+-	kfree(addr);
++	kfree((void *)handle);
+ #else
+ 	vfree(addr);
+ #endif
+@@ -99,7 +99,7 @@ void dma_sync_single_for_device(struct device *dev, dma_addr_t handle,
+ 		cache_clear(handle, size);
+ 		break;
+ 	case PCI_DMA_BIDIRECTIONAL:
+-		flush_cache_all();
++		flush_dcache();
+ 		break;
+ 	default:
+ 		if (printk_ratelimit())
+-- 
+1.6.4
+

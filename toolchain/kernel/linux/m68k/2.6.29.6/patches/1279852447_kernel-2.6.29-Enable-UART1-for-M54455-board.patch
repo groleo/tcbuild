@@ -1,0 +1,43 @@
+From 5dd9cf56dbf1606b61ff974199d39c2746b97650 Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Fri, 23 Jul 2010 10:34:07 +0800
+Subject: [PATCH 10/14] Enable UART1 for M54455 board.
+
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ arch/m68k/coldfire/m5445x/devices.c |    6 ++++++
+ arch/m68k/include/asm/mcfuart.h     |    1 +
+ 2 files changed, 7 insertions(+), 0 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m5445x/devices.c b/arch/m68k/coldfire/m5445x/devices.c
+index 37d23e1..62ddbc0 100644
+--- a/arch/m68k/coldfire/m5445x/devices.c
++++ b/arch/m68k/coldfire/m5445x/devices.c
+@@ -458,6 +458,12 @@ static struct mcf_platform_uart m5445x_uart_platform[] = {
+ 		.mapbase	= MCFUART_BASE1,
+ 		.irq		= MCFINT_VECBASE + MCFINT_UART0,
+ 	},
++#ifdef CONFIG_M54455
++	{
++		.mapbase	= MCFUART_BASE2,
++		.irq		= MCFINT_VECBASE + MCFINT_UART1,
++	},
++#endif
+ 	{ },
+ };
+ 
+diff --git a/arch/m68k/include/asm/mcfuart.h b/arch/m68k/include/asm/mcfuart.h
+index f896018..ea0ecee 100644
+--- a/arch/m68k/include/asm/mcfuart.h
++++ b/arch/m68k/include/asm/mcfuart.h
+@@ -55,6 +55,7 @@
+ #define MCFUART_BASE3           0xfc068000      /* Base address of UART3 */
+ #define MCFINT_VECBASE          64
+ #define MCFINT_UART0            26
++#define MCFINT_UART1            27
+ #elif defined(CONFIG_M547X_8X)
+ #define MCFUART_BASE1           0x8600          /* Base address of UART1 */
+ #define MCFUART_BASE2           0x8700          /* Base address of UART2 */
+-- 
+1.6.4
+

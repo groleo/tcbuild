@@ -1,0 +1,116 @@
+From 41f53d75554bbaa7b00db43554a275f10f4c1c72 Mon Sep 17 00:00:00 2001
+From: Shrek Wu <b16972@freescale.com>
+Date: Thu, 10 Jun 2010 11:35:06 +0800
+Subject: [PATCH] Fix the modelo switch port 0 down up issue
+
+When down then up port0 of the switch, the port0 can not work.
+This patch fix this issue by reseting the three ports.
+
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ drivers/net/modelo_switch.c |   28 +++++++++++++---------------
+ 1 files changed, 13 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/net/modelo_switch.c b/drivers/net/modelo_switch.c
+index 000a36b..dea4b49 100644
+--- a/drivers/net/modelo_switch.c
++++ b/drivers/net/modelo_switch.c
+@@ -306,8 +306,10 @@ int esw_update_atable_static(unsigned char *mac_addr,
+ 	/* Now search all the entries in the selected block */
+ 	for (entry = block_index; entry < index_end; entry++) {
+ 		read_atable(fep, entry, &read_lo, &read_hi);
++#ifdef switch_debug
+ 		printk(KERN_ERR "LO = %X\n", read_lo);
+ 		printk(KERN_ERR "HI = %X\n", read_hi);
++#endif
+ 		/*
+ 		 * MAC address matched, so update the
+ 		 * existing entry
+@@ -3640,7 +3642,6 @@ switch_enet_open(struct net_device *dev)
+ 	volatile switch_t *fecp;
+ 
+ 	fecp = (volatile switch_t *)fep->hwp;
+-	printk(KERN_INFO "%s\n", __func__);
+ 	/* I should reset the ring buffers here, but I don't yet know
+ 	 * a simple way to do that.
+ 	 */
+@@ -3704,7 +3705,6 @@ switch_enet_close(struct net_device *dev)
+ {
+ 	struct switch_enet_private *fep = netdev_priv(dev);
+ 
+-	printk(KERN_INFO "%s\n", __func__);
+ 	/* Don't know what to do yet.*/
+ 	fep->opened = 0;
+ 	netif_stop_queue(dev);
+@@ -3738,7 +3738,6 @@ static void set_multicast_list(struct net_device *dev)
+ 	unsigned int i, j, bit, data, crc;
+ 	unsigned char hash;
+ 
+-	printk(KERN_ERR "%s\n", __func__);
+ 	fep = netdev_priv(dev);
+ 	ep = fep->hwp;
+ 
+@@ -3806,7 +3805,6 @@ switch_set_mac_address(struct net_device *dev)
+ static void
+ switch_hw_init()
+ {
+-	printk(KERN_ERR"%s \n", __func__);
+ 	/* GPIO config - RMII mode for both MACs */
+ 	MCF_GPIO_PAR_FEC = (MCF_GPIO_PAR_FEC &
+ 		MCF_GPIO_PAR_FEC_FEC_MASK) |
+@@ -3836,6 +3834,7 @@ switch_hw_init()
+ 	MCF_FEC_EIMR1 = FEC_ENET_TXF | FEC_ENET_RXF;
+ 	/*MCF_PPMHR0*/
+ 	MCF_PPMCR0 = 0;
++#ifdef modelo_debug
+ 	printk(KERN_ERR "%s:MCF_GPIO_PAR_FEC %x \n"
+ 		"MCF_FEC_RCR0 %x MCF_FEC_RCR1 %x \n"
+ 		"MCF_FEC_TCR0 %x MCF_FEC_TCR1 %x \n"
+@@ -3846,6 +3845,7 @@ switch_hw_init()
+ 		MCF_FEC_RCR0, MCF_FEC_RCR1, MCF_FEC_TCR0, MCF_FEC_TCR1,
+ 		MCF_FEC_ECR0, MCF_FEC_ECR1, MCF_FEC_EIMR0, MCF_FEC_EIMR1,
+ 		MCF_PPMHR0);
++#endif
+ }
+ /* Initialize the FEC Ethernet.
+  */
+@@ -4077,9 +4077,11 @@ switch_restart(struct net_device *dev, int duplex)
+ 	fep = netdev_priv(dev);
+ 	fecp = fep->hwp;
+ 	plat = fep->pdev->dev.platform_data;
+-	/* Whack a reset.  We should wait for this.
+-	*/
+-	/*fecp->fec_ecntrl = 1;*/
++	/* Whack a reset.  We should wait for this.*/
++	MCF_FEC_ECR0 = 1;
++	MCF_FEC_ECR1 = 1;
++	udelay(10);
++
+ 	fecp->ESW_MODE = MCF_ESW_MODE_SW_RST;
+ 	udelay(10);
+ 	fecp->ESW_MODE = MCF_ESW_MODE_STATRST;
+@@ -4095,17 +4097,13 @@ switch_restart(struct net_device *dev, int duplex)
+ 	/* Clear any outstanding interrupt.
+ 	*/
+ 	fecp->switch_ievent = 0xffffffff;
+-	/*if (plat && plat->enable_phy_intr)
+-		plat->enable_phy_intr();*/
+ 
+-	/* Set station address.
+-	*/
++	/* Set station address.*/
+ 	switch_set_mac_address(dev);
+ 
+-	/* Reset all multicast.
+-	*/
+-	/*fecp->fec_grp_hash_table_high = 0;
+-	fecp->fec_grp_hash_table_low = 0;*/
++	switch_hw_init();
++
++	/* Reset all multicast.*/
+ 
+ 	/* Set maximum receive buffer size.
+ 	*/
+-- 
+1.6.4
+

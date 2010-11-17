@@ -1,0 +1,81 @@
+From 9f767361a2eeb0cc4f0e3655fe3dd8d62ec3d9c0 Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Wed, 4 Aug 2010 11:33:23 +0800
+Subject: [PATCH] Soft reset fix for v4e chips
+
+Some devices need long rest time on the board, and the RSTOUT was
+needed for some devices to reset.
+
+Also fix some compile warnings.
+
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ arch/m68k/coldfire/m5441x/config.c |    6 +-----
+ arch/m68k/coldfire/m5445x/config.c |   13 ++++++++-----
+ 2 files changed, 9 insertions(+), 10 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m5441x/config.c b/arch/m68k/coldfire/m5441x/config.c
+index 1904790..c605a54 100644
+--- a/arch/m68k/coldfire/m5441x/config.c
++++ b/arch/m68k/coldfire/m5441x/config.c
+@@ -153,10 +153,6 @@ int __init uboot_commandline(char *bootargs)
+  */
+ asmlinkage void __init cf_early_init(void)
+ {
+-	struct bi_record *record = (struct bi_record *) &_end;
+-
+-	extern char _end;
+-
+ 	SET_VBR((void *)MCF_RAMBAR1);
+ 
+ 	/* Mask all interrupts */
+@@ -464,7 +460,7 @@ void coldfire_reboot(void)
+ 
+ 	mdelay(10);
+ 
+-	asm("moveb #0x80, %%d0\n\t"
++	asm("moveb #0xc0, %%d0\n\t"
+ 	    "moveb %%d0, 0xec090000\n\t"
+ 	    : : : "%d0");
+ }
+diff --git a/arch/m68k/coldfire/m5445x/config.c b/arch/m68k/coldfire/m5445x/config.c
+index c98977b..b0c6791 100644
+--- a/arch/m68k/coldfire/m5445x/config.c
++++ b/arch/m68k/coldfire/m5445x/config.c
+@@ -23,6 +23,7 @@
+ #include <linux/mm.h>
+ #include <linux/sched.h>
+ #include <linux/clockchips.h>
++#include <linux/delay.h>
+ #include <asm/bootinfo.h>
+ #include <asm/machdep.h>
+ #include <asm/coldfire.h>
+@@ -168,10 +169,6 @@ int __init uboot_commandline(char *bootargs)
+  */
+ asmlinkage void __init cf_early_init(void)
+ {
+-	struct bi_record *record = (struct bi_record *) &_end;
+-
+-	extern char _end;
+-
+ 	SET_VBR((void *)MCF_RAMBAR1);
+ 
+ 	/* Mask all interrupts */
+@@ -473,7 +470,13 @@ void coldfire_reboot(void)
+ {
+ 	/* disable interrupts and do a software reset */
+ 	asm("movew #0x2700, %%sr\n\t"
+-	    "moveb #0x80, %%d0\n\t"
++	    "moveb #0x40, %%d0\n\t"
++	    "moveb %%d0, 0xfc0a0000\n\t"
++	    : : : "%d0");
++
++	mdelay(10);
++
++	asm("moveb #0xc0, %%d0\n\t"
+ 	    "moveb %%d0, 0xfc0a0000\n\t"
+ 	    : : : "%d0");
+ }
+-- 
+1.6.4
+

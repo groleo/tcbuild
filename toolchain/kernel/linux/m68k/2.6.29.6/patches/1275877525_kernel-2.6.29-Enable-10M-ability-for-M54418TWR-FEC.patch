@@ -1,0 +1,49 @@
+From 1357111d687756b172348900e3e10be87e4dd7f5 Mon Sep 17 00:00:00 2001
+From: Shrek Wu <b16972@freescale.com>
+Date: Mon, 7 Jun 2010 10:25:25 +0800
+Subject: [PATCH] Enable 10M ability for M54418TWR FEC.
+
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ drivers/net/fec.c |   14 ++++++++------
+ 1 files changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/net/fec.c b/drivers/net/fec.c
+index 3c1240a..2eb9889 100644
+--- a/drivers/net/fec.c
++++ b/drivers/net/fec.c
+@@ -707,8 +707,10 @@ static void fec_adjust_link(struct net_device *dev)
+ 		if (priv->old_link == PHY_DOWN) {
+ 			new_state = 1;
+ 			priv->old_link = phydev->link;
+-			fec_restart(dev, phydev->duplex);
+ 		}
++
++		if (new_state)
++			fec_restart(dev, phydev->duplex);
+ 	} else if (priv->old_link) {
+ 		new_state = 1;
+ 		priv->old_link = PHY_DOWN;
+@@ -1248,14 +1250,14 @@ fec_restart(struct net_device *dev, int duplex)
+ 		fecp->fec_x_cntrl = 0x00;
+ 	}
+ 	fep->full_duplex = duplex;
+-/*
+-#ifdef CONFIG_M5445X
+-	if (fep->speed_10)
+-		fecp->fec_r_cntrl |= 0x0200;	// RMII_10T
++
++#if defined(CONFIG_M5445X) || defined(CONFIG_M5441X)
++	if (fep->speed == 10)
++		fecp->fec_r_cntrl |= 0x0200;	/*RMII_10T*/
+ 	else
+ 		fecp->fec_r_cntrl &= ~0x0200;
+ #endif
+-*/
++
+ 	/* Set MII speed.
+ 	*/
+ 	fecp->fec_mii_speed = fep->phy_speed;
+-- 
+1.6.4
+

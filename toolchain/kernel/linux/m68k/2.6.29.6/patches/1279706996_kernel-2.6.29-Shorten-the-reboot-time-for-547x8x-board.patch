@@ -1,0 +1,28 @@
+From af670628279ea746a8a05716de43d25e92f9218e Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Wed, 21 Jul 2010 18:09:56 +0800
+Subject: [PATCH 11/14] Shorten the reboot time for 547x8x board
+
+The watchdog reset time was a little long for the reboot.
+This patch try to fix this by setting a short wd time.
+
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ arch/m68k/coldfire/m547x/config.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m547x/config.c b/arch/m68k/coldfire/m547x/config.c
+index 9c325fc..6c3fd2a 100644
+--- a/arch/m68k/coldfire/m547x/config.c
++++ b/arch/m68k/coldfire/m547x/config.c
+@@ -319,6 +319,7 @@ void coldfire_reboot(void)
+ 	printk(KERN_INFO "Rebooting\n");
+ 	asm("movew #0x2700, %sr\n");
+ 	MCF_GPT_GMS0 = MCF_GPT_GMS_WDEN | MCF_GPT_GMS_CE | MCF_GPT_GMS_TMS(4);
++	MCF_GPT_GCIR0 = (0x0A << 16) | 0x01;
+ }
+ 
+ static void coldfire_get_model(char *model)
+-- 
+1.6.4
+

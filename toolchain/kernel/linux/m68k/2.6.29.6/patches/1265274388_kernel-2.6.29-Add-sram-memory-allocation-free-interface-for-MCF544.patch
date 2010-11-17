@@ -1,0 +1,132 @@
+From c3b35a85e265bb3b125c4ae7016450945394b426 Mon Sep 17 00:00:00 2001
+From: Wang Huan <wanghuan@zch06.freescale.net>
+Date: Thu, 4 Feb 2010 17:06:28 +0800
+Subject: [PATCH 22/25] Add sram memory allocation/free interface for MCF5445X
+
+Implement sram  memory allocation/free APIs in the kernel.
+It's tested on mcf5445x platform.
+
+Signed-off-by: Lanttor Guo <lanttor.guo@freescale.com>
+---
+ arch/m68k/include/asm/cf-sram.h |   21 ++++++++++
+ arch/m68k/mm/cf-sram.c          |   80 +++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 101 insertions(+), 0 deletions(-)
+ create mode 100644 arch/m68k/include/asm/cf-sram.h
+ create mode 100644 arch/m68k/mm/cf-sram.c
+
+diff --git a/arch/m68k/include/asm/cf-sram.h b/arch/m68k/include/asm/cf-sram.h
+new file mode 100644
+index 0000000..4c89733
+--- /dev/null
++++ b/arch/m68k/include/asm/cf-sram.h
+@@ -0,0 +1,21 @@
++/*
++ * Copyright 2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Author: Lanttor.Guo@freescale.com
++ *
++ * Providing on-chip SRAM allocation and free APIs to kernel
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ */
++
++#ifndef CF_SRAM_H
++#define CF_SRAM_H
++
++extern int declare_sram_pool(void *start, size_t size);
++
++extern void *sram_alloc(size_t len);
++extern void sram_free(void *addr, size_t len);
++
++#endif
+diff --git a/arch/m68k/mm/cf-sram.c b/arch/m68k/mm/cf-sram.c
+new file mode 100644
+index 0000000..786f3e1
+--- /dev/null
++++ b/arch/m68k/mm/cf-sram.c
+@@ -0,0 +1,80 @@
++/*
++ * Copyright 2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Author: Lanttor.Guo@freescale.com
++ *
++ * Providing on-chip SRAM allocation and free APIs to kernel
++ * The implemention uses gen_pool_alloc/gen_pool_free interface
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ */
++
++#include <linux/module.h>
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/genalloc.h>
++
++/* sram memory min allocation size per once */
++static long blk_size = CONFIG_SRAM_ALLOC_GRANULARITY;
++static struct gen_pool *sram_pool;
++
++/*
++ * Set up memory pools to manage on-chip sram.
++ * @ start	the start address of SRAM
++ * @ size	the size of SRAM
++ * return	return 0 express success
++ */
++int declare_sram_pool(void *start, size_t size)
++{
++	int status = 0;
++
++	pr_debug("%s %p %d\n", __func__, start, size);
++
++	sram_pool = gen_pool_create(ilog2(blk_size), -1);
++	if (!sram_pool) {
++		printk(KERN_ERR "gen_pool_creat faile at %s()\n", __func__);
++		status = -ENOMEM;
++	}
++
++	status = gen_pool_add(sram_pool, (unsigned long)start, size, -1);
++	if (status < 0)
++		printk(KERN_ERR "gen_pool_add failed at %s()\n", __func__);
++
++	return status;
++
++}
++
++/*
++ * Allocate memory from sram pool
++ * @ len	the size of allocated memory
++ * return	return the start addr of allocated memory
++ */
++void *sram_alloc(size_t len)
++{
++	unsigned long vaddr;
++
++	if (!len) {
++		printk(KERN_ERR "the len parameter of sram_alloc() is zero\n");
++		return NULL;
++	}
++
++	vaddr = gen_pool_alloc(sram_pool, len);
++	if (!vaddr)
++		return NULL;
++
++	return (void *)vaddr;
++}
++EXPORT_SYMBOL(sram_alloc);
++
++/*
++ * Free memory to sram pool
++ * @ addr	the addr of allocated memory
++ * @ len	the size of allocated memory
++ */
++void sram_free(void *addr, size_t len)
++{
++	gen_pool_free(sram_pool, (unsigned long)addr, len);
++}
++EXPORT_SYMBOL(sram_free);
+-- 
+1.6.4
+

@@ -1,0 +1,177 @@
+From 52d45ec1657abd9a319127117dd768c74d4871d2 Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Thu, 17 Jun 2010 11:16:23 +0800
+Subject: [PATCH] Fix Bug of usb otg resource register issue on m5441x platform
+
+Fix the bug:
+boot up Linux system and cat /proc/iomem and found that
+resouce information for usb otg is in infinite loop.
+
+This bug also exists on the m5445x boards.
+
+Signed-off-by: Lanttor Guo <lanttor.guo@freescale.com>
+---
+ arch/m68k/coldfire/m5441x/usb_dr.c |   37 +++++++++++++++++++++++++++++------
+ arch/m68k/coldfire/m5445x/usb_dr.c |   37 +++++++++++++++++++++++++++++------
+ 2 files changed, 60 insertions(+), 14 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m5441x/usb_dr.c b/arch/m68k/coldfire/m5441x/usb_dr.c
+index 00de76a..2593298 100644
+--- a/arch/m68k/coldfire/m5441x/usb_dr.c
++++ b/arch/m68k/coldfire/m5441x/usb_dr.c
+@@ -8,7 +8,6 @@
+  * http://www.opensource.org/licenses/gpl-license.html
+  * http://www.gnu.org/copyleft/gpl.html
+  */
+-#define DEBUG
+ #include <linux/kernel.h>
+ #include <linux/types.h>
+ #include <linux/platform_device.h>
+@@ -58,7 +57,31 @@ static struct fsl_usb2_platform_data __maybe_unused dr_config_fsls = {
+ /*
+  * resources
+  */
+-static struct resource dr_resources[] = {
++static struct resource dr_udc_resources[] = {
++	[0] = {
++		.start = (u32)(&USB_OTGREGS_BASE),
++		.end   = (u32)(&USB_OTGREGS_BASE + 0x1ff),
++		.flags = IORESOURCE_MEM,
++	},
++	[1] = {
++		.start = INT_USB,
++		.flags = IORESOURCE_IRQ,
++	},
++};
++
++static struct resource dr_otg_resources[] = {
++	[0] = {
++		.start = (u32)(&USB_OTGREGS_BASE),
++		.end   = (u32)(&USB_OTGREGS_BASE + 0x1ff),
++		.flags = IORESOURCE_MEM,
++	},
++	[1] = {
++		.start = INT_USB,
++		.flags = IORESOURCE_IRQ,
++	},
++};
++
++static struct resource dr_host_resources[] = {
+ 	[0] = {
+ 		.start = (u32)(&USB_OTGREGS_BASE),
+ 		.end   = (u32)(&USB_OTGREGS_BASE + 0x1ff),
+@@ -92,8 +115,8 @@ static struct platform_device __maybe_unused dr_udc_device = {
+ 		.dma_mask          = &dr_udc_dmamask,
+ 		.coherent_dma_mask = 0xffffffff,
+ 	},
+-	.resource      = dr_resources,
+-	.num_resources = ARRAY_SIZE(dr_resources),
++	.resource      = dr_udc_resources,
++	.num_resources = ARRAY_SIZE(dr_udc_resources),
+ };
+ 
+ static struct platform_device __maybe_unused dr_otg_device = {
+@@ -104,8 +127,8 @@ static struct platform_device __maybe_unused dr_otg_device = {
+ 		.dma_mask          = &dr_otg_dmamask,
+ 		.coherent_dma_mask = 0xffffffff,
+ 	},
+-	.resource      = dr_resources,
+-	.num_resources = ARRAY_SIZE(dr_resources),
++	.resource      = dr_otg_resources,
++	.num_resources = ARRAY_SIZE(dr_otg_resources),
+ };
+ 
+ static int __init usb_dr_init(void)
+@@ -113,7 +136,7 @@ static int __init usb_dr_init(void)
+ 	pr_debug("%s:\n", __func__);
+ 
+ 	dr_register_otg();
+-	dr_register_host(dr_resources, ARRAY_SIZE(dr_resources));
++	dr_register_host(dr_host_resources, ARRAY_SIZE(dr_host_resources));
+ 	dr_register_udc();
+ 
+ 	return 0;
+diff --git a/arch/m68k/coldfire/m5445x/usb_dr.c b/arch/m68k/coldfire/m5445x/usb_dr.c
+index acdddde..bee04e5 100644
+--- a/arch/m68k/coldfire/m5445x/usb_dr.c
++++ b/arch/m68k/coldfire/m5445x/usb_dr.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2010 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute  it and/or modify it
+  * under  the terms of  the GNU General  Public License as published by the
+@@ -65,7 +65,7 @@ static struct fsl_usb2_platform_data __maybe_unused dr_config_fsls = {
+ /*
+  * resources
+  */
+-static struct resource dr_resources[] = {
++static struct resource dr_host_resources[] = {
+ 	[0] = {
+ 		.start = (u32)(&USB_OTGREGS_BASE),
+ 		.end   = (u32)(&USB_OTGREGS_BASE + 0x1ff),
+@@ -77,6 +77,29 @@ static struct resource dr_resources[] = {
+ 	},
+ };
+ 
++static struct resource dr_otg_resources[] = {
++	[0] = {
++		.start = (u32)(&USB_OTGREGS_BASE),
++		.end   = (u32)(&USB_OTGREGS_BASE + 0x1ff),
++		.flags = IORESOURCE_MEM,
++	},
++	[1] = {
++		.start = INT_USB,
++		.flags = IORESOURCE_IRQ,
++	},
++};
++
++static struct resource dr_udc_resources[] = {
++	[0] = {
++		.start = (u32)(&USB_OTGREGS_BASE),
++		.end   = (u32)(&USB_OTGREGS_BASE + 0x1ff),
++		.flags = IORESOURCE_MEM,
++	},
++	[1] = {
++		.start = INT_USB,
++		.flags = IORESOURCE_IRQ,
++	},
++};
+ static u64 dr_udc_dmamask = ~(u32) 0;
+ static void dr_udc_release(struct device *dev)
+ {
+@@ -99,8 +122,8 @@ static struct platform_device __maybe_unused dr_udc_device = {
+ 		.dma_mask          = &dr_udc_dmamask,
+ 		.coherent_dma_mask = 0xffffffff,
+ 	},
+-	.resource      = dr_resources,
+-	.num_resources = ARRAY_SIZE(dr_resources),
++	.resource      = dr_udc_resources,
++	.num_resources = ARRAY_SIZE(dr_udc_resources),
+ };
+ 
+ static struct platform_device __maybe_unused dr_otg_device = {
+@@ -111,8 +134,8 @@ static struct platform_device __maybe_unused dr_otg_device = {
+ 		.dma_mask          = &dr_otg_dmamask,
+ 		.coherent_dma_mask = 0xffffffff,
+ 	},
+-	.resource      = dr_resources,
+-	.num_resources = ARRAY_SIZE(dr_resources),
++	.resource      = dr_otg_resources,
++	.num_resources = ARRAY_SIZE(dr_otg_resources),
+ };
+ 
+ static int __init usb_dr_init(void)
+@@ -120,7 +143,7 @@ static int __init usb_dr_init(void)
+ 	pr_debug("%s:\n", __func__);
+ 
+ 	dr_register_otg();
+-	dr_register_host(dr_resources, ARRAY_SIZE(dr_resources));
++	dr_register_host(dr_host_resources, ARRAY_SIZE(dr_host_resources));
+ 	dr_register_udc();
+ 
+ 	return 0;
+-- 
+1.6.4
+

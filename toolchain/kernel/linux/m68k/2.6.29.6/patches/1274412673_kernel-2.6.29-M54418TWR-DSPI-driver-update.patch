@@ -1,0 +1,454 @@
+From 627f6bc0daaee281844c55107ecf28991256f3ef Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Fri, 21 May 2010 11:31:13 +0800
+Subject: [PATCH 05/18] M54418TWR DSPI driver update.
+
+Add DSP1 support but so far DSP0 and DSP1 can not be used at
+the same time.
+Add cs0 and cs1 support for serial flash suport on DSP0.
+
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+Signed-off-by: Lanttor Guo <lanttor.guo@freescale.com>
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ arch/m68k/coldfire/m5441x/devices.c   |  245 +++++++++++++++++++++++++++++----
+ arch/m68k/include/asm/mcf5441x_dspi.h |    8 +-
+ drivers/spi/Kconfig                   |   22 +++
+ drivers/spi/dspi_mcf.c                |   27 +++--
+ 4 files changed, 264 insertions(+), 38 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m5441x/devices.c b/arch/m68k/coldfire/m5441x/devices.c
+index dad1ef0..909b7e2 100644
+--- a/arch/m68k/coldfire/m5441x/devices.c
++++ b/arch/m68k/coldfire/m5441x/devices.c
+@@ -125,11 +125,13 @@ static struct platform_device nfc_device = {
+ };
+ #endif
+ 
+-#ifdef CONFIG_SPI
+ /*
+  * DSPI
+  */
+-#define M5441X_DSPI0_MCR	0xFC05C000			/* base */
++#ifdef CONFIG_SPI
++
++#if defined(CONFIG_DSPI0)	/* DSPI0 initialization */
++#define M5441X_DSPI0_MCR	0xFC05C000	/* base */
+ 
+ #define M5441X_DSPI0_IRQ_SOURCE	(31)
+ #define M5441X_DSPI0_IRQ_VECTOR	(64 + M5441X_DSPI0_IRQ_SOURCE)
+@@ -187,31 +189,8 @@ static struct coldfire_dspi_chip spidev_chip_info = {
+ };
+ #endif
+ 
+-static struct spi_board_info spi_board_info[] = {
+-
+-#if defined(CONFIG_MTD_M25P80) || defined(CONFIG_MTD_M25P80_MODULE)
+-	{
+-		.modalias = "m25p80", /* Name of spi driver for this device */
+-		.max_speed_hz = 70000000, /* max spi clock in HZ */
+-		.bus_num = 1,
+-		.chip_select = 0,
+-		.platform_data = &at26df081a_platform_data,
+-		.controller_data = &at26df081a_chip_info
+-	},
+-#endif
+-#if defined(CONFIG_SPI_SPIDEV) || defined(CONFIG_SPI_SPIDEV_MODULE)
+-	{
+-		.modalias = "spidev",
+-		.max_speed_hz = 16000000, /* max clk (SCK) speed in HZ */
+-		.bus_num = 1,
+-		.chip_select = 0,		/* CS0 */
+-		.controller_data = &spidev_chip_info,
+-	},
+-#endif
+-};
+-
+ 
+-static struct coldfire_spi_master coldfire_master_info = {
++static struct coldfire_spi_master spi0_master_info = {
+ 	.bus_num = 1,
+ 	.num_chipselect = SPI_NUM_CHIPSELECTS,
+ 	.irq_list = 0,		/* not used */
+@@ -259,11 +238,197 @@ static struct platform_device coldfire_spi0 = {
+ 	.resource = coldfire_spi0_resources,
+ 	.num_resources = ARRAY_SIZE(coldfire_spi0_resources),
+ 	.dev = {
+-		.platform_data = &coldfire_master_info,
++		.platform_data = &spi0_master_info,
++	}
++};
++
++#elif defined(CONFIG_DSPI1)	/* DSPI1 initialization */
++#define M5441X_DSPI1_MCR	0xFC03C000	/* base */
++
++#define M5441X_DSPI1_IRQ_SOURCE	(54)
++#define M5441X_DSPI1_IRQ_VECTOR	(64 + 64 + M5441X_DSPI1_IRQ_SOURCE)
++
++/* number of supported SPI selects */
++#define SPI_NUM_CHIPSELECTS	8
++
++
++#if defined(CONFIG_SPI_SPIDEV) || defined(CONFIG_SPI_SPIDEV_MODULE)
++static struct coldfire_dspi_chip spidev_chip_info = {
++	.bits_per_word = 8,
++};
++#endif
++
++static struct coldfire_spi_master spi1_master_info = {
++	.bus_num = 1,
++	.num_chipselect = SPI_NUM_CHIPSELECTS,
++	.irq_list = 0,		/* not used */
++	.irq_source = M5441X_DSPI1_IRQ_SOURCE,
++	.irq_vector = M5441X_DSPI1_IRQ_VECTOR,
++	.irq_mask = (1 << (M5441X_DSPI1_IRQ_SOURCE - 32)),
++	.irq_lp = 0x2,		/* irq level */
++	.cs_control = NULL,
++};
++
++static struct resource coldfire_spi1_resources[] = {
++	[0] = {
++		.name = "spi-par",
++		.start = (u32)&MCF_GPIO_PAR_ESDHCH,	/* PAR_ESDHCH */
++		.end = (u32)&MCF_GPIO_PAR_ESDHCL,	/* PAR_ESDHCL */
++		.flags = IORESOURCE_MEM
++	},
++
++	[1] = {
++		.name = "spi-module",
++		.start = M5441X_DSPI1_MCR,	/* DSPI MCR Base */
++		.end = M5441X_DSPI1_MCR + 0xc0,	/* DSPI mem map end */
++		.flags = IORESOURCE_MEM
++	},
++
++	[2] = {
++		.name = "spi-int-level",
++		.start = (u32)&MCF_INTC1_ICR54,	/* ICR start */
++		.end = (u32)&MCF_INTC1_ICR54, 	/* ICR end */
++		.flags = IORESOURCE_MEM
++	},
++
++	[3] = {
++		.name = "spi-int-mask",
++		.start = (u32)&MCF_INTC1_IMRH,	/* IMRL */
++		.end = (u32)&MCF_INTC1_IMRH,	/* IMRL */
++		.flags = IORESOURCE_MEM
++	}
++};
++
++static struct platform_device coldfire_spi1 = {
++	.name = "spi_coldfire",
++	.id = -1,
++	.resource = coldfire_spi1_resources,
++	.num_resources = ARRAY_SIZE(coldfire_spi1_resources),
++	.dev = {
++		.platform_data = &spi1_master_info,
++	}
++};
++
++#ifdef CONFIG_MMC_SPI
++static struct coldfire_dspi_chip dspi_sd_chip_info = {
++	.mode = SPI_MODE_0,
++	.bits_per_word = 8,
++	.void_write_data = 0xff,
++	.dbr = 0,
++	.pbr = 0,
++	.br = 1,
++	.pcssck = 2,
++	.pasc = 2,
++	.pdt = 2,
++	.cssck = 5,
++	.asc = 5,
++	.dt = 5,
++};
++
++int mmc_spi_init(struct device *mmc_spi_device,
++	irqreturn_t mmc_spi_irq_handler(int irq, void *private),
++	void *irq_privatedata)
++{
++	int ret;
++#if defined(CONFIG_DETECT_USE_EXTERN_IRQ1)
++	int card_detect_extern_irq = 64 + 1;
++	/*this is irq1 hardware work round*/
++	MCF_GPIO_PAR_IRQ0H |= 0x3;
++
++	MCF_EPORT_EPPAR   = MCF_EPORT_EPPAR | MCF_EPORT_EPPAR_EPPA1_BOTH;
++	MCF_EPORT_EPIER   = MCF_EPORT_EPIER | MCF_EPORT_EPIER_EPIE1;
++
++	MCF_INTC0_ICR1  = 7;           /* IRQ1 */
++#if debug_mmc_spi
++	printk(KERN_INFO "MCF_INTC0_ICR1 %x MCF_EPORT_EPPAR %x "
++		"MCF_EPORT_EPFR %x MCF_EPORT_EPIER %x "
++		"MCF_INTC0_IMRL %x MCF_INTC0_INTFRCL %x "
++		"MCF_INTC0_IPRL %x\n",
++		MCF_INTC0_ICR1, MCF_EPORT_EPPAR, MCF_EPORT_EPFR,
++		MCF_EPORT_EPIER, MCF_INTC0_IMRL, MCF_INTC0_INTFRCL,
++		MCF_INTC0_IPRL);
++#endif
++#elif defined(CONFIG_DETECT_USE_EXTERN_IRQ7)
++	int card_detect_extern_irq = 64 + 7;
++	MCF_GPIO_PAR_IRQ0H |= MCF_GPIO_PAR_IRQH_IRQ7;
++
++	MCF_EPORT_EPPAR   = MCF_EPORT_EPPAR | MCF_EPORT_EPPAR_EPPA7_BOTH;
++	MCF_EPORT_EPIER   = MCF_EPORT_EPIER | MCF_EPORT_EPIER_EPIE7;
++
++	MCF_INTC0_ICR7  = 2;           /* IRQ7 */
++#ifdef debug_mmc_spi
++	printk("MCF_INTC0_ICR7 %x MCF_EPORT_EPPAR %x\n",
++		MCF_INTC0_ICR7, MCF_EPORT_EPPAR);
++#endif
++#else
++	int card_detect_extern_irq = 64 + 7;
++	MCF_GPIO_PAR_IRQ0H |= MCF_GPIO_PAR_IRQH_IRQ7;
++
++	MCF_EPORT_EPPAR   = MCF_EPORT_EPPAR | MCF_EPORT_EPPAR_EPPA7_BOTH;
++	MCF_EPORT_EPIER   = MCF_EPORT_EPIER | MCF_EPORT_EPIER_EPIE7;
++
++	MCF_INTC0_ICR7  = 2;           /* IRQ7 */
++#ifdef debug_mmc_spi
++	printk(KERN_INFO "MCF_INTC0_ICR1 %x MCF_EPORT_EPPAR %x\n",
++		MCF_INTC0_ICR7, MCF_EPORT_EPPAR);
++#endif
++#endif
++
++	ret = request_irq(card_detect_extern_irq,
++			mmc_spi_irq_handler, IRQF_DISABLED,
++			"mmc_spi_irq", irq_privatedata);
++	if (ret) {
++		printk(KERN_INFO "%s: request irq fail %x\n", __func__, ret);
++		return -EBUSY;
+ 	}
++
++	return 0;
++}
++
++static struct mmc_spi_platform_data mcf5441x_mmc_pdata = {
++	.ocr_mask = MMC_VDD_33_34,
++	.init = mmc_spi_init,
++};
++#endif
++
++#endif
++
++/* DSPI device */
++static struct spi_board_info spi_board_info[] = {
++
++#if defined(CONFIG_DSPI1) && defined(CONFIG_MMC_SPI)
++	{
++		.modalias = "mmc_spi",
++		.max_speed_hz = 50000000,
++		.bus_num = 1,
++		.chip_select = 0,
++		.platform_data = &mcf5441x_mmc_pdata,
++		.controller_data = &dspi_sd_chip_info,
++	},
++#endif
++#if defined(CONFIG_DSPI0) && (defined(CONFIG_MTD_M25P80) || \
++    defined(CONFIG_MTD_M25P80_MODULE))
++	{
++		.modalias = "m25p80", /* Name of spi driver for this device */
++		.max_speed_hz = 70000000, /* max spi clock in HZ */
++		.bus_num = 1,
++		.chip_select = CONFIG_DSP0_SBF_CS,
++		.platform_data = &at26df081a_platform_data,
++		.controller_data = &at26df081a_chip_info
++	},
++#endif
++#if defined(CONFIG_SPI_SPIDEV) || defined(CONFIG_SPI_SPIDEV_MODULE)
++	{
++		.modalias = "spidev",
++		.max_speed_hz = 16000000, /* max clk (SCK) speed in HZ */
++		.bus_num = 1,
++		.chip_select = 0,		/* CS0 */
++		.controller_data = &spidev_chip_info,
++	},
++#endif
+ };
+ 
+-/**
++/*
+  * m5441x_spi_init - Initialize SPI
+  */
+ static int __init m5441x_spi_init(void)
+@@ -271,9 +436,33 @@ static int __init m5441x_spi_init(void)
+ 	int retval;
+ 
+ 	/* register device */
++#if defined(CONFIG_DSPI0)
++	MCF_GPIO_PAR_DSPI0WH =
++		(MCF_GPIO_PAR_DSPI0WH & MCF_GPIO_PAR_DSPI0_SCK_MASK) |
++		MCF_GPIO_PAR_DSPI0_SCK_DSPI0SCK;
++	MCF_GPIO_PAR_DSPI0WH =
++		(MCF_GPIO_PAR_DSPI0WH & MCF_GPIO_PAR_DSPI0_SOUT_MASK) |
++		MCF_GPIO_PAR_DSPI0_SOUT_DSPI0SOUT;
++	MCF_GPIO_PAR_DSPI0WH =
++		(MCF_GPIO_PAR_DSPI0WH & MCF_GPIO_PAR_DSPI0_SIN_MASK) |
++		MCF_GPIO_PAR_DSPI0_SIN_DSPI0SIN;
++	MCF_GPIO_PAR_DSPI0WH =
++		(MCF_GPIO_PAR_DSPI0WH & MCF_GPIO_PAR_DSPI0_PCS0_MASK) |
++		MCF_GPIO_PAR_DSPI0_PCS0_DSPI0PCS0;
++	MCF_GPIO_PAR_DSPI0WL = 0x80;
+ 	retval = platform_device_register(&coldfire_spi0);
+ 	if (retval < 0)
+ 		goto out;
++#elif defined(CONFIG_DSPI1)
++	MCF_PM_PPMCR0 = 0xf;
++	MCF_GPIO_PAR_ESDHCH = 0x55;     /* DAT[3:0] */
++	MCF_GPIO_PAR_ESDHCL = 0x05;     /* CMD, CLK */
++	MCF_GPIO_SRCR_IRQ0 = 3;
++	MCF_GPIO_SRCR_SDHC = 3;
++	retval = platform_device_register(&coldfire_spi1);
++	if (retval < 0)
++		goto out;
++#endif
+ 
+ 	/* register board info */
+ 	if (ARRAY_SIZE(spi_board_info))
+diff --git a/arch/m68k/include/asm/mcf5441x_dspi.h b/arch/m68k/include/asm/mcf5441x_dspi.h
+index ec8fc40..e90d6dd 100644
+--- a/arch/m68k/include/asm/mcf5441x_dspi.h
++++ b/arch/m68k/include/asm/mcf5441x_dspi.h
+@@ -21,10 +21,13 @@
+ /* Register read/write macros */
+ /* DSPI Module Configuration Register */
+ #define MCF_DSPI_DMCR           MCF_REG32(0xFC05C000)
++#define MCF_DSPI1_DMCR          MCF_REG32(0xFC03C000)
+ /* DSPI Transfer Count Register */
+ #define MCF_DSPI_DTCR           MCF_REG32(0xFC05C008)
++#define MCF_DSPI1_DTCR          MCF_REG32(0xFC03C008)
+ /* DSPI Clock and Transfer Attributes Register */
+ #define MCF_DSPI_DCTAR0         MCF_REG32(0xFC05C00C)
++#define MCF_DSPI1_DCTAR0        MCF_REG32(0xFC03C00C)
+ /* DSPI Clock and Transfer Attributes Register */
+ #define MCF_DSPI_DCTAR1         MCF_REG32(0xFC05C010)
+ /* DSPI Clock and Transfer Attributes Register */
+@@ -41,12 +44,16 @@
+ #define MCF_DSPI_DCTAR7         MCF_REG32(0xFC05C028
+ /* DSPI Status Register */
+ #define MCF_DSPI_DSR            MCF_REG32(0xFC05C02C)
++#define MCF_DSPI1_DSR           MCF_REG32(0xFC03C02C)
+ /* DSPI DMA/Interrupt Request Select and Enable Register */
+ #define MCF_DSPI_DRSER          MCF_REG32(0xFC05C030)
++#define MCF_DSPI1_DRSER         MCF_REG32(0xFC03C030)
+ /* DSPI Transmit FIFO Register */
+ #define MCF_DSPI_DTFR           MCF_REG32(0xFC05C034)
++#define MCF_DSPI1_DTFR          MCF_REG32(0xFC03C034)
+ /* DSPI Receive FIFO Register */
+ #define MCF_DSPI_DRFR           MCF_REG32(0xFC05C038)
++#define MCF_DSPI1_DRFR          MCF_REG32(0xFC03C038)
+ /* DSPI Transmit FIFO Debugging Registers */
+ #define MCF_DSPI_DTFDR0         MCF_REG32(0xFC05C03C)
+ /* DSPI Transmit FIFO Debugging Registers */
+@@ -64,7 +71,6 @@
+ /* DSPI Receive FIFO Debugging Registers */
+ #define MCF_DSPI_DRFDR3         MCF_REG32(0xFC05C088)
+ 
+-
+ /* Parameterized register read/write macros for multiple registers */
+ /* DSPI Clock and Transfer Attributes Register */
+ #define MCF_DSPI_DCTAR(x)       MCF_REG32(0xFC05C00C+((x)*0x004))
+diff --git a/drivers/spi/Kconfig b/drivers/spi/Kconfig
+index 2c1e3d6..404835d 100644
+--- a/drivers/spi/Kconfig
++++ b/drivers/spi/Kconfig
+@@ -122,6 +122,28 @@ config SPI_DSPI
+ 	help
+ 	  SPI driver for Coldfire DSPI driver only.
+ 
++choice
++	prompt "Selsect DSPI controller"
++	depends on SPI_DSPI && M5441X
++	default DSPI0
++
++config DSPI0
++	bool "DSPI0 controller"
++	help
++	  DSPI0 controller on m5441x platform
++
++config DSP0_SBF_CS
++	hex
++	prompt "Chip select for serial flash on DSPI0"
++	depends on DSPI0 && M5441X
++	default 1
++
++config DSPI1
++	bool "DSPI1 controller"
++	help
++	  DSPI1 controller on m5441x platform
++endchoice
++
+ config SPI_COLDFIRE_DSPI_EDMA
+ 	boolean "Coldfire DSPI master driver uses eDMA"
+ 	depends on SPI_MASTER && COLDFIRE && SPI_DSPI && COLDFIRE_EDMA
+diff --git a/drivers/spi/dspi_mcf.c b/drivers/spi/dspi_mcf.c
+index eeac592..d4f6b1f 100644
+--- a/drivers/spi/dspi_mcf.c
++++ b/drivers/spi/dspi_mcf.c
+@@ -86,11 +86,16 @@
+ #define DSPI_DMA_RX_TCD		MCF_EDMA_CHAN_DSPI_RX
+ #define DSPI_DMA_TX_TCD 	MCF_EDMA_CHAN_DSPI_TX
+ #elif defined(CONFIG_M5441X)
++#if defined(CONFIG_DSPI0)
+ #define DSPI_DMA_RX_TCD		MCF_EDMA_CHAN_DSPI0_RX
+ #define DSPI_DMA_TX_TCD 	MCF_EDMA_CHAN_DSPI0_TX
++#elif defined(CONFIG_DSPI1)
++#define DSPI_DMA_RX_TCD		MCF_EDMA_CHAN_DSPI1_RX
++#define DSPI_DMA_TX_TCD 	MCF_EDMA_CHAN_DSPI1_TX
++#endif
+ #endif
+ 
+-#define NEW_DMA_METHOD
++#undef NEW_DMA_METHOD
+ 
+ #endif
+ 
+@@ -1180,20 +1185,20 @@ static int coldfire_spi_probe(struct platform_device *pdev)
+ 			drv_data->edma_tx_buf, drv_data->edma_tx_buf_pa,
+ 			drv_data->edma_rx_buf, drv_data->edma_rx_buf_pa);
+ #endif
+-#if 0
+-	drv_data->mcr = (void *)&MCF_DSPI_DMCR;
+-	drv_data->ctar = (void *)&MCF_DSPI_DCTAR0;
+-	drv_data->dspi_sr = (void *)&MCF_DSPI_DSR;
+-	drv_data->dspi_rser = (void *)&MCF_DSPI_DRSER;
+-	drv_data->dspi_dtfr = (void *)&MCF_DSPI_DTFR;
+-	drv_data->dspi_drfr = (void *)&MCF_DSPI_DRFR;
+-#else
++#if defined(CONFIG_DSPI0)
+ 	drv_data->mcr = (volatile u32 *)&MCF_DSPI_DMCR;
+ 	drv_data->ctar = (volatile u32 *)&MCF_DSPI_DCTAR0;
+ 	drv_data->dspi_sr = (volatile u32 *)&MCF_DSPI_DSR;
+ 	drv_data->dspi_rser = (volatile u32 *)&MCF_DSPI_DRSER;
+ 	drv_data->dspi_dtfr = (volatile u32 *)&MCF_DSPI_DTFR;
+ 	drv_data->dspi_drfr = (volatile u32 *)&MCF_DSPI_DRFR;
++#elif defined(CONFIG_DSPI1)
++	drv_data->mcr = (volatile u32 *)&MCF_DSPI1_DMCR;
++	drv_data->ctar = (volatile u32 *)&MCF_DSPI1_DCTAR0;
++	drv_data->dspi_sr = (volatile u32 *)&MCF_DSPI1_DSR;
++	drv_data->dspi_rser = (volatile u32 *)&MCF_DSPI1_DRSER;
++	drv_data->dspi_dtfr = (volatile u32 *)&MCF_DSPI1_DTFR;
++	drv_data->dspi_drfr = (volatile u32 *)&MCF_DSPI1_DRFR;
+ 
+ #endif
+ 	memory_resource = platform_get_resource_byname(pdev, IORESOURCE_MEM,
+@@ -1205,6 +1210,8 @@ static int coldfire_spi_probe(struct platform_device *pdev)
+ #ifdef CONFIG_M5301x
+ 	drv_data->parh = (void *)memory_resource->start;
+ 	drv_data->parl = (void *)memory_resource->end;
++#elif defined(CONFIG_M5441X)
++	/* This configuration has been set at arch scource*/
+ #else
+ 	drv_data->par = (void *)memory_resource->start;
+ #endif
+@@ -1268,6 +1275,8 @@ static int coldfire_spi_probe(struct platform_device *pdev)
+ #ifdef CONFIG_M5301x
+ 	*drv_data->parh = (u8) (platform_info->par_val16 >> 8);
+ 	*drv_data->parl = (u8) (platform_info->par_val16 & 0xff);
++#elif defined(CONFIG_M5441X)
++	/* This configuration has been set at arch source */
+ #else
+ 	*drv_data->par = platform_info->par_val;
+ #endif
+-- 
+1.6.4
+

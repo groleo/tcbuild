@@ -1,0 +1,54 @@
+From 7aa8ad7cb3d9d97b72237bf75dee6e1e555b8c0c Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Wed, 21 Jul 2010 14:33:35 +0800
+Subject: [PATCH 09/14] Workaround for glibc futex alignment issue
+
+In the futex implmentation, the uaddr should be sizeof(u32)
+aligned, But the glibc 2.11.217 pass the uaddr as 2bytes aligned.
+To avoid the EINVAL error, this patch provide a workaroud to check
+the address with 2bytes aligned.
+
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ arch/m68k/include/asm/futex.h |    2 +-
+ kernel/futex.c                |    6 +++++-
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/arch/m68k/include/asm/futex.h b/arch/m68k/include/asm/futex.h
+index 6a332a9..680a130 100644
+--- a/arch/m68k/include/asm/futex.h
++++ b/arch/m68k/include/asm/futex.h
+@@ -2,5 +2,5 @@
+ #define _ASM_FUTEX_H
+ 
+ #include <asm-generic/futex.h>
+-
++#define FUTEX_ALIGNMENT 2
+ #endif
+diff --git a/kernel/futex.c b/kernel/futex.c
+index 438701a..857bb6d 100644
+--- a/kernel/futex.c
++++ b/kernel/futex.c
+@@ -64,6 +64,10 @@ int __read_mostly futex_cmpxchg_enabled;
+ 
+ #define FUTEX_HASHBITS (CONFIG_BASE_SMALL ? 4 : 8)
+ 
++#ifndef FUTEX_ALIGNMENT
++#define FUTEX_ALIGNMENT sizeof(u32)
++#endif
++
+ /*
+  * Priority Inheritance state:
+  */
+@@ -215,7 +219,7 @@ static int get_futex_key(u32 __user *uaddr, int fshared, union futex_key *key)
+ 	 * The futex address must be "naturally" aligned.
+ 	 */
+ 	key->both.offset = address % PAGE_SIZE;
+-	if (unlikely((address % sizeof(u32)) != 0))
++	if (unlikely((address % FUTEX_ALIGNMENT) != 0))
+ 		return -EINVAL;
+ 	address -= key->both.offset;
+ 
+-- 
+1.6.4
+

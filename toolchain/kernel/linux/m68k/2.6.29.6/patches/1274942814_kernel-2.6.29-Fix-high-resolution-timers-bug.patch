@@ -1,0 +1,66 @@
+From c885025cf39babfa35d854d585e96e91216bf3c2 Mon Sep 17 00:00:00 2001
+From: Shrek Wu <b16972@freescale.com>
+Date: Thu, 27 May 2010 14:46:54 +0800
+Subject: [PATCH] Fix high resolution timers bug.
+
+The event_handler should follow the timers increasing. otherwise the
+time udpate will have error.
+
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ arch/m68k/coldfire/m5441x/config.c |    3 +--
+ arch/m68k/coldfire/m5445x/config.c |    3 +--
+ arch/m68k/coldfire/m547x/config.c  |    3 +--
+ 3 files changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m5441x/config.c b/arch/m68k/coldfire/m5441x/config.c
+index 9ee34e1..634d399 100644
+--- a/arch/m68k/coldfire/m5441x/config.c
++++ b/arch/m68k/coldfire/m5441x/config.c
+@@ -445,10 +445,9 @@ static irqreturn_t coldfire_dtim_clk_irq(int irq, void *dev)
+ {
+ 	struct clock_event_device *evt = (struct clock_event_device *)dev;
+ 
+-	evt->event_handler(evt);
+ 	__raw_writeb(MCF_DTIM_DTER_CAP | MCF_DTIM_DTER_REF, MCF_DTIM2_DTER);
+ 	sched_dtim_clk_val +=  (MCF_BUSCLK / 16) / HZ;;
+-
++	evt->event_handler(evt);
+ 	return IRQ_HANDLED;
+ }
+ 
+diff --git a/arch/m68k/coldfire/m5445x/config.c b/arch/m68k/coldfire/m5445x/config.c
+index e2d17f5..93d6226 100644
+--- a/arch/m68k/coldfire/m5445x/config.c
++++ b/arch/m68k/coldfire/m5445x/config.c
+@@ -460,10 +460,9 @@ static irqreturn_t coldfire_dtim_clk_irq(int irq, void *dev)
+ {
+ 	struct clock_event_device *evt = (struct clock_event_device *)dev;
+ 
+-	evt->event_handler(evt);
+ 	__raw_writeb(MCF_DTIM_DTER_CAP | MCF_DTIM_DTER_REF, MCF_DTIM2_DTER);
+ 	sched_dtim_clk_val +=  (MCF_BUSCLK / 16) / HZ;;
+-
++	evt->event_handler(evt);
+ 	return IRQ_HANDLED;
+ }
+ 
+diff --git a/arch/m68k/coldfire/m547x/config.c b/arch/m68k/coldfire/m547x/config.c
+index 6de8a02..9c325fc 100644
+--- a/arch/m68k/coldfire/m547x/config.c
++++ b/arch/m68k/coldfire/m547x/config.c
+@@ -293,10 +293,9 @@ static irqreturn_t coldfire_dtim_clk_irq(int irq, void *dev)
+ 	struct clock_event_device *evt =
+ 		(struct clock_event_device *)dev;
+ 
+-	evt->event_handler(evt);
+ 	MCF_SSR(0) = MCF_SSR_ST;
+ 	sched_dtim_clk_val +=  (MCF_BUSCLK) / HZ;;
+-
++	evt->event_handler(evt);
+ 	return IRQ_HANDLED;
+ }
+ 
+-- 
+1.6.4
+

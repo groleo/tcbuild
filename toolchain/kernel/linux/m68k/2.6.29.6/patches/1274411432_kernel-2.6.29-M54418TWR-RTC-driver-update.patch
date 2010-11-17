@@ -1,0 +1,212 @@
+From 7cd05ed7155100e6a74f70f5c6ab9666118cf068 Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Fri, 21 May 2010 11:10:32 +0800
+Subject: [PATCH] M54418TWR RTC driver update
+
+Enabled the rtc clock. So the time can move on.
+Fix the year setting so the year can be set correcttly
+Fix a bug which sometimes the driver may trig kernel panic
+during system booting up
+
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ arch/m68k/coldfire/m5441x/devices.c  |    9 +++++++++
+ arch/m68k/include/asm/mcf5441x_rtc.h |    1 +
+ drivers/rtc/rtc-m5441x.c             |   72 +++++++++++++++++++++++++++++++++++++++---------------------------------
+ 3 files changed, 49 insertions(+), 33 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m5441x/devices.c b/arch/m68k/coldfire/m5441x/devices.c
+index d820904..a7bc0a1 100644
+--- a/arch/m68k/coldfire/m5441x/devices.c
++++ b/arch/m68k/coldfire/m5441x/devices.c
+@@ -464,6 +464,12 @@ static struct platform_device rtc_device = {
+ 	.name = "rtc-m5441x",
+ 	.id   = -1,
+ };
++
++static void m5441x_rtc_init(void)
++{
++	/* Power management: enable RTC clock */
++	MCF_PM_PPMCR0 = 42;
++}
+ #endif
+ 
+ static struct platform_device *m5441x_devices[] __initdata = {
+@@ -494,6 +500,9 @@ static int __init mcf5441x_init_devices(void)
+ #if defined(CONFIG_SERIAL_MCF) || defined(CONFIG_SERIAL_MCF_MODULE)
+ 	m5441x_uarts_init();
+ #endif
++#if defined(CONFIG_RTC_M5441X) || defined(CONFIG_RTC_M5441X_MODULE)
++	m5441x_rtc_init();
++#endif
+ 	platform_add_devices(m5441x_devices, ARRAY_SIZE(m5441x_devices));
+ 	return 0;
+ }
+diff --git a/arch/m68k/include/asm/mcf5441x_rtc.h b/arch/m68k/include/asm/mcf5441x_rtc.h
+index 6e6a999..171cfab 100644
+--- a/arch/m68k/include/asm/mcf5441x_rtc.h
++++ b/arch/m68k/include/asm/mcf5441x_rtc.h
+@@ -118,6 +118,7 @@
+ 
+ /* Bit definitions and macros for MCF_RTC_SR */
+ #define MCF_RTC_SR_INVALID 	0x0001
++#define MCF_RTC_SR_WPE		0x0010
+ 
+ /* Interrupt source */
+ #define MCFINT_RTC		(64+64+26)
+diff --git a/drivers/rtc/rtc-m5441x.c b/drivers/rtc/rtc-m5441x.c
+index aee92d7..9ef82dc 100644
+--- a/drivers/rtc/rtc-m5441x.c
++++ b/drivers/rtc/rtc-m5441x.c
+@@ -109,10 +109,12 @@ static DEFINE_SPINLOCK(rtc_lock);
+  */
+ static void disable_register_write_protection(void)
+ {
+-	writew(0x00, MCF_RTC_CR);
+-	writew(0x01, MCF_RTC_CR);
+-	writew(0x03, MCF_RTC_CR);
+-	writew(0x02, MCF_RTC_CR);
++	if (readw(MCF_RTC_SR) & MCF_RTC_SR_WPE) {
++		writew(0x0000, MCF_RTC_CR);
++		writew(0x0001, MCF_RTC_CR);
++		writew(0x0003, MCF_RTC_CR);
++		writew(0x0002, MCF_RTC_CR);
++	}
+ 
+ }
+ 
+@@ -127,12 +129,20 @@ static void disable_register_write_protection(void)
+  */
+ static u32 get_alarm_or_time(struct device *dev, int time_alarm, struct rtc_time *tm)
+ {
++	dev_dbg(dev, "debug function %s()!\n", __func__);
++
+ 	while (readw(MCF_RTC_SR) & MCF_RTC_SR_INVALID);
+ 
+ 	if (time_alarm == MCF_RTC_TIME) {
++		/*check register information */
++		dev_dbg(dev, "RTC_YEARMON:0x%x,RTC_DAYS:0x%x,RTC_HOURMIN:0x%x,"
++			"RTC_SECONDS:0x%x\n", readw(MCF_RTC_YEARMON),
++			readw(MCF_RTC_DAYS), readw(MCF_RTC_HOURMIN),
++			readw(MCF_RTC_SECONDS));
++
+ 		/* get year */
+                 tm->tm_year = year_cal_basic +
+-                        (char)MCF_RTC_YEARMON_YEAR_RD(readw(MCF_RTC_YEARMON));
++			(char)(MCF_RTC_YEARMON_YEAR_RD(readw(MCF_RTC_YEARMON)));
+ 		/* get month */
+                 tm->tm_mon =
+ 			MCF_RTC_YEARMON_MON_RD(readw(MCF_RTC_YEARMON)) - 1;
+@@ -156,16 +166,11 @@ static u32 get_alarm_or_time(struct device *dev, int time_alarm, struct rtc_time
+ 		/* no day saving time */
+                 tm->tm_isdst = -1;
+ 
+-		/* debug information */
++		/* check rtc_tm fileds information */
+ 		dev_dbg(dev, "RTC TIME --> year:%d,yday:%d,mon:%d,mday:%d,"
+ 			"wday:%d,hour:%d,min:%d,sec:%d\n", tm->tm_year,
+ 			tm->tm_yday, tm->tm_mon, tm->tm_mday, tm->tm_wday,
+ 			tm->tm_hour, tm->tm_min, tm->tm_sec);
+-                dev_dbg(dev,"RTC_YEARMON:0x%x,RTC_DAYS:0x%x,RTC_HOURMIN:0x%x,"
+-                        "RTC_SECONDS:0x%x\n", readw(MCF_RTC_YEARMON),
+-                        readw(MCF_RTC_DAYS), readw(MCF_RTC_HOURMIN),
+-                        readw(MCF_RTC_SECONDS));
+-
+ 
+ 	} else if (time_alarm == MCF_RTC_ALARM) {
+ 		tm->tm_year = year_cal_basic +
+@@ -209,14 +214,23 @@ static u32 get_alarm_or_time(struct device *dev, int time_alarm, struct rtc_time
+  */
+ static void set_alarm_or_time(struct device *dev, int time_alarm, struct rtc_time *tm)
+ {
++	char year;
++
++	dev_dbg(dev, "debug function %s()!\n", __func__);
++
+ 	/* wirte enable setting */
+ 	disable_register_write_protection();
+ 
+ 	if (time_alarm == MCF_RTC_TIME) {
++		/* check rtc_time fields information */
++		dev_dbg(dev, "RTC TIME --> year:%d,yday:%d,mon:%d,mday:%d,"
++			"wday:%d,hour:%d,min:%d,sec:%d\n", tm->tm_year,
++			tm->tm_yday, tm->tm_mon, tm->tm_mday, tm->tm_wday,
++			tm->tm_hour, tm->tm_min, tm->tm_sec);
++
++		year = ((tm->tm_year + 1900) - year_cal_basic);
+ 		/* write RTC_YEARMON register */
+-		writew(MCF_RTC_YEARMON_YEAR_SET
+-		       ((tm->tm_year + 1900) - year_cal_basic ) |
+-		       MCF_RTC_YEARMON_MON_SET(tm->tm_mon + 1), MCF_RTC_YEARMON);
++		writew((year << 8) | (tm->tm_mon + 1), MCF_RTC_YEARMON);
+ 
+ 		/* write RTC_DAYS register */
+ 		writew(MCF_RTC_DAYS_DAYWEEK_SET(tm->tm_wday) |
+@@ -237,17 +251,12 @@ static void set_alarm_or_time(struct device *dev, int time_alarm, struct rtc_tim
+ 			"RTC_SECONDS:0x%x\n", readw(MCF_RTC_YEARMON),
+ 			readw(MCF_RTC_DAYS), readw(MCF_RTC_HOURMIN),
+ 			readw(MCF_RTC_SECONDS));
+-                dev_dbg(dev, "RTC TIME --> year:%d,yday:%d,mon:%d,mday:%d,"
+-                        "wday:%d,hour:%d,min:%d,sec:%d\n", tm->tm_year,
+-                        tm->tm_yday, tm->tm_mon, tm->tm_mday, tm->tm_wday,
+-                        tm->tm_hour, tm->tm_min, tm->tm_sec);
+ 
+ 	} else if (time_alarm == MCF_RTC_ALARM) {
++
++		year = ((tm->tm_year + 1900) - year_cal_basic);
+ 		/* write RTC_YEARMON register */
+-		writew(MCF_RTC_YEARMON_YEAR_SET
+-			((tm->tm_year + 1900) - year_cal_basic) |
+-			MCF_RTC_YEARMON_MON_SET(tm->tm_mon + 1),
+-			MCF_RTC_ALRM_YRMON);
++		writew((year << 8) | (tm->tm_mon + 1), MCF_RTC_ALRM_YRMON);
+ 
+ 		/* write RTC_DAYS register */
+ 		writew(MCF_RTC_DAYS_DAYWEEK_SET(tm->tm_wday) |
+@@ -268,7 +277,6 @@ static void set_alarm_or_time(struct device *dev, int time_alarm, struct rtc_tim
+ 			"ALRM_SEC:0x%x\n", readw(MCF_RTC_ALRM_YRMON),
+ 			readw(MCF_RTC_ALRM_DAYS), readw(MCF_RTC_ALRM_HM),
+ 			readw(MCF_RTC_ALRM_SEC));
+-
+ 	} else {
+ 		panic("wrong value for time_alarm=%d\n", time_alarm);
+ 	}
+@@ -523,11 +531,18 @@ static int __devinit mcf_rtc_probe(struct platform_device *pdev)
+ 	struct rtc_plat_data *pdata = NULL;
+ 	u32 ret = 0;
+ 
++	/* Clear interrupt before request irq */
++	writew(0x0100, MCF_RTC_CR);
++	writew(0x0001, MCF_RTC_IER);
++	disable_register_write_protection();
++
++	if (!(readw(MCF_RTC_CFG_DATA) & MCF_RTC_CFG_DATA_OSCEN))
++		writew(MCF_RTC_CFG_DATA_OSCEN, MCF_RTC_CFG_DATA);
++
+ 	pdata = kzalloc(sizeof(*pdata), GFP_KERNEL);
+ 	if (!pdata)
+ 		return -ENOMEM;
+ 
+-	/* Configure and enable the RTC */
+ 	pdata->irq = MCFINT_VECBASE + MCFINT_RTC;
+ 	if (request_irq(pdata->irq, mcf_rtc_interrupt, IRQF_DISABLED,
+ 			pdev->name, pdev) < 0) {
+@@ -550,15 +565,6 @@ static int __devinit mcf_rtc_probe(struct platform_device *pdev)
+ 	pdata->rtc = rtc;
+ 	platform_set_drvdata(pdev, pdata);
+ 
+-	writeb(4, MCFSIM_ICR_RTC);
+-
+-	disable_register_write_protection();
+-
+-	writew(MCF_RTC_IER_1HZ, MCF_RTC_IER);  /* Unmask the 1Hz timer */
+-
+-	writew((~MCF_RTC_CFG_DATA_OSCBYP & MCF_RTC_CFG_DATA_OSCEN),
+-		MCF_RTC_CFG_DATA);
+-
+         dev_dbg(&pdev->dev, "RTC_CR:0x%x, RTC_SR:0x%x\n", readw(MCF_RTC_CR),
+                 readw(MCF_RTC_SR));
+ 
+-- 
+1.6.4
+

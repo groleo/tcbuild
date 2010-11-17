@@ -1,0 +1,29 @@
+From 5b153e1d07720bd85185e0b1b6d15fe48728d44d Mon Sep 17 00:00:00 2001
+From: Shrek Wu <b16972@freescale.com>
+Date: Fri, 20 Aug 2010 15:29:29 +0800
+Subject: [PATCH 2/2] add phy_disconnect for m547x_8x fec.
+
+This patch add phy_disconnect to fec_close, otherwise the phy still connected
+when ifconfig down called and then next time when ifconfig up, there is warning
+information.
+
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ drivers/net/fec_m547x.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/net/fec_m547x.c b/drivers/net/fec_m547x.c
+index e19c9d4..b6a3502 100644
+--- a/drivers/net/fec_m547x.c
++++ b/drivers/net/fec_m547x.c
+@@ -825,6 +825,7 @@ int fec_close(struct net_device *dev)
+ 	int i;
+ 
+ 	netif_stop_queue(dev);
++	phy_disconnect(fp->phydev);
+ 	phy_stop(fp->phydev);
+ 	/* Perform the graceful stop */
+ 	FEC_TCR(base_addr) |= FEC_TCR_GTS;
+-- 
+1.6.4
+

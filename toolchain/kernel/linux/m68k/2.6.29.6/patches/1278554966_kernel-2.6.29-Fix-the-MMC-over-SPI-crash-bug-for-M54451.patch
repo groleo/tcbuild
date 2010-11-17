@@ -1,0 +1,35 @@
+From 0c3b57d482d9f35ea2ce8945456a87bbf7963a65 Mon Sep 17 00:00:00 2001
+From: Shrek Wu <b16972@freescale.com>
+Date: Thu, 8 Jul 2010 10:09:26 +0800
+Subject: [PATCH 03/14] Fix the MMC over SPI crash bug for M54451
+
+The SPI code destroyed by previous patch for Modelo which
+can configure the SPI mmc on SPI0 or SPI1.
+
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ drivers/spi/dspi_mcf.c |    8 +++++++-
+ 1 files changed, 7 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/spi/dspi_mcf.c b/drivers/spi/dspi_mcf.c
+index d4f6b1f..510bd47 100644
+--- a/drivers/spi/dspi_mcf.c
++++ b/drivers/spi/dspi_mcf.c
+@@ -1199,7 +1199,13 @@ static int coldfire_spi_probe(struct platform_device *pdev)
+ 	drv_data->dspi_rser = (volatile u32 *)&MCF_DSPI1_DRSER;
+ 	drv_data->dspi_dtfr = (volatile u32 *)&MCF_DSPI1_DTFR;
+ 	drv_data->dspi_drfr = (volatile u32 *)&MCF_DSPI1_DRFR;
+-
++#else
++	drv_data->mcr = (volatile u32 *)&MCF_DSPI_DMCR;
++	drv_data->ctar = (volatile u32 *)&MCF_DSPI_DCTAR0;
++	drv_data->dspi_sr = (volatile u32 *)&MCF_DSPI_DSR;
++	drv_data->dspi_rser = (volatile u32 *)&MCF_DSPI_DRSER;
++	drv_data->dspi_dtfr = (volatile u32 *)&MCF_DSPI_DTFR;
++	drv_data->dspi_drfr = (volatile u32 *)&MCF_DSPI_DRFR;
+ #endif
+ 	memory_resource = platform_get_resource_byname(pdev, IORESOURCE_MEM,
+ 						       "spi-par");
+-- 
+1.6.4
+

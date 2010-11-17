@@ -1,0 +1,122 @@
+From 59b185e94f4c36e48f10445a9ece981538f67bfd Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Fri, 4 Jun 2010 16:35:23 +0800
+Subject: [PATCH] M54418TWR NFC driver update
+
+Disable hw ECC for erase block aligned pages.
+
+On the erase block, there's always have clean marker for jffs2,
+The NFC ECC provide a fake correction on the erase block when
+there're clean marker and adjust the bits on the fly when reading back.
+
+Disable the hw ECC on erase block aligned pages is a workaround
+for jffs2 on the NAND.
+
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ drivers/mtd/nand/fsl_nfc.c |   37 +++++++++++++++++++++++++++----------
+ 1 files changed, 27 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/mtd/nand/fsl_nfc.c b/drivers/mtd/nand/fsl_nfc.c
+index bd6bb74..274971b 100644
+--- a/drivers/mtd/nand/fsl_nfc.c
++++ b/drivers/mtd/nand/fsl_nfc.c
+@@ -35,10 +35,10 @@
+ 
+ /* Timeouts */
+ #define NFC_RESET_TIMEOUT	1000		/* 1 ms */
+-#define NFC_TIMEOUT		(5*(HZ / 10))
++#define NFC_TIMEOUT		(HZ)
+ 
+ 
+-#define ECC_SRAM_ADDR	0x100
++#define ECC_SRAM_ADDR	(0x840 >> 3)
+ #define ECC_STATUS_MASK	0x80
+ #define ECC_ERR_COUNT	0x3F
+ 
+@@ -60,6 +60,7 @@ struct fsl_nfc_prv {
+ 	wait_queue_head_t	irq_waitq;
+ 	uint			column;
+ 	int			spareonly;
++	int			page;
+ };
+ 
+ static int get_status;
+@@ -222,16 +223,17 @@ static void fsl_nfc_done(struct mtd_info *mtd)
+ 	struct fsl_nfc_prv *prv = chip->priv;
+ 	int rv;
+ 
+-	nfc_set(mtd, NFC_IRQ_STATUS, CMD_DONE_EN_MASK | IDLE_EN_MASK);
++	nfc_set(mtd, NFC_IRQ_STATUS, IDLE_EN_MASK);
++
+ 	nfc_set_field(mtd, NFC_FLASH_CMD2, START_MASK,
+ 			START_SHIFT, 1);
+ 
+-	if (!nfc_get_field(mtd, NFC_IRQ_STATUS, CMD_DONE_IRQ_MASK)) {
++	if (!nfc_get_field(mtd, NFC_IRQ_STATUS, IDLE_IRQ_MASK)) {
+ 		rv = wait_event_timeout(prv->irq_waitq,
+ 			nfc_get_field(mtd, NFC_IRQ_STATUS,
+-				CMD_DONE_IRQ_MASK), NFC_TIMEOUT);
++				IDLE_IRQ_MASK), NFC_TIMEOUT);
+ 		if (!rv)
+-			printk(KERN_WARNING DRV_NAME
++			printk(KERN_DEBUG DRV_NAME
+ 				": Timeout while waiting for BUSY.\n");
+ 	}
+ 	fsl_nfc_clear(mtd);
+@@ -306,8 +308,7 @@ fsl_nfc_irq(int irq, void *data)
+ 	struct nand_chip *chip = mtd->priv;
+ 	struct fsl_nfc_prv *prv = chip->priv;
+ 
+-	nfc_clear(mtd, NFC_IRQ_STATUS, CMD_DONE_EN_MASK
+-			| IDLE_EN_MASK);
++	nfc_clear(mtd, NFC_IRQ_STATUS, IDLE_EN_MASK);
+ 	wake_up(&prv->irq_waitq);
+ 
+ 	return IRQ_HANDLED;
+@@ -393,8 +394,25 @@ fsl_nfc_command(struct mtd_info *mtd, unsigned command,
+ 	get_id = 0;
+ 	get_status = 0;
+ 
++	if (page != -1) prv->page = page;
++
++	nfc_set_field(mtd, NFC_FLASH_CONFIG,
++		CONFIG_ECC_MODE_MASK,
++		CONFIG_ECC_MODE_SHIFT, ECC_45_BYTE);
++
++	if (!(page%0x40)) {
++			nfc_set_field(mtd, NFC_FLASH_CONFIG,
++				CONFIG_ECC_MODE_MASK,
++				CONFIG_ECC_MODE_SHIFT, ECC_BYPASS);
++	}
++
+ 	switch (command) {
+ 	case NAND_CMD_PAGEPROG:
++		if (!(prv->page%0x40))
++			nfc_set_field(mtd, NFC_FLASH_CONFIG,
++				CONFIG_ECC_MODE_MASK,
++				CONFIG_ECC_MODE_SHIFT, ECC_BYPASS);
++
+ 		fsl_nfc_send_cmd(mtd,
+ 				PROGRAM_PAGE_CMD_BYTE1,
+ 				PROGRAM_PAGE_CMD_BYTE2,
+@@ -848,7 +866,6 @@ fsl_nfc_probe(struct platform_device *pdev)
+ 	bbt_main_descr.pattern = bbt_pattern;
+ 	bbt_mirror_descr.pattern = mirror_pattern;
+ 
+-
+ 	init_waitqueue_head(&prv->irq_waitq);
+ 	retval = request_irq(prv->irq, fsl_nfc_irq, IRQF_DISABLED, DRV_NAME, mtd);
+ 	if (retval) {
+@@ -898,7 +915,7 @@ fsl_nfc_probe(struct platform_device *pdev)
+ 		goto error;
+ 	}
+ 
+-	printk(KERN_DEBUG"parse partition: partnr = %d\n", retval);
++	printk(KERN_DEBUG "parse partition: partnr = %d\n", retval);
+ 
+ 	if (retval > 0)
+ 		retval = add_mtd_partitions(mtd, parts, retval);
+-- 
+1.6.4
+

@@ -1,0 +1,51 @@
+From c3829a77dabe2a15d88ad0e080030fbc884c6449 Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Sun, 13 Jun 2010 13:31:56 +0800
+Subject: [PATCH] FEC RMII interface slew rate setting fix
+
+This patch add the slew rate setting for 54418 FEC RMII interface.
+When the FEC used in u-boot, this will be set. but when boot kernel
+from NAND, the FEC did not used and the slew rate was not set.
+
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ arch/m68k/coldfire/m5441x/fec.c      |    3 +++
+ arch/m68k/coldfire/m5441x/l2switch.c |    2 ++
+ 2 files changed, 5 insertions(+), 0 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m5441x/fec.c b/arch/m68k/coldfire/m5441x/fec.c
+index fc80646..8c34da6 100644
+--- a/arch/m68k/coldfire/m5441x/fec.c
++++ b/arch/m68k/coldfire/m5441x/fec.c
+@@ -233,12 +233,15 @@ static int __init mcf5441x_fec_dev_init(void)
+ 		MCF_GPIO_PAR_FEC_FEC_MASK) |
+ 		MCF_GPIO_PAR_FEC_FEC_RMII0FUL_ULPI;
+ 
++	MCF_GPIO_SRCR_FEC = 0x0C;
++
+ #if defined(CONFIG_FEC2)
+ 	MCF_GPIO_PAR_FEC =
+ 		(MCF_GPIO_PAR_FEC &
+ 		MCF_GPIO_PAR_FEC_FEC_MASK) |
+ 		MCF_GPIO_PAR_FEC_FEC_RMII0FUL_1FUL;
+ 
++	MCF_GPIO_SRCR_FEC |= 0x03;
+ 
+ 	MCF_GPIO_PAR_SIMP0H =
+ 		(MCF_GPIO_PAR_SIMP0H &
+diff --git a/arch/m68k/coldfire/m5441x/l2switch.c b/arch/m68k/coldfire/m5441x/l2switch.c
+index 0a11994..af01e0a 100644
+--- a/arch/m68k/coldfire/m5441x/l2switch.c
++++ b/arch/m68k/coldfire/m5441x/l2switch.c
+@@ -87,6 +87,8 @@ static void switch_request_intrs(struct net_device *dev,
+ 		MCF_GPIO_PAR_FEC_FEC_MASK) |
+ 		MCF_GPIO_PAR_FEC_FEC_RMII0FUL_1FUL;
+ 
++	MCF_GPIO_SRCR_FEC = 0x0F;
++
+ 	MCF_GPIO_PAR_SIMP0H =
+ 		(MCF_GPIO_PAR_SIMP0H &
+ 		MCF_GPIO_PAR_SIMP0H_DAT_MASK) |
+-- 
+1.6.4
+

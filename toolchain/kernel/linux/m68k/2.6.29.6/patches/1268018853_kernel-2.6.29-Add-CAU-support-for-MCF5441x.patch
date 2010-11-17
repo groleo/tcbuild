@@ -1,0 +1,65 @@
+From 7c3686aaf3f5cc78cb242a769e83a35ff7faeff8 Mon Sep 17 00:00:00 2001
+From: Shrek Wu <b16972@freescale.com>
+Date: Mon, 8 Mar 2010 11:27:33 +0800
+Subject: [PATCH 06/16] Add CAU support for MCF5441x.
+
+This patch enable the des, 3des, aes, md5 and sha1 for MCF5441x.
+
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ drivers/crypto/Kconfig |   12 ++++++------
+ 1 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/crypto/Kconfig b/drivers/crypto/Kconfig
+index 0329e92..aba15a1 100644
+--- a/drivers/crypto/Kconfig
++++ b/drivers/crypto/Kconfig
+@@ -63,15 +63,15 @@ config CRYPTO_DEV_GEODE
+ 
+ config CRYPTO_DEV_MCFCAU
+ 	bool "Support for Freescale Coldfire Cryptographic Acceleration Unit (CAU)"
+-	depends on M5445X
++	depends on M5445X || M5441X
+ 	select CRYPTO_ALGAPI
+ 	help
+ 	  The cryptographic acceleration unit (CAU) is a ColdFire coprocessor
+ 	  implementing a set of specialized operations in hardware. For example,
+-	  you can find it on MCF5445X.
++	  you can find it on MCF5445X, or M5441X.
+ 
+ config CRYPTO_DEV_MCFCAU_DES
+-	tristate "DES and Triple DES cipher algorithms (MCF5445X)"
++	tristate "DES and Triple DES cipher algorithms (coldfire)"
+ 	depends on CRYPTO_DEV_MCFCAU
+ 	select CRYPTO_ALGAPI
+ 	select CRYPTO_BLKCIPHER
+@@ -85,7 +85,7 @@ config CRYPTO_DEV_MCFCAU_DES
+ 	  will be called mcfcau-des.
+ 
+ config CRYPTO_DEV_MCFCAU_AES
+-	tristate "AES cipher algorithm (MCF5445X)"
++	tristate "AES cipher algorithm (coldfire)"
+ 	depends on CRYPTO_DEV_MCFCAU
+ 	select CRYPTO_ALGAPI
+ 	select CRYPTO_BLKCIPHER
+@@ -99,7 +99,7 @@ config CRYPTO_DEV_MCFCAU_AES
+ 	  will be called mcfcau-aes.
+ 
+ config CRYPTO_DEV_MCFCAU_MD5
+-	tristate "MD5 digest algorithm (MCF5445X)"
++	tristate "MD5 digest algorithm (coldfire)"
+ 	depends on CRYPTO_DEV_MCFCAU
+ 	select CRYPTO_ALGAPI
+ 	help
+@@ -112,7 +112,7 @@ config CRYPTO_DEV_MCFCAU_MD5
+ 	  the module will be called mcfcau-md5.
+ 
+ config CRYPTO_DEV_MCFCAU_SHA1
+-	tristate "SHA1 digest algorithm (MCF5445X)"
++	tristate "SHA1 digest algorithm (coldfire)"
+ 	depends on CRYPTO_DEV_MCFCAU
+ 	select CRYPTO_ALGAPI
+ 	help
+-- 
+1.6.4
+

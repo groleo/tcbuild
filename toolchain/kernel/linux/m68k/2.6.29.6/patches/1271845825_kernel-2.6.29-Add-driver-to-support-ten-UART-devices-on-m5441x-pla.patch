@@ -1,0 +1,474 @@
+From 747cf206aee4b6bf94b3be672bfe446b74a99e04 Mon Sep 17 00:00:00 2001
+From: Lanttor Guo <lanttor.guo@freescale.com>
+Date: Wed, 21 Apr 2010 18:30:25 +0800
+Subject: [PATCH 14/16] Add driver to support ten UART devices on m5441x platform
+
+Test CPU board: UART0(J1), UART4(J3)
+Test SER2 board: UART1(J11), UART2(J31)
+
+Signed-off-by: Lanttor Guo <lanttor.guo@freescale.com>
+---
+ arch/m68k/coldfire/m5441x/devices.c   |  223 ++++++++++++++++++++++++++-------
+ arch/m68k/include/asm/mcf5441x_gpio.h |    2 +-
+ arch/m68k/include/asm/mcfuart.h       |   30 +++--
+ drivers/serial/Kconfig                |   70 ++++++++++
+ drivers/serial/mcf.c                  |    4 +-
+ 5 files changed, 270 insertions(+), 59 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m5441x/devices.c b/arch/m68k/coldfire/m5441x/devices.c
+index ef27b72..d820904 100644
+--- a/arch/m68k/coldfire/m5441x/devices.c
++++ b/arch/m68k/coldfire/m5441x/devices.c
+@@ -36,7 +36,7 @@
+ /*
+  * I2C
+  */
+-#if defined(CONFIG_I2C)
++#if defined(CONFIG_I2C) || defined(CONFIG_I2C_MODULE)
+ static struct resource coldfire_i2c_resources[] = {
+ 	{		/* I/O */
+ 		.start		= 0xFC058000,
+@@ -225,8 +225,8 @@ static struct coldfire_spi_master coldfire_master_info = {
+ static struct resource coldfire_spi0_resources[] = {
+ 	[0] = {
+ 		.name = "spi-par",
+-		.start = (u32)&MCF_GPIO_PAR_DSPI0,	/* PAR_DSPI0 */
+-		.end = (u32)&MCF_GPIO_PAR_DSPI0,	/* PAR_DSPI0 */
++		.start = (u32)&MCF_GPIO_PAR_DSPI0WH,	/* PAR_DSPI0 */
++		.end = (u32)&MCF_GPIO_PAR_DSPI0WH,	/* PAR_DSPI0 */
+ 		.flags = IORESOURCE_MEM
+ 	},
+ 
+@@ -284,27 +284,72 @@ out:
+ }
+ #endif
+ 
+-static int __init mcf5441x_init_devices(void)
+-{
+-	printk(KERN_INFO "mcf5441x_init_devices: %s.\n", __func__);
+-
+-#if defined(CONFIG_I2C)
+-	mcf5441x_init_i2c();
+-#endif
+-#if defined(CONFIG_SPI) || defined(CONFIG_SPI_MODULE)
+-	m5441x_spi_init();
+-#endif
+-	return 0;
+-}
+-arch_initcall(mcf5441x_init_devices);
+-
+-/***************************************************************************/
++#if defined (CONFIG_SERIAL_MCF) || defined(CONFIG_SERIAL_MCF_MODULE)
++/*
++ * UART initialization
++ */
+ static struct mcf_platform_uart m5441x_uart_platform[] = {
++#ifdef CONFIG_SERIAL_MCF_UART0
++	{
++		.mapbase	= MCFUART_BASE0,
++		.irq		= MCFINT0_VECBASE + MCFINT_UART0,
++	},
++#endif
++#ifdef CONFIG_SERIAL_MCF_UART1
+ 	{
+ 		.mapbase	= MCFUART_BASE1,
+-		.irq		= MCFINT_VECBASE + MCFINT_UART0,
++		.irq		= MCFINT0_VECBASE + MCFINT_UART1,
++	},
++#endif
++#ifdef CONFIG_SERIAL_MCF_UART2
++	{
++		.mapbase	= MCFUART_BASE2,
++		.irq		= MCFINT0_VECBASE + MCFINT_UART2,
++	},
++#endif
++#ifdef CONFIG_SERIAL_MCF_UART3
++	{
++		.mapbase	= MCFUART_BASE3,
++		.irq		= MCFINT0_VECBASE + MCFINT_UART3,
++	},
++#endif
++#ifdef CONFIG_SERIAL_MCF_UART4
++	{
++		.mapbase	= MCFUART_BASE4,
++		.irq		= MCFINT1_VECBASE + MCFINT_UART4,
++	},
++#endif
++#ifdef CONFIG_SERIAL_MCF_UART5
++	{
++		.mapbase	= MCFUART_BASE5,
++		.irq		= MCFINT1_VECBASE + MCFINT_UART5,
++	},
++#endif
++#ifdef CONFIG_SERIAL_MCF_UART6
++	{
++		.mapbase	= MCFUART_BASE6,
++		.irq		= MCFINT1_VECBASE + MCFINT_UART6,
++	},
++#endif
++#ifdef CONFIG_SERIAL_MCF_UART7
++	{
++		.mapbase	= MCFUART_BASE7,
++		.irq		= MCFINT1_VECBASE + MCFINT_UART7,
++	},
++#endif
++#ifdef CONFIG_SERIAL_MCF_UART8
++	{
++		.mapbase	= MCFUART_BASE8,
++		.irq		= MCFINT1_VECBASE + MCFINT_UART8,
+ 	},
+-	{ },
++#endif
++#ifdef CONFIG_SERIAL_MCF_UART9
++	{
++		.mapbase	= MCFUART_BASE9,
++		.irq		= MCFINT1_VECBASE + MCFINT_UART9,
++	},
++#endif
++	{}
+ };
+ 
+ static struct platform_device m5441x_uart = {
+@@ -313,7 +358,108 @@ static struct platform_device m5441x_uart = {
+ 	.dev.platform_data	= m5441x_uart_platform,
+ };
+ 
++static void m5441x_uarts_init(void)
++{
++#ifdef CONFIG_SERIAL_MCF_UART0
++	/* enable uart0 clock */
++	MCF_PM_PPMCR0 = 24;
++
++	/* gpio pin assignment for uart0 */
++	MCF_GPIO_PAR_UART0 &= (MCF_GPIO_PAR_UART0_U0RXD_MASK |
++				MCF_GPIO_PAR_UART0_U0TXD_MASK);
++	MCF_GPIO_PAR_UART0 |= (MCF_GPIO_PAR_UART0_U0RXD_U0RXD |
++				MCF_GPIO_PAR_UART0_U0TXD_U0TXD);
++#endif
++#ifdef CONFIG_SERIAL_MCF_UART1
++	/* enable uart1 clock */
++	MCF_PM_PPMCR0 = 25;
++	/* gpio pin assignment for uart1 */
++	MCF_GPIO_PAR_UART1 &= (MCF_GPIO_PAR_UART1_U1RXD_MASK |
++				MCF_GPIO_PAR_UART1_U1TXD_MASK);
++	MCF_GPIO_PAR_UART1 |= (MCF_GPIO_PAR_UART1_U1RXD_U1RXD |
++				MCF_GPIO_PAR_UART1_U1TXD_U1TXD);
++#endif
++#ifdef CONFIG_SERIAL_MCF_UART2
++	/* enable uart2 clock */
++	MCF_PM_PPMCR0 = 26;
++	/* gpio pin assignment for uart2 */
++	MCF_GPIO_PAR_UART2 &= (MCF_GPIO_PAR_UART2_U2RXD_MASK |
++				MCF_GPIO_PAR_UART2_U2TXD_MASK);
++	MCF_GPIO_PAR_UART2 |= (MCF_GPIO_PAR_UART2_U2RXD_U2RXD |
++				MCF_GPIO_PAR_UART2_U2TXD_U2TXD);
++#endif
++#ifdef CONFIG_SERIAL_MCF_UART3
++	/* enable uart3 clock */
++	MCF_PM_PPMCR0 = 27;
++	/* gpio pin assignment for uart3 */
++	MCF_GPIO_PAR_DSPI0WH &= (MCF_GPIO_PAR_DSPI0_SIN_MASK |
++				MCF_GPIO_PAR_DSPI0_SOUT_MASK);
++	MCF_GPIO_PAR_DSPI0WH |= (MCF_GPIO_PAR_DSPI0_SIN_U3RXD |
++				MCF_GPIO_PAR_DSPI0_SOUT_U3TXD);
++#endif
++#ifdef CONFIG_SERIAL_MCF_UART4
++	/* enable uart4 clock */
++	MCF_PM_PPMCR1 = 24;
++
++	/* gpio pin assignment for uart4 */
++	MCF_GPIO_PAR_UART0 &= (MCF_GPIO_PAR_UART0_U0RTS_MASK |
++				MCF_GPIO_PAR_UART0_U0CTS_MASK);
++	MCF_GPIO_PAR_UART0 |= (MCF_GPIO_PAR_UART0_U0RTS_U4RXD |
++				MCF_GPIO_PAR_UART0_U0CTS_U4TXD);
++#endif
++#ifdef CONFIG_SERIAL_MCF_UART5
++	/* enable uart5 clock */
++	MCF_PM_PPMCR1 = 25;
++
++	/* gpio pin assignment for uart5 */
++	MCF_GPIO_PAR_UART1 &= (MCF_GPIO_PAR_UART1_U1RTS_MASK |
++				MCF_GPIO_PAR_UART1_U1CTS_MASK);
++	MCF_GPIO_PAR_UART1 |= (MCF_GPIO_PAR_UART1_U1RTS_U5RXD |
++				MCF_GPIO_PAR_UART1_U1CTS_U5TXD);
++#endif
++#ifdef CONFIG_SERIAL_MCF_UART6
++	/* enable uart6 clock */
++	MCF_PM_PPMCR1 = 26;
++	/* gpio pin assignment for uart6 */
++	MCF_GPIO_PAR_UART2 &= (MCF_GPIO_PAR_UART2_U2RTS_MASK |
++				MCF_GPIO_PAR_UART2_U2CTS_MASK);
++	MCF_GPIO_PAR_UART2 |= (MCF_GPIO_PAR_UART2_U2RTS_U6RXD |
++				MCF_GPIO_PAR_UART2_U2CTS_U6TXD);
++#endif
++#ifdef CONFIG_SERIAL_MCF_UART7
++	/* enable uart7 clock */
++	MCF_PM_PPMCR1 = 27;
++	/* gpio pin assignment for uart7 */
++	MCF_GPIO_PAR_SSI0H &= (MCF_GPIO_PAR_SSI0H_FS_MASK);
++	MCF_GPIO_PAR_SSI0H |= (MCF_GPIO_PAR_SSI0H_FS_U7TXD);
++	MCF_GPIO_PAR_SSI0L &= (MCF_GPIO_PAR_SSI0L_BCLK_MASK);
++	MCF_GPIO_PAR_SSI0L |= (MCF_GPIO_PAR_SSI0L_BCLK_U7RXD);
++#endif
++#ifdef CONFIG_SERIAL_MCF_UART8
++	/* enable uart8 clock */
++	MCF_PM_PPMCR1 = 28;
++	/* gpio pin assignment for uart8 */
++	MCF_GPIO_PAR_CANI2C &= (MCF_GPIO_PAR_CANI2C_I2C0SCL_MASK |
++				MCF_GPIO_PAR_CANI2C_I2C0SDA_MASK);
++	MCF_GPIO_PAR_CANI2C |= (MCF_GPIO_PAR_CANI2C_I2C0SCL_U8TXD |
++				MCF_GPIO_PAR_CANI2C_I2C0SDA_U8RXD);
++#endif
++#ifdef CONFIG_SERIAL_MCF_UART9
++	/* enable uart4 clock */
++	MCF_PM_PPMCR1 = 29;
++	/* gpio pin assignment for uart9 */
++	MCF_GPIO_PAR_CANI2C &= (MCF_GPIO_PAR_CANI2C_CAN1TX_MASK |
++				MCF_GPIO_PAR_CANI2C_CAN1RX_MASK);
++	MCF_GPIO_PAR_CANI2C |= (MCF_GPIO_PAR_CANI2C_CAN1TX_U9TXD |
++				MCF_GPIO_PAR_CANI2C_CAN1RX_U9RXD);
++#endif
++}
++#endif
++
+ #if defined(CONFIG_RTC_M5441X) || defined(CONFIG_RTC_M5441X_MODULE)
++/*
++ * RTC initialization
++ */
+ static struct platform_device rtc_device = {
+ 	.name = "rtc-m5441x",
+ 	.id   = -1,
+@@ -321,7 +467,9 @@ static struct platform_device rtc_device = {
+ #endif
+ 
+ static struct platform_device *m5441x_devices[] __initdata = {
++#if defined(CONFIG_SERIAL_MCF) || defined(CONFIG_SERIAL_MCF_MODULE)
+ 	&m5441x_uart,
++#endif
+ #if defined(CONFIG_RTC_M5441X) || defined(CONFIG_RTC_M5441X_MODULE)
+ 	&rtc_device,
+ #endif
+@@ -333,36 +481,23 @@ static struct platform_device *m5441x_devices[] __initdata = {
+ #endif
+ };
+ 
+-
+-static void m5441x_uart_init_line(int line, int irq)
+-{
+-	if (line == 0) {
+-		MCF_GPIO_PAR_UART0 &= (MCF_GPIO_PAR_UART0_U0RXD_MASK |
+-					MCF_GPIO_PAR_UART0_U0TXD_MASK);
+-		MCF_GPIO_PAR_UART0 |= (MCF_GPIO_PAR_UART0_U0RXD_U0RXD |
+-					MCF_GPIO_PAR_UART0_U0TXD_U0TXD);
+-
+-	}
+-}
+-
+-void m5441x_uarts_init(void)
++static int __init mcf5441x_init_devices(void)
+ {
+-	const int nrlines = ARRAY_SIZE(m5441x_uart_platform);
+-	int line;
+-
+-	for (line = 0; (line < nrlines); line++)
+-		m5441x_uart_init_line(line, m5441x_uart_platform[line].irq);
+-}
+-/****************************************************************************/
+-/***************************************************************************/
++	printk(KERN_INFO "mcf5441x_init_devices: %s.\n", __func__);
+ 
+-static int __init init_BSP(void)
+-{
++#if defined(CONFIG_I2C) || defined(CONFIG_I2C_MODULE)
++	mcf5441x_init_i2c();
++#endif
++#if defined(CONFIG_SPI) || defined(CONFIG_SPI_MODULE)
++	m5441x_spi_init();
++#endif
++#if defined(CONFIG_SERIAL_MCF) || defined(CONFIG_SERIAL_MCF_MODULE)
+ 	m5441x_uarts_init();
++#endif
+ 	platform_add_devices(m5441x_devices, ARRAY_SIZE(m5441x_devices));
+ 	return 0;
+ }
+ 
+-arch_initcall(init_BSP);
++arch_initcall(mcf5441x_init_devices);
+ 
+ 
+diff --git a/arch/m68k/include/asm/mcf5441x_gpio.h b/arch/m68k/include/asm/mcf5441x_gpio.h
+index aefcde2..1ce97ea 100644
+--- a/arch/m68k/include/asm/mcf5441x_gpio.h
++++ b/arch/m68k/include/asm/mcf5441x_gpio.h
+@@ -88,7 +88,7 @@
+ #define MCF_GPIO_PAR_CANI2C	MCF_REG08(0xEC09404B)
+ #define MCF_GPIO_PAR_IRQ0H	MCF_REG08(0xEC09404C)
+ #define MCF_GPIO_PAR_IRQ0L	MCF_REG08(0xEC09404D)
+-#define MCF_GPIO_PAR_DSPI0	MCF_REG08(0xEC09404E)
++#define MCF_GPIO_PAR_DSPI0WH	MCF_REG08(0xEC09404E)
+ #define MCF_GPIO_PAR_DSPI0WL	MCF_REG08(0xEC09404F)
+ #define MCF_GPIO_PAR_TIMER	MCF_REG08(0xEC094050)
+ #define MCF_GPIO_PAR_UART2	MCF_REG08(0xEC094051)
+diff --git a/arch/m68k/include/asm/mcfuart.h b/arch/m68k/include/asm/mcfuart.h
+index 31079c7..f896018 100644
+--- a/arch/m68k/include/asm/mcfuart.h
++++ b/arch/m68k/include/asm/mcfuart.h
+@@ -5,7 +5,7 @@
+  *
+  *	(C) Copyright 1999-2003, Greg Ungerer (gerg@snapgear.com)
+  * 	(C) Copyright 2000, Lineo Inc. (www.lineo.com) 
+- * 	Copyright 2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ * 	Copyright (C) 2009-2010 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /****************************************************************************/
+@@ -66,18 +66,19 @@
+ #define MCFINT_UART2            33
+ #define MCFINT_UART3            32
+ #elif defined(CONFIG_M5441X)
+-#define MCFUART_BASE1          0xfc060000      /* Base address of UART1 */
+-#define MCFUART_BASE2          0xfc064000      /* Base address of UART2 */
+-#define MCFUART_BASE3          0xfc068000      /* Base address of UART3 */
+-#define MCFUART_BASE4          0xfc06C000      /* Base address of UART4 */
+-#define MCFUART_BASE5          0xec060000
+-#define MCFUART_BASE6          0xec064000
+-#define MCFUART_BASE7          0xec068000
+-#define MCFUART_BASE8          0xec06C000
+-#define MCFUART_BASE9          0xec070000
+-#define MCFUART_BASE10         0xec074000
++#define MCFUART_BASE0          0xfc060000      /* Base address of UART1 */
++#define MCFUART_BASE1          0xfc064000      /* Base address of UART2 */
++#define MCFUART_BASE2          0xfc068000      /* Base address of UART3 */
++#define MCFUART_BASE3          0xfc06C000      /* Base address of UART4 */
++#define MCFUART_BASE4          0xec060000
++#define MCFUART_BASE5          0xec064000
++#define MCFUART_BASE6          0xec068000
++#define MCFUART_BASE7          0xec06C000
++#define MCFUART_BASE8          0xec070000
++#define MCFUART_BASE9          0xec074000
+ 
+-#define MCFINT_VECBASE		64
++#define MCFINT0_VECBASE		64
++#define MCFINT1_VECBASE		(64 + 64)
+ #define MCFINT_UART0            26
+ #define MCFINT_UART1            27
+ #define MCFINT_UART2            28
+@@ -88,7 +89,12 @@
+ #define MCFINT_UART7            51
+ #define MCFINT_UART8            52
+ #define MCFINT_UART9            53
++#endif
+ 
++#if defined(CONFIG_M5441X)
++#define MAX_PORT_NUM	10
++#else
++#define MAX_PORT_NUM	3
+ #endif
+ 
+ #ifndef __ASSEMBLY__
+diff --git a/drivers/serial/Kconfig b/drivers/serial/Kconfig
+index 9618026..e51c1e2 100644
+--- a/drivers/serial/Kconfig
++++ b/drivers/serial/Kconfig
+@@ -1052,6 +1052,76 @@ config SERIAL_MCF_CONSOLE
+ 	help
+ 	  Enable a ColdFire internal serial port to be the system console.
+ 
++config SERIAL_MCF_UART0
++	bool "Coldfire UART0 device support"
++	depends on SERIAL_MCF && M5441X
++	default y
++	help
++	  Enable ColdFire UART0 device configuration
++
++config SERIAL_MCF_UART1
++	bool "Coldfire UART1 device support"
++	depends on SERIAL_MCF && M5441X
++	default n
++	help
++	  Enable ColdFire UART1 device configuration
++
++config SERIAL_MCF_UART2
++	bool "Coldfire UART2 device support"
++	depends on SERIAL_MCF && M5441X
++	default n
++	help
++	  Enable ColdFire UART2 device configuration
++
++config SERIAL_MCF_UART3
++	bool "Coldfire UART3 device support"
++	depends on SERIAL_MCF && M5441X
++	default n
++	help
++	  Enable ColdFire UART3 device configuration
++
++config SERIAL_MCF_UART4
++	bool "Coldfire UART4 device support"
++	depends on SERIAL_MCF && M5441X
++	default n
++	help
++	  Enable ColdFire UART4 device configuration
++
++config SERIAL_MCF_UART5
++	bool "Coldfire UART5 device support"
++	depends on SERIAL_MCF && M5441X
++	default n
++	help
++	  Enable ColdFire UART5 device configuration
++
++config SERIAL_MCF_UART6
++	bool "Coldfire UART6 device support"
++	depends on SERIAL_MCF && M5441X
++	default n
++	help
++	  Enable ColdFire UART6 device configuration
++
++config SERIAL_MCF_UART7
++	bool "Coldfire UART7 device support"
++	depends on SERIAL_MCF && M5441X
++	default n
++	help
++	  Enable ColdFire UART7 device configuration
++
++config SERIAL_MCF_UART8
++	bool "Coldfire UART8 device support"
++	depends on SERIAL_MCF && M5441X
++	default n
++	help
++	  Enable ColdFire UART8 device configuration
++
++config SERIAL_MCF_UART9
++	bool "Coldfire UART9 device support"
++	depends on SERIAL_MCF && M5441X
++	default n
++	help
++	  Enable ColdFire UART9 device configuration
++
+ config SERIAL_68360_SMC
+ 	bool "68360 SMC uart support"
+ 	depends on M68360
+diff --git a/drivers/serial/mcf.c b/drivers/serial/mcf.c
+index d253f4d..8e77236 100644
+--- a/drivers/serial/mcf.c
++++ b/drivers/serial/mcf.c
+@@ -4,7 +4,7 @@
+  *	mcf.c -- Freescale ColdFire UART driver
+  *
+  *	(C) Copyright 2003-2007, Greg Ungerer <gerg@snapgear.com>
+- *          Copyright (C) 2008-2009 Freescale Semiconductor, Inc.
++ *          Copyright (C) 2008-2010 Freescale Semiconductor, Inc.
+  *          All rights reserved.
+  *              Jason Jin Jason.Jin@freescale.com
+  *              Shrek Wu B16972@freescale.com
+@@ -531,7 +531,7 @@ static struct uart_ops mcf_uart_ops = {
+ 	.verify_port	= mcf_verify_port,
+ };
+ 
+-static struct mcf_uart mcf_ports[3];
++static struct mcf_uart mcf_ports[MAX_PORT_NUM];
+ 
+ #define	MCF_MAXPORTS	ARRAY_SIZE(mcf_ports)
+ 
+-- 
+1.6.4
+

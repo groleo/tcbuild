@@ -1,0 +1,28 @@
+From bd0102031d9b399f6208d49bfc4dcc4a2191081a Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Fri, 23 Apr 2010 16:11:14 +0800
+Subject: [PATCH] M54418TWR CAU bug fix.
+
+not enable the ocf this time.
+
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ crypto/Kconfig |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/crypto/Kconfig b/crypto/Kconfig
+index 33c07af..28073b3 100644
+--- a/crypto/Kconfig
++++ b/crypto/Kconfig
+@@ -733,7 +733,7 @@ config CRYPTO_ANSI_CPRNG
+ 	  for cryptographic modules.  Uses the Algorithm specified in
+ 	  ANSI X9.31 A.2.4
+ 
+-source "crypto/ocf/Kconfig"
++#source "crypto/ocf/Kconfig"
+ source "drivers/crypto/Kconfig"
+ 
+ endif	# if CRYPTO
+-- 
+1.6.4
+

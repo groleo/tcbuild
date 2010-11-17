@@ -1,0 +1,29 @@
+From 3456fd08a58fafe76edf0d177262e1cf62adc0bb Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Wed, 23 Jun 2010 10:18:32 +0800
+Subject: [PATCH] enable the write enbale for RTC ioclt
+
+Before modifying any RTC registers, write enable bit must be set.
+This patch fix the WE for the writing in IOCTL.
+
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ drivers/rtc/rtc-m5441x.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/rtc/rtc-m5441x.c b/drivers/rtc/rtc-m5441x.c
+index 9ef82dc..156e49c 100644
+--- a/drivers/rtc/rtc-m5441x.c
++++ b/drivers/rtc/rtc-m5441x.c
+@@ -368,6 +368,8 @@ static int mcf_rtc_ioctl(struct device *dev, unsigned int cmd,
+ {
+ 	int i;
+ 
++	disable_register_write_protection();
++
+ 	switch (cmd) {
+ 	case RTC_PIE_OFF:
+ 		writew((readw(MCF_RTC_IER) & ~PIT_ALL_ON), MCF_RTC_IER);
+-- 
+1.6.4
+

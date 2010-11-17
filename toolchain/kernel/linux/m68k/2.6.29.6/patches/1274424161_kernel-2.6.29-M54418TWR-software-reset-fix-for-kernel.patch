@@ -1,0 +1,43 @@
+From 8e8c2ffd022b1823f898fdc3a1db7590de7058d2 Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Fri, 21 May 2010 14:42:41 +0800
+Subject: [PATCH] M54418TWR software reset fix for kernel.
+
+Some devices need long reset time for software reset. without
+this, software reset did not work when SER1 board used.
+
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ arch/m68k/coldfire/m5441x/config.c |    9 ++++++++-
+ 1 files changed, 8 insertions(+), 1 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m5441x/config.c b/arch/m68k/coldfire/m5441x/config.c
+index 543d489..9ee34e1 100644
+--- a/arch/m68k/coldfire/m5441x/config.c
++++ b/arch/m68k/coldfire/m5441x/config.c
+@@ -18,6 +18,7 @@
+ #include <linux/mm.h>
+ #include <linux/sched.h>
+ #include <linux/clockchips.h>
++#include <linux/delay.h>
+ #include <asm/bootinfo.h>
+ #include <asm/machdep.h>
+ #include <asm/coldfire.h>
+@@ -476,7 +477,13 @@ void coldfire_reboot(void)
+ {
+ 	/* disable interrupts and do a software reset */
+ 	asm("movew #0x2700, %%sr\n\t"
+-	    "moveb #0x80, %%d0\n\t"
++	    "moveb #0x40, %%d0\n\t"
++	    "moveb %%d0, 0xec090000\n\t"
++	    : : : "%d0");
++
++	mdelay(10);
++
++	asm("moveb #0x80, %%d0\n\t"
+ 	    "moveb %%d0, 0xec090000\n\t"
+ 	    : : : "%d0");
+ }
+-- 
+1.6.4
+

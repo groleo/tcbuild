@@ -1,0 +1,45 @@
+From 400341bf1661068b9ae220fe7b8bf74257420ad1 Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Fri, 23 Jul 2010 14:15:57 +0800
+Subject: [PATCH 12/14] Add ramdisk support for 547x8x boards.
+
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ arch/m68k/coldfire/m547x/config.c |    7 +++++++
+ 1 files changed, 7 insertions(+), 0 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m547x/config.c b/arch/m68k/coldfire/m547x/config.c
+index 6c3fd2a..dad26d5 100644
+--- a/arch/m68k/coldfire/m547x/config.c
++++ b/arch/m68k/coldfire/m547x/config.c
+@@ -62,6 +62,8 @@ EXPORT_SYMBOL(cf_dma_size);
+ /* ethernet mac addresses from uboot */
+ unsigned char uboot_enet0[6];
+ unsigned char uboot_enet1[6];
++unsigned long u_initrd_start;
++unsigned long u_initrd_end;
+ 
+ void coldfire_sort_memrec(void)
+ {
+@@ -116,6 +118,9 @@ int __init uboot_commandline(char *bootargs)
+ 	uboot_info.cmd_line_start = (*(u32 *)(uboot_info_stk+12)) + offset;
+ 	uboot_info.cmd_line_stop = (*(u32 *)(uboot_info_stk+16)) + offset;
+ 
++	u_initrd_start = uboot_info.initrd_start;
++	u_initrd_end = uboot_info.initrd_end;
++
+ 	/* copy over mac addresses */
+ 	memcpy(uboot_enet0, uboot_info.bdi->bi_enet0addr, 6);
+ 	memcpy(uboot_enet1, uboot_info.bdi->bi_enet1addr, 6);
+@@ -170,6 +175,8 @@ asmlinkage void __init cf_early_init(void)
+ 	/* add initrd image */
+ 	record = (struct bi_record *) ((void *)record + record->size);
+ 	record->tag = BI_RAMDISK;
++	record->data[0] = u_initrd_start;
++	record->data[1] = u_initrd_end - u_initrd_start + 1;
+ 	record->size =  sizeof(record->tag) + sizeof(record->size)
+ 		+ sizeof(record->data[0]) + sizeof(record->data[1]);
+ #endif
+-- 
+1.6.4
+

@@ -1,0 +1,54 @@
+From 521b42215982377c3cbb149437d80ea80ccccc58 Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Tue, 13 Apr 2010 14:01:00 +0800
+Subject: [PATCH 09/16] Add core watchdog support for M54418
+
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ drivers/watchdog/Kconfig   |    2 +-
+ drivers/watchdog/mcf_wdt.c |    8 ++++----
+ 2 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/watchdog/Kconfig b/drivers/watchdog/Kconfig
+index aa1d852..1ad17f7 100644
+--- a/drivers/watchdog/Kconfig
++++ b/drivers/watchdog/Kconfig
+@@ -772,7 +772,7 @@ config TXX9_WDT
+ 
+ config COLDFIRE_WATCHDOG
+ 	tristate "ColdFire watchdog support"
+-	depends on M547X_8X || M5445X
++	depends on M547X_8X || M5445X || M5441X
+ 	help
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called softdog.
+diff --git a/drivers/watchdog/mcf_wdt.c b/drivers/watchdog/mcf_wdt.c
+index 864db8d..4a8e432 100644
+--- a/drivers/watchdog/mcf_wdt.c
++++ b/drivers/watchdog/mcf_wdt.c
+@@ -66,7 +66,7 @@ wdt_keepalive(void)
+ 	MCF_GPT_GMS0 = MCF_GPT_GMS_OCPW(0xA5) | MCF_GPT_GMS0;
+ }
+ 
+-#elif defined(CONFIG_M5445X)
++#elif defined(CONFIG_M5445X) || defined(CONFIG_M5441X)
+ 
+ /* Enable watchdog and set time-out */
+ static int
+@@ -213,10 +213,10 @@ static int
+ mcf_wdt_release(struct inode *inode, struct file *file)
+ {
+ 	if (test_bit(WDT_OK_TO_CLOSE, &wdt_status)) {
+-		wdt_disable();
++		wdt_keepalive();
+ 	} else {
+-		printk(KERN_CRIT "WATCHDOG: Device closed unexpectdly - "
+-					"timer will not stop\n");
++		printk(KERN_CRIT "WATCHDOG: Device closed unexpectdly\n");
++		wdt_disable();
+ 	}
+ 
+ 	clear_bit(WDT_IN_USE, &wdt_status);
+-- 
+1.6.4
+

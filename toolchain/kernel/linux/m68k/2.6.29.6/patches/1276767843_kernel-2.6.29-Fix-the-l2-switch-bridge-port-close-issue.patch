@@ -1,0 +1,28 @@
+From 35fc5df48296bd375bae21eed36b479c5efa0b0e Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Thu, 17 Jun 2010 17:44:03 +0800
+Subject: [PATCH] Fix the l2 switch bridge port close issue
+
+This patch fix the issue that the bridge can open but can not close.
+
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ drivers/net/modelo_switch.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/net/modelo_switch.c b/drivers/net/modelo_switch.c
+index dea4b49..7f5fbd6 100644
+--- a/drivers/net/modelo_switch.c
++++ b/drivers/net/modelo_switch.c
+@@ -2160,7 +2160,7 @@ void  esw_bridge_port_configure(
+ 	volatile switch_t  *fecp;
+ 
+ 	fecp = fep->hwp;
+-	fecp->ESW_BMPC |= configure;
++	fecp->ESW_BMPC = configure;
+ #ifdef debug_bridge_port
+ 	printk(KERN_INFO "%s: bridge management port %x \n"
+ 		__func__, fecp->ESW_BMPC);
+-- 
+1.6.4
+

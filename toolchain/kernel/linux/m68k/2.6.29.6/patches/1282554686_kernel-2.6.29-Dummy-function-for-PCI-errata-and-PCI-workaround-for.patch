@@ -1,0 +1,224 @@
+From 07de240c59fd500a29c370ff4917d3678bf0fe84 Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Mon, 23 Aug 2010 17:11:26 +0800
+Subject: [PATCH] Dummy function for PCI errata and PCI workaround for watchdog
+
+This patch add a dummy funtion for m547x_8x PCI errata. Refer to M5475DE
+errata 35.
+
+This patch also try to disable PCI for watchdog reset. Otherwise, the
+watchdog reset will fail sometimes. Correspondingly, the PCI clock should
+be enabled in PCI initilization.
+
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ arch/m68k/coldfire/m547x/Makefile    |    2 +-
+ arch/m68k/coldfire/m547x/config.c    |    7 ++++-
+ arch/m68k/coldfire/m547x/pci.c       |   21 +++++++++-------
+ arch/m68k/coldfire/m547x/pci_dummy.S |   45 ++++++++++++++++++++++++++++++++++
+ arch/m68k/include/asm/m5485sim.h     |    1 +
+ drivers/watchdog/mcf_wdt.c           |    9 +++++++
+ 6 files changed, 73 insertions(+), 12 deletions(-)
+ create mode 100644 arch/m68k/coldfire/m547x/pci_dummy.S
+
+diff --git a/arch/m68k/coldfire/m547x/Makefile b/arch/m68k/coldfire/m547x/Makefile
+index 584fde4..5c1924b 100644
+--- a/arch/m68k/coldfire/m547x/Makefile
++++ b/arch/m68k/coldfire/m547x/Makefile
+@@ -3,5 +3,5 @@
+ #
+ 
+ obj-$(CONFIG_M547X_8X)	+= config.o mcf548x-devices.o devices.o
+-obj-$(CONFIG_PCI)       += pci.o
++obj-$(CONFIG_PCI)       += pci.o pci_dummy.o
+ obj-$(CONFIG_MCD_DMA)	+= dma.o
+diff --git a/arch/m68k/coldfire/m547x/config.c b/arch/m68k/coldfire/m547x/config.c
+index a1a3111..a8e98a7 100644
+--- a/arch/m68k/coldfire/m547x/config.c
++++ b/arch/m68k/coldfire/m547x/config.c
+@@ -305,12 +305,15 @@ void coldfire_reboot(void)
+ 	printk(KERN_INFO "Rebooting\n");
+ 
+ 	/*Disable the XLB priority settings, then set the core to same priority level
+-	 * as other XLB masters, otherwise the watchdog may fail to reset.*/
++	 * as other XLB masters, also disable the PCI here, otherwise the watchdog
++	 * may fail to reset.
++	 */
+ 	MCF_XARB_PRIEN = 0;
++	MCF_SPCR &= ~0x02;
+ 	asm("tpf");
+ 	asm("movew #0x2700, %sr\n");
+ 	MCF_GPT_GMS0 = MCF_GPT_GMS_WDEN | MCF_GPT_GMS_CE | MCF_GPT_GMS_TMS(4);
+-	MCF_GPT_GCIR0 = (0x0A << 16) | 0x01;
++	MCF_GPT_GCIR0 = (0x0A << 16) | 0x03;
+ }
+ 
+ static void coldfire_get_model(char *model)
+diff --git a/arch/m68k/coldfire/m547x/pci.c b/arch/m68k/coldfire/m547x/pci.c
+index c3da2cb..18fffec 100644
+--- a/arch/m68k/coldfire/m547x/pci.c
++++ b/arch/m68k/coldfire/m547x/pci.c
+@@ -299,6 +299,9 @@ static int read_config_dword(/*struct pci_dev *dev*/
+ 	return result;
+ }
+ 
++
++extern void pci_dummy_function();
++
+ /*
+  * static int write_config_byte()
+  *
+@@ -330,6 +333,8 @@ static int write_config_byte(/*struct pci_dev *dev*/
+ 	__asm("tpf");
+ 	MCF_PCICAR &= ~MCF_PCICAR_E;
+ 
++	pci_dummy_function();
++
+ 	DBG("PCI: write_config_byte bus=%d, dev=%d, fn=%d, "
+ 		"addr=0x%02X, value=0x%02X ret=%02X\n",
+ 	bus->number, PCI_SLOT(devfn), PCI_FUNC(devfn), where, value, result);
+@@ -374,6 +379,8 @@ static int write_config_word(/*struct pci_dev *dev*/
+ 	__asm("tpf");
+ 	MCF_PCICAR &= ~MCF_PCICAR_E;
+ 
++	pci_dummy_function();
++
+ 	DBG("PCI: write_config_word bus=%d, dev=%d, fn=%d, "
+ 		"addr=0x%02X, value=0x%04X ret=%02X\n",
+ 	bus->number, PCI_SLOT(devfn), PCI_FUNC(devfn), where, value, result);
+@@ -417,6 +424,8 @@ static int write_config_dword(/*struct pci_dev *dev*/
+ 	__asm("tpf");
+ 	MCF_PCICAR &= ~MCF_PCICAR_E;
+ 
++	pci_dummy_function();
++
+ 	DBG("PCI: write_config_dword dev=%d, fn=%d,"
+ 		"addr=0x%02X, value=0x%08X ret=%02X\n",
+ 	    PCI_SLOT(devfn), PCI_FUNC(devfn), where,  value, result);
+@@ -830,6 +839,8 @@ struct pci_bus_info *__init init_coldfire_pci(void)
+ 	int pci_mem_va;
+ 	static char irq_name[N_IRQS][15];
+ 
++	MCF_SPCR |= 0x02; /*Enable the PCI clock*/
++
+ 	/* Get controller revision */
+ 	revision = MCF_PCICCRIR;
+ 	printk(KERN_INFO "ColdFire PCI Host Bridge "
+@@ -907,7 +918,7 @@ struct pci_bus_info *__init init_coldfire_pci(void)
+ 	MCF_PCIIW1BTAR = WxBAR(HOST_IO_BASE,  PCI_IO_BASE_ADDR,  PCI_IO_SIZE);
+ 
+ 	MCF_PCIIWCR = MCF_PCIIWCR_WINCTRL1_IO |
+-		MCF_PCIIWCR_WINCTRL0_MEMRDLINE;
++		MCF_PCIIWCR_WINCTRL0_MEMREAD;
+ 
+ 	/* Target PCI DMA Windows */
+ 	MCF_PCIBAR1   = PCI_DMA_BASE;
+@@ -990,14 +1001,6 @@ struct pci_bus_info *__init init_coldfire_pci(void)
+ 	bus->fixup = coldfire_fixup;
+ 	bus->conf_device = configure_device;
+ 
+-	/*
+-	* improve the PCI priority on XLB bus, otherwise the pci configuration space
+-	* access may hang-up the linux kernel booting up, disable the priority if want
+-	* to use the watchdog reset.
+-	*/
+-	MCF_XARB_PRIEN = 0xff;
+-	MCF_XARB_PRI &= 0xffff0fff;
+-
+ 	return bus;
+ }
+ 
+diff --git a/arch/m68k/coldfire/m547x/pci_dummy.S b/arch/m68k/coldfire/m547x/pci_dummy.S
+new file mode 100644
+index 0000000..72841bb
+--- /dev/null
++++ b/arch/m68k/coldfire/m547x/pci_dummy.S
+@@ -0,0 +1,45 @@
++/*
++ * Copyright (C) 2010 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Author: Jason Jin <Jason.jin@freescale.com>
++ *
++ * This routine is the dummy function for PCI errata
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of
++ * the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ * MA 02111-1307 USA
++ */
++
++.global _pci_dummy_function
++.global pci_dummy_function
++.text
++
++pci_dummy_function:
++_pci_dummy_function:
++
++/* force function start to 16-byte boundary.Can be done in linker file also */
++.align 16
++clr.l %d0
++move.l %d0, 0xF0000F0C
++/* Must use direct addressing. write to EPORT module
++* xlbus -> slavebus -> eport, writing '0' to register has no
++* effect
++*/
++
++rts
++tpf.l #0x0
++tpf.l #0x0
++tpf.l #0x0
++tpf.l #0x0
++tpf.l #0x0
++.end
+diff --git a/arch/m68k/include/asm/m5485sim.h b/arch/m68k/include/asm/m5485sim.h
+index 5398401..763fda6 100644
+--- a/arch/m68k/include/asm/m5485sim.h
++++ b/arch/m68k/include/asm/m5485sim.h
+@@ -23,6 +23,7 @@
+ /* Arbiter master pri enable 	*/
+ #define	MCF_XARB_PRI	MCF_REG32(0x000268)
+ /* Arbiter master pri levels	*/
++#define MCF_SPCR	MCF_REG32(0x000300)
+ 
+ /*
+  *      FlexBus Chip Selects Registers
+diff --git a/drivers/watchdog/mcf_wdt.c b/drivers/watchdog/mcf_wdt.c
+index c0a465a..ff59ea7 100644
+--- a/drivers/watchdog/mcf_wdt.c
++++ b/drivers/watchdog/mcf_wdt.c
+@@ -213,7 +213,12 @@ static int
+ mcf_wdt_release(struct inode *inode, struct file *file)
+ {
+ 	if (test_bit(WDT_OK_TO_CLOSE, &wdt_status)) {
++#ifdef CONFIG_M547X_8X
++		MCF_GPT_GCIR0 = (0x0A << 16) | 0x09;
++		MCF_GPT_GMS0 = MCF_GPT_GMS_OCPW(0xA5) | MCF_GPT_GMS0;
++#else
+ 		wdt_keepalive();
++#endif
+ 	} else {
+ 		printk(KERN_CRIT "WATCHDOG: Device closed unexpectdly\n");
+ 		wdt_disable();
+@@ -225,6 +230,10 @@ mcf_wdt_release(struct inode *inode, struct file *file)
+ #ifdef CONFIG_M547X_8X
+ 	/*disable the XLB priority, otherwise the watchdog reset may fail*/
+ 	MCF_XARB_PRIEN = 0;
++	/*Also disable the PCI, Ugly! But there is issue between PCI and watchdog
++	 *Otherwise the watchdog reset may fail, only valuable for testing!
++	 */
++	MCF_SPCR &= ~0x02;
+ 	asm("tpf");
+ #endif
+ 
+-- 
+1.6.4
+

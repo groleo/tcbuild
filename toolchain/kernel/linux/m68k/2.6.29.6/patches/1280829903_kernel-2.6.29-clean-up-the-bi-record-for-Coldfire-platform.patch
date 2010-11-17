@@ -1,0 +1,285 @@
+From 4d2012996740483a2d8bd1ec6739080b0bf31b36 Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Tue, 3 Aug 2010 18:05:03 +0800
+Subject: [PATCH 3/3] clean up the bi record for Coldfire platform
+
+Remove the bi_record for coldfire platform. pass the initrd
+parameters to kernel directly.
+
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ arch/m68k/coldfire/m5441x/config.c |   30 ++++++------------------------
+ arch/m68k/coldfire/m5445x/config.c |   30 ++++++------------------------
+ arch/m68k/coldfire/m547x/config.c  |   33 ++++++---------------------------
+ arch/m68k/kernel/setup.c           |   13 +++++++------
+ 4 files changed, 25 insertions(+), 81 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m5441x/config.c b/arch/m68k/coldfire/m5441x/config.c
+index 634d399..1904790 100644
+--- a/arch/m68k/coldfire/m5441x/config.c
++++ b/arch/m68k/coldfire/m5441x/config.c
+@@ -54,6 +54,7 @@ extern char m68k_command_line[CL_SIZE];
+ extern unsigned long availmem;
+ extern unsigned long shadow_cacr;
+ EXPORT_SYMBOL(shadow_cacr);
++extern struct mem_info m68k_ramdisk;
+ 
+ static int irq_enable[NR_IRQS];
+ unsigned long num_pages;
+@@ -70,9 +71,6 @@ EXPORT_SYMBOL(cf_dma_size);
+ unsigned char uboot_enet0[6];
+ unsigned char uboot_enet1[6];
+ 
+-unsigned long u_initrd_start;
+-unsigned long u_initrd_end;
+-
+ void coldfire_sort_memrec(void)
+ {
+ 	int i, j;
+@@ -126,8 +124,11 @@ int __init uboot_commandline(char *bootargs)
+ 	uboot_info.cmd_line_start = (*(u32 *)(uboot_info_stk+12)) + offset;
+ 	uboot_info.cmd_line_stop = (*(u32 *)(uboot_info_stk+16)) + offset;
+ 
+-	u_initrd_start = uboot_info.initrd_start;
+-	u_initrd_end = uboot_info.initrd_end;
++#if defined(CONFIG_BLK_DEV_INITRD)
++	m68k_ramdisk.addr = uboot_info.initrd_start;
++	m68k_ramdisk.size = (uboot_info.initrd_end - uboot_info.initrd_start) ?
++		(uboot_info.initrd_end - uboot_info.initrd_start + 1) : 0;
++#endif
+ 
+ 	/* copy over mac addresses */
+ 	memcpy(uboot_enet0, uboot_info.bdi->bi_enet0addr, 6);
+@@ -202,31 +203,12 @@ asmlinkage void __init cf_early_init(void)
+ #endif
+ 	}
+ 
+-#if defined(CONFIG_BLK_DEV_INITRD)
+-	/* add initrd image */
+-	record = (struct bi_record *) ((void *)record + record->size);
+-	record->tag = BI_RAMDISK;
+-	record->data[0] = u_initrd_start;
+-	record->data[1] = (u_initrd_end - u_initrd_start) ? u_initrd_end - u_initrd_start + 1 : 0;
+-	record->size =  sizeof(record->tag) + sizeof(record->size)
+-		+ sizeof(record->data[0]) + sizeof(record->data[1]);
+-#endif
+-
+-	/* Mark end of tags. */
+-	record = (struct bi_record *) ((void *) record + record->size);
+-	record->tag = 0;
+-	record->data[0] = 0;
+-	record->data[1] = 0;
+-	record->size = sizeof(record->tag) + sizeof(record->size)
+-		+ sizeof(record->data[0]) + sizeof(record->data[1]);
+-
+ 	/* Invalidate caches via CACR */
+ 	flush_bcache();
+ 	cacr_set(CACHE_DISABLE_MODE);
+ 
+ 	/* Turn on caches via CACR, enable EUSP */
+ 	cacr_set(CACHE_INITIAL_MODE);
+-
+ }
+ 
+ /* Assembler routines */
+diff --git a/arch/m68k/coldfire/m5445x/config.c b/arch/m68k/coldfire/m5445x/config.c
+index 93d6226..c98977b 100644
+--- a/arch/m68k/coldfire/m5445x/config.c
++++ b/arch/m68k/coldfire/m5445x/config.c
+@@ -58,6 +58,7 @@ extern char m68k_command_line[CL_SIZE];
+ extern unsigned long availmem;
+ extern unsigned long shadow_cacr;
+ EXPORT_SYMBOL(shadow_cacr);
++extern struct mem_info m68k_ramdisk;
+ 
+ static int irq_enable[NR_IRQS];
+ unsigned long num_pages;
+@@ -74,9 +75,6 @@ EXPORT_SYMBOL(cf_dma_size);
+ unsigned char uboot_enet0[6];
+ unsigned char uboot_enet1[6];
+ 
+-unsigned long u_initrd_start;
+-unsigned long u_initrd_end;
+-
+ void coldfire_sort_memrec(void)
+ {
+ 	int i, j;
+@@ -130,8 +128,11 @@ int __init uboot_commandline(char *bootargs)
+ 	uboot_info.cmd_line_start = (*(u32 *)(uboot_info_stk+12)) + offset;
+ 	uboot_info.cmd_line_stop = (*(u32 *)(uboot_info_stk+16)) + offset;
+ 
+-	u_initrd_start = uboot_info.initrd_start;
+-	u_initrd_end = uboot_info.initrd_end;
++#if defined(CONFIG_BLK_DEV_INITRD)
++	m68k_ramdisk.addr = uboot_info.initrd_start;
++	m68k_ramdisk.size = (uboot_info.initrd_end - uboot_info.initrd_start) ?
++		(uboot_info.initrd_end - uboot_info.initrd_start + 1) : 0;
++#endif
+ 
+ 	/* copy over mac addresses */
+ 	memcpy(uboot_enet0, uboot_info.bdi->bi_enet0addr, 6);
+@@ -217,31 +218,12 @@ asmlinkage void __init cf_early_init(void)
+ #endif
+ 	}
+ 
+-#if defined(CONFIG_BLK_DEV_INITRD)
+-	/* add initrd image */
+-	record = (struct bi_record *) ((void *)record + record->size);
+-	record->tag = BI_RAMDISK;
+-	record->data[0] = u_initrd_start;
+-	record->data[1] = (u_initrd_end - u_initrd_start) ? u_initrd_end - u_initrd_start + 1 : 0;
+-	record->size =  sizeof(record->tag) + sizeof(record->size)
+-		+ sizeof(record->data[0]) + sizeof(record->data[1]);
+-#endif
+-
+-	/* Mark end of tags. */
+-	record = (struct bi_record *) ((void *) record + record->size);
+-	record->tag = 0;
+-	record->data[0] = 0;
+-	record->data[1] = 0;
+-	record->size = sizeof(record->tag) + sizeof(record->size)
+-		+ sizeof(record->data[0]) + sizeof(record->data[1]);
+-
+ 	/* Invalidate caches via CACR */
+ 	flush_bcache();
+ 	cacr_set(CACHE_DISABLE_MODE);
+ 
+ 	/* Turn on caches via CACR, enable EUSP */
+ 	cacr_set(CACHE_INITIAL_MODE);
+-
+ }
+ 
+ /* Assembler routines */
+diff --git a/arch/m68k/coldfire/m547x/config.c b/arch/m68k/coldfire/m547x/config.c
+index dad26d5..d9b3a7b 100644
+--- a/arch/m68k/coldfire/m547x/config.c
++++ b/arch/m68k/coldfire/m547x/config.c
+@@ -47,6 +47,7 @@ extern char _etext, _edata, __init_begin, __init_end;
+ extern struct console mcfrs_console;
+ extern char m68k_command_line[CL_SIZE];
+ extern unsigned long availmem;
++extern struct mem_info m68k_ramdisk;
+ 
+ static int irq_enable[NR_IRQS];
+ unsigned long num_pages;
+@@ -62,8 +63,6 @@ EXPORT_SYMBOL(cf_dma_size);
+ /* ethernet mac addresses from uboot */
+ unsigned char uboot_enet0[6];
+ unsigned char uboot_enet1[6];
+-unsigned long u_initrd_start;
+-unsigned long u_initrd_end;
+ 
+ void coldfire_sort_memrec(void)
+ {
+@@ -118,8 +117,11 @@ int __init uboot_commandline(char *bootargs)
+ 	uboot_info.cmd_line_start = (*(u32 *)(uboot_info_stk+12)) + offset;
+ 	uboot_info.cmd_line_stop = (*(u32 *)(uboot_info_stk+16)) + offset;
+ 
+-	u_initrd_start = uboot_info.initrd_start;
+-	u_initrd_end = uboot_info.initrd_end;
++#if defined(CONFIG_BLK_DEV_INITRD)
++	m68k_ramdisk.addr = uboot_info.initrd_start;
++	m68k_ramdisk.size = (uboot_info.initrd_end - uboot_info.initrd_start) ?
++		(uboot_info.initrd_end - uboot_info.initrd_start + 1) : 0;
++#endif
+ 
+ 	/* copy over mac addresses */
+ 	memcpy(uboot_enet0, uboot_info.bdi->bi_enet0addr, 6);
+@@ -144,10 +146,6 @@ int __init uboot_commandline(char *bootargs)
+ 
+ asmlinkage void __init cf_early_init(void)
+ {
+-	struct bi_record *record = (struct bi_record *) &_end;
+-
+-	extern char _end;
+-
+ 	SET_VBR((void *)MCF_RAMBAR0);
+ 
+ 	/* Mask all interrupts */
+@@ -171,31 +169,12 @@ asmlinkage void __init cf_early_init(void)
+ #endif
+ 	}
+ 
+-#if defined(CONFIG_BLK_DEV_INITRD)
+-	/* add initrd image */
+-	record = (struct bi_record *) ((void *)record + record->size);
+-	record->tag = BI_RAMDISK;
+-	record->data[0] = u_initrd_start;
+-	record->data[1] = u_initrd_end - u_initrd_start + 1;
+-	record->size =  sizeof(record->tag) + sizeof(record->size)
+-		+ sizeof(record->data[0]) + sizeof(record->data[1]);
+-#endif
+-
+-	/* Mark end of tags. */
+-	record = (struct bi_record *) ((void *) record + record->size);
+-	record->tag = 0;
+-	record->data[0] = 0;
+-	record->data[1] = 0;
+-	record->size = sizeof(record->tag) + sizeof(record->size)
+-		+ sizeof(record->data[0]) + sizeof(record->data[1]);
+-
+ 	/* Invalidate caches via CACR */
+ 	flush_bcache();
+ 	cacr_set(CACHE_DISABLE_MODE);
+ 
+ 	/* Turn on caches via CACR, enable EUSP */
+ 	cacr_set(CACHE_INITIAL_MODE);
+-
+ }
+ 
+ /* Assembler routines */
+diff --git a/arch/m68k/kernel/setup.c b/arch/m68k/kernel/setup.c
+index 111a1c3..72ee912 100644
+--- a/arch/m68k/kernel/setup.c
++++ b/arch/m68k/kernel/setup.c
+@@ -77,6 +77,7 @@ struct mem_info m68k_memory[NUM_MEMINFO];
+ EXPORT_SYMBOL(m68k_memory);
+ 
+ struct mem_info m68k_ramdisk;
++EXPORT_SYMBOL(m68k_ramdisk);
+ 
+ #if !defined(CONFIG_COLDFIRE)
+ static char m68k_command_line[CL_SIZE];
+@@ -161,7 +162,7 @@ extern void paging_init(void);
+ 
+ static void __init m68k_parse_bootinfo(const struct bi_record *record)
+ {
+-	while ((record->tag != BI_LAST)) {
++	while ((record->tag != BI_LAST)  && !(CONFIG_COLDFIRE)) {
+ 		int unknown = 0;
+ 		const unsigned long *data = record->data;
+ 
+@@ -238,7 +239,7 @@ static void __init m68k_parse_bootinfo(const struct bi_record *record)
+ void __init setup_arch(char **cmdline_p)
+ {
+ 
+-#if !defined(CONFIG_SUN3)
++#if !defined(CONFIG_SUN3) && !defined(CONFIG_COLDFIRE)
+ 	int i;
+ #endif
+ 	
+@@ -357,10 +358,6 @@ void __init setup_arch(char **cmdline_p)
+ 
+ 	paging_init();
+ 
+-#if !defined(CONFIG_SUN3)
+-	for (i = 1; i < m68k_num_memory; i++)
+-		free_bootmem_node(NODE_DATA(i), m68k_memory[i].addr,
+-				  m68k_memory[i].size);
+ #ifdef CONFIG_BLK_DEV_INITRD
+ 	if (m68k_ramdisk.size) {
+ 		reserve_bootmem_node(__virt_to_node(phys_to_virt(m68k_ramdisk.addr)),
+@@ -372,6 +369,10 @@ void __init setup_arch(char **cmdline_p)
+ 	}
+ #endif
+ 
++#if !defined(CONFIG_SUN3) && !defined(CONFIG_COLDFIRE)
++	for (i = 1; i < m68k_num_memory; i++)
++		free_bootmem_node(NODE_DATA(i), m68k_memory[i].addr,
++				  m68k_memory[i].size);
+ #ifdef CONFIG_ATARI
+ 	if (MACH_IS_ATARI)
+ 		atari_stram_reserve_pages((void *)availmem);
+-- 
+1.6.4
+

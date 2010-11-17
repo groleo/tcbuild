@@ -10,7 +10,7 @@ CT_DoKernelTupleValues() {
 # Download the kernel
 do_kernel_get() {
     if [ "${CT_KERNEL_LINUX_USE_CUSTOM_HEADERS}" != "y" ]; then
-        CT_GetFile "${PKG_SRC}" "${PKG_URL}"
+        CT_GetFile "${PKG_SRC}" {ftp,http}://ftp.{de.,eu.,}kernel.org/pub/linux/kernel/v2.{6{,/testing},4,2}
     fi
     return 0
 }

@@ -1,0 +1,272 @@
+From 4433d3d13ccec664bb7588e6dc98240acd496833 Mon Sep 17 00:00:00 2001
+From: Wang Huan <wanghuan@zch06.freescale.net>
+Date: Wed, 15 Sep 2010 13:48:24 +0800
+Subject: [PATCH] default configuration update for some boards
+
+default configuration update for some boards.
+
+To sync the default configuration with ltib.
+
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ arch/m68k/configs/m54451evb_defconfig |   18 +++++++++++++++---
+ arch/m68k/configs/m54455evb_defconfig |   17 ++++++++++++++---
+ arch/m68k/configs/m5474lite_defconfig |   14 ++++++++++++--
+ arch/m68k/configs/m5475evb_defconfig  |   13 +++++++++++--
+ arch/m68k/configs/m5485evb_defconfig  |   21 ++++++++++++++++++---
+ 5 files changed, 70 insertions(+), 13 deletions(-)
+
+diff --git a/arch/m68k/configs/m54451evb_defconfig b/arch/m68k/configs/m54451evb_defconfig
+index d20815c..5598690 100644
+--- a/arch/m68k/configs/m54451evb_defconfig
++++ b/arch/m68k/configs/m54451evb_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.29
+-# Fri Jul 23 15:05:49 2010
++# Tue Aug 24 16:14:20 2010
+ #
+ CONFIG_M68K=y
+ CONFIG_MMU=y
+@@ -26,7 +26,7 @@ CONFIG_EXPERIMENTAL=y
+ CONFIG_BROKEN_ON_SMP=y
+ CONFIG_INIT_ENV_ARG_LIMIT=32
+ CONFIG_LOCALVERSION=""
+-#CONFIG_LOCALVERSION_AUTO is not set
++# CONFIG_LOCALVERSION_AUTO is not set
+ CONFIG_SWAP=y
+ CONFIG_SYSVIPC=y
+ CONFIG_SYSVIPC_SYSCTL=y
+@@ -361,7 +361,10 @@ CONFIG_MTD_RAM=y
+ #
+ # CONFIG_MTD_COMPLEX_MAPPINGS is not set
+ CONFIG_MTD_PHYSMAP=y
+-# CONFIG_MTD_PHYSMAP_COMPAT is not set
++CONFIG_MTD_PHYSMAP_COMPAT=y
++CONFIG_MTD_PHYSMAP_START=0x0
++CONFIG_MTD_PHYSMAP_LEN=0x01000000
++CONFIG_MTD_PHYSMAP_BANKWIDTH=2
+ # CONFIG_MTD_PLATRAM is not set
+ 
+ #
+@@ -992,6 +995,7 @@ CONFIG_SDIO_UART=y
+ #
+ # CONFIG_MMC_SDHCI is not set
+ CONFIG_MMC_SPI=y
++CONFIG_M54451_SD_HW_DETECT=y
+ # CONFIG_MEMSTICK is not set
+ # CONFIG_NEW_LEDS is not set
+ # CONFIG_ACCESSIBILITY is not set
+@@ -1372,6 +1376,14 @@ CONFIG_CRYPTO_DES=y
+ # Random Number Generation
+ #
+ # CONFIG_CRYPTO_ANSI_CPRNG is not set
++
++#
++# OCF Configuration
++#
++
++#
++# Talitos Driver
++#
+ CONFIG_CRYPTO_HW=y
+ CONFIG_CRYPTO_DEV_MCFCAU=y
+ CONFIG_CRYPTO_DEV_MCFCAU_DES=y
+diff --git a/arch/m68k/configs/m54455evb_defconfig b/arch/m68k/configs/m54455evb_defconfig
+index f74502b..054d248 100644
+--- a/arch/m68k/configs/m54455evb_defconfig
++++ b/arch/m68k/configs/m54455evb_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.29
+-# Fri Jul 23 14:57:21 2010
++# Tue Aug 24 16:16:14 2010
+ #
+ CONFIG_M68K=y
+ CONFIG_MMU=y
+@@ -26,7 +26,7 @@ CONFIG_EXPERIMENTAL=y
+ CONFIG_BROKEN_ON_SMP=y
+ CONFIG_INIT_ENV_ARG_LIMIT=32
+ CONFIG_LOCALVERSION=""
+-#CONFIG_LOCALVERSION_AUTO is not set
++# CONFIG_LOCALVERSION_AUTO is not set
+ CONFIG_SWAP=y
+ CONFIG_SYSVIPC=y
+ CONFIG_SYSVIPC_SYSCTL=y
+@@ -360,7 +360,10 @@ CONFIG_MTD_CFI_UTIL=y
+ #
+ # CONFIG_MTD_COMPLEX_MAPPINGS is not set
+ CONFIG_MTD_PHYSMAP=y
+-# CONFIG_MTD_PHYSMAP_COMPAT is not set
++CONFIG_MTD_PHYSMAP_COMPAT=y
++CONFIG_MTD_PHYSMAP_START=0x0
++CONFIG_MTD_PHYSMAP_LEN=0x01000000
++CONFIG_MTD_PHYSMAP_BANKWIDTH=1
+ # CONFIG_MTD_INTEL_VR_NOR is not set
+ # CONFIG_MTD_PLATRAM is not set
+ 
+@@ -1557,6 +1560,14 @@ CONFIG_CRYPTO_DES=y
+ # Random Number Generation
+ #
+ # CONFIG_CRYPTO_ANSI_CPRNG is not set
++
++#
++# OCF Configuration
++#
++
++#
++# Talitos Driver
++#
+ CONFIG_CRYPTO_HW=y
+ CONFIG_CRYPTO_DEV_MCFCAU=y
+ CONFIG_CRYPTO_DEV_MCFCAU_DES=y
+diff --git a/arch/m68k/configs/m5474lite_defconfig b/arch/m68k/configs/m5474lite_defconfig
+index 96c284a..569ac6a 100644
+--- a/arch/m68k/configs/m5474lite_defconfig
++++ b/arch/m68k/configs/m5474lite_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.29
+-# Wed Jul 21 09:56:29 2010
++# Tue Aug 24 16:17:48 2010
+ #
+ CONFIG_M68K=y
+ CONFIG_MMU=y
+@@ -26,7 +26,7 @@ CONFIG_EXPERIMENTAL=y
+ CONFIG_BROKEN_ON_SMP=y
+ CONFIG_INIT_ENV_ARG_LIMIT=32
+ CONFIG_LOCALVERSION=""
+-CONFIG_LOCALVERSION_AUTO=y
++# CONFIG_LOCALVERSION_AUTO is not set
+ CONFIG_SWAP=y
+ CONFIG_SYSVIPC=y
+ CONFIG_SYSVIPC_SYSCTL=y
+@@ -309,6 +309,7 @@ CONFIG_WIRELESS_OLD_REGULATORY=y
+ # CONFIG_WIMAX is not set
+ # CONFIG_RFKILL is not set
+ # CONFIG_NET_9P is not set
++# CONFIG_KLIPS is not set
+ 
+ #
+ # Device Drivers
+@@ -1239,6 +1240,15 @@ CONFIG_CRYPTO_DES=y
+ # Random Number Generation
+ #
+ # CONFIG_CRYPTO_ANSI_CPRNG is not set
++
++#
++# OCF Configuration
++#
++# CONFIG_OCF_OCF is not set
++
++#
++# Talitos Driver
++#
+ # CONFIG_CRYPTO_HW is not set
+ 
+ #
+diff --git a/arch/m68k/configs/m5475evb_defconfig b/arch/m68k/configs/m5475evb_defconfig
+index 1dbb479..68d7e22 100644
+--- a/arch/m68k/configs/m5475evb_defconfig
++++ b/arch/m68k/configs/m5475evb_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.29
+-# Fri Jul 23 16:16:50 2010
++# Tue Aug 24 15:41:10 2010
+ #
+ CONFIG_M68K=y
+ CONFIG_MMU=y
+@@ -352,7 +352,7 @@ CONFIG_MTD_BLOCK=y
+ #
+ # RAM/ROM/Flash chip drivers
+ #
+-# CONFIG_MTD_CFI is not set
++CONFIG_MTD_CFI=y
+ CONFIG_MTD_JEDECPROBE=y
+ CONFIG_MTD_GEN_PROBE=y
+ # CONFIG_MTD_CFI_ADV_OPTIONS is not set
+@@ -1293,6 +1293,15 @@ CONFIG_CRYPTO_DES=y
+ # Random Number Generation
+ #
+ # CONFIG_CRYPTO_ANSI_CPRNG is not set
++
++#
++# OCF Configuration
++#
++# CONFIG_OCF_OCF is not set
++
++#
++# Talitos Driver
++#
+ # CONFIG_CRYPTO_HW is not set
+ 
+ #
+diff --git a/arch/m68k/configs/m5485evb_defconfig b/arch/m68k/configs/m5485evb_defconfig
+index 4c9bfca..43a48ee 100644
+--- a/arch/m68k/configs/m5485evb_defconfig
++++ b/arch/m68k/configs/m5485evb_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.29
+-# Fri Jul 23 16:12:09 2010
++# Tue Aug 24 16:19:05 2010
+ #
+ CONFIG_M68K=y
+ CONFIG_MMU=y
+@@ -294,7 +294,7 @@ CONFIG_CAN_RAW=y
+ #
+ # CONFIG_CAN_VCAN is not set
+ CONFIG_CAN_DEV=y
+-# CONFIG_CAN_CALC_BITTIMING is not set
++CONFIG_CAN_CALC_BITTIMING=y
+ CONFIG_CAN_FLEXCAN=y
+ CONFIG_CAN_MCF=y
+ # CONFIG_CAN_DEBUG_DEVICES is not set
+@@ -353,8 +353,10 @@ CONFIG_MTD_BLOCK=y
+ #
+ # RAM/ROM/Flash chip drivers
+ #
+-# CONFIG_MTD_CFI is not set
++CONFIG_MTD_CFI=y
+ # CONFIG_MTD_JEDECPROBE is not set
++CONFIG_MTD_GEN_PROBE=y
++# CONFIG_MTD_CFI_ADV_OPTIONS is not set
+ CONFIG_MTD_MAP_BANK_WIDTH_1=y
+ CONFIG_MTD_MAP_BANK_WIDTH_2=y
+ CONFIG_MTD_MAP_BANK_WIDTH_4=y
+@@ -365,6 +367,10 @@ CONFIG_MTD_CFI_I1=y
+ CONFIG_MTD_CFI_I2=y
+ # CONFIG_MTD_CFI_I4 is not set
+ # CONFIG_MTD_CFI_I8 is not set
++CONFIG_MTD_CFI_INTELEXT=y
++CONFIG_MTD_CFI_AMDSTD=y
++# CONFIG_MTD_CFI_STAA is not set
++CONFIG_MTD_CFI_UTIL=y
+ CONFIG_MTD_RAM=y
+ CONFIG_MTD_ROM=y
+ # CONFIG_MTD_ABSENT is not set
+@@ -1545,6 +1551,15 @@ CONFIG_CRYPTO_DES=y
+ # Random Number Generation
+ #
+ # CONFIG_CRYPTO_ANSI_CPRNG is not set
++
++#
++# OCF Configuration
++#
++# CONFIG_OCF_OCF is not set
++
++#
++# Talitos Driver
++#
+ # CONFIG_CRYPTO_HW is not set
+ 
+ #
+-- 
+1.6.4
+

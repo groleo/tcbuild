@@ -1,0 +1,486 @@
+From 137eebbf92d2a01c1bb6e0a8fe441d6fea7629f6 Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Thu, 3 Jun 2010 12:19:29 +0800
+Subject: [PATCH 07/18] Enable 1588 functions for M5441x FEC module
+
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ drivers/net/Kconfig  |    6 ++
+ drivers/net/Makefile |    3 +
+ drivers/net/fec.c    |  110 +++++++++++++++++++++++++++++++++++++--
+ drivers/net/fec.h    |  138 ++++++++++++++++++++++++++++++++++++++++++++++++-
+ 4 files changed, 248 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/net/Kconfig b/drivers/net/Kconfig
+index ee1442a..4769759 100644
+--- a/drivers/net/Kconfig
++++ b/drivers/net/Kconfig
+@@ -1858,6 +1858,12 @@ config FEC_SHARED_PHY
+ 	help
+ 	  Say Y here if both PHYs are controlled via a single channel.
+ 
++config FEC_1588
++        bool "Enable 1588 interface(on some ColdFire designs)"
++	depends on M5441X && FEC
++	help
++		Say Y here if 1588 function is enabled.
++
+ config FEC_548x
+ 	tristate "MCF547x/MCF548x Fast Ethernet Controller support"
+ 	depends on M547X_8X
+diff --git a/drivers/net/Makefile b/drivers/net/Makefile
+index 5b7ebcc..5deb466 100644
+--- a/drivers/net/Makefile
++++ b/drivers/net/Makefile
+@@ -106,6 +106,9 @@ obj-$(CONFIG_PCMCIA_PCNET) += 8390.o
+ obj-$(CONFIG_HP100) += hp100.o
+ obj-$(CONFIG_SMC9194) += smc9194.o
+ obj-$(CONFIG_FEC) += fec.o
++ifeq ($(CONFIG_FEC_1588), y)
++obj-$(CONFIG_FEC) += fec_1588.o
++endif
+ obj-$(CONFIG_FEC_548x) += fec_m547x.o
+ obj-$(CONFIG_MODELO_SWITCH) += modelo_switch.o
+ obj-$(CONFIG_FEC_MPC52xx) += fec_mpc52xx.o
+diff --git a/drivers/net/fec.c b/drivers/net/fec.c
+index 2d3f281..ed52543 100644
+--- a/drivers/net/fec.c
++++ b/drivers/net/fec.c
+@@ -18,11 +18,13 @@
+  * Bug fixes and cleanup by Philippe De Muyter (phdm@macqel.be)
+  * Copyright (c) 2004-2006 Macq Electronique SA.
+  *
+- * Copyright 2007-2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2007-2010 Freescale Semiconductor, Inc. All Rights Reserved.
+  * Author: Kurt Mahan, kmahan@freescale.com
+  *         Jason Jin, Jason.jin@freescale.com
+  *         Chenghu Wu <b16972@freescale.com>
+- * Bug fixes, add Coldfire support, cleanup, move the phy support to the phy level.
++ * Bug fixes, add Coldfire support, cleanup,
++ * move the phy support to the phy level.
++ * Add 1588 function into FEC driver.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -79,7 +81,8 @@
+ #define FEC_ENET_RXB	((uint)0x01000000)	/* A buffer was received */
+ #define FEC_ENET_MII	((uint)0x00800000)	/* MII interrupt */
+ #define FEC_ENET_EBERR	((uint)0x00400000)	/* SDMA bus error */
+-
++#define FEC_ENET_TS_AVAIL       ((uint)0x00010000)
++#define FEC_ENET_TS_TIMER       ((uint)0x00008000)
+ static int fec_enet_open(struct net_device *dev);
+ static int fec_enet_start_xmit(struct sk_buff *skb, struct net_device *dev);
+ static void fec_enet_mii(struct net_device *dev);
+@@ -112,6 +115,9 @@ fec_enet_start_xmit(struct sk_buff *skb, struct net_device *dev)
+ 	volatile fec_t	*fecp;
+ 	volatile cbd_t	*bdp;
+ 	unsigned short	status;
++#ifdef CONFIG_FEC_1588
++	unsigned long   estatus;
++#endif
+ 	unsigned long flags;
+ 
+ 	fep = netdev_priv(dev);
+@@ -180,7 +186,17 @@ fec_enet_start_xmit(struct sk_buff *skb, struct net_device *dev)
+ 	status |= (BD_ENET_TX_READY | BD_ENET_TX_INTR
+ 			| BD_ENET_TX_LAST | BD_ENET_TX_TC);
+ 	bdp->cbd_sc = status;
++#ifdef CONFIG_FEC_1588
++	if (fep->ptimer_present) {
++		if (fec_ptp_do_txstamp(skb))
++			estatus = BD_ENET_TX_TS;
++		else
++			estatus = 0;
+ 
++		bdp->cbd_esc = estatus;
++		bdp->cbd_bdu = BD_ENET_TX_BDU;
++	}
++#endif
+ 	dev->trans_start = jiffies;
+ 
+ 	/* Trigger transmission start */
+@@ -261,6 +277,10 @@ fec_enet_interrupt(int irq, void *dev_id)
+ 	volatile fec_t	*fecp;
+ 	uint	int_events;
+ 	irqreturn_t ret = IRQ_NONE;
++#ifdef CONFIG_FEC_1588
++	struct fec_enet_private *fep = netdev_priv(dev);
++	struct fec_ptp_private *fpp = &(fep->ptp_priv);
++#endif
+ 
+ 	fecp = (volatile fec_t *)dev->base_addr;
+ 
+@@ -286,6 +306,19 @@ fec_enet_interrupt(int irq, void *dev_id)
+ 			fec_enet_tx(dev);
+ 		}
+ 
++#ifdef CONFIG_FEC_1588
++		if (int_events & FEC_ENET_TS_AVAIL) {
++			ret = IRQ_HANDLED;
++			fec_ptp_store_txstamp(&(fep->ptp_priv));
++		}
++
++		if (int_events & FEC_ENET_TS_TIMER) {
++			ret = IRQ_HANDLED;
++			if (fep->ptimer_present)
++				fpp->prtc++;
++		}
++
++#endif
+ 		if (int_events & FEC_ENET_MII) {
+ 			ret = IRQ_HANDLED;
+ 			fec_enet_mii(dev);
+@@ -380,6 +413,9 @@ static void
+ fec_enet_rx(struct net_device *dev)
+ {
+ 	struct	fec_enet_private *fep;
++#ifdef CONFIG_FEC_1588
++	struct fec_ptp_private *fpp;
++#endif
+ 	volatile fec_t	*fecp;
+ 	volatile cbd_t *bdp;
+ 	unsigned short status;
+@@ -392,6 +428,9 @@ fec_enet_rx(struct net_device *dev)
+ #endif
+ 
+ 	fep = netdev_priv(dev);
++#ifdef CONFIG_FEC_1588
++	fpp = &(fep->ptp_priv);
++#endif
+ 	fecp = (volatile fec_t *)dev->base_addr;
+ 
+ 	spin_lock_irq(&fep->hw_lock);
+@@ -452,16 +491,28 @@ while (!((status = bdp->cbd_sc) & BD_ENET_RX_EMPTY)) {
+ 	 * include that when passing upstream as it messes up
+ 	 * bridging applications.
+ 	 */
++#ifdef CONFIG_FEC_1588
++	skb = dev_alloc_skb(pkt_len - 4 + NET_IP_ALIGN);
++#else
+ 	skb = dev_alloc_skb(pkt_len-4);
+-
++#endif
+ 	if (skb == NULL) {
+ 		printk(KERN_ERR "%s: Memory squeeze, "
+ 			"dropping packet.\n", dev->name);
+ 		dev->stats.rx_dropped++;
+ 	} else {
++#ifdef CONFIG_FEC_1588
++		skb_reserve(skb, NET_IP_ALIGN);
++#endif
+ 		skb_put(skb, pkt_len-4);	/* Make room */
+ 		skb_copy_to_linear_data(skb, data, pkt_len-4);
+ 		skb->protocol = eth_type_trans(skb, dev);
++#ifdef CONFIG_FEC_1588
++		/* 1588 messeage TS handle */
++		if (fep->ptimer_present)
++			fec_ptp_store_rxstamp(fpp, skb,
++					(struct bufdesc *)bdp);
++#endif
+ 		netif_rx(skb);
+ 	}
+ rx_processing_done:
+@@ -474,6 +525,11 @@ rx_processing_done:
+ 	*/
+ 	status |= BD_ENET_RX_EMPTY;
+ 	bdp->cbd_sc = status;
++#ifdef CONFIG_FEC_1588
++	bdp->cbd_esc = BD_ENET_RX_INT;
++	bdp->cbd_prot = 0;
++	bdp->cbd_bdu = 0;
++#endif
+ 
+ 	/* Update BD pointer to next entry.
+ 	*/
+@@ -632,7 +688,7 @@ static int coldfire_fec_init_phy(struct net_device *dev)
+ 				phydev = tmp_phydev;
+ 				startnode = 0;
+ 			} else {
+-				startnode ++;
++				startnode++;
+ 				continue;
+ 			}
+ 		} else
+@@ -1136,15 +1192,32 @@ fec_restart(struct net_device *dev, int duplex)
+ 	/* Set MII speed.
+ 	*/
+ 	fecp->fec_mii_speed = fep->phy_speed;
+-
++#ifdef CONFIG_FEC_1588
++	if (fep->ptimer_present) {
++		int ret;
++		/* Set Timer count */
++		ret = fec_ptp_start(&(fep->ptp_priv));
++		if (ret)
++			fep->ptimer_present = 0;
++		else
++			fecp->fec_ecntrl = 0x00000010;
++	}
++	fecp->fec_ecntrl |= 2;
++#else
+ 	/* And last, enable the transmit and receive processing.
+ 	*/
+ 	fecp->fec_ecntrl = 2;
++#endif
+ 	fecp->fec_r_des_active = 0;
+ 
+ 	/* Enable interrupts we wish to service.
+ 	*/
++#ifdef CONFIG_FEC_1588
++	fecp->fec_imask = (FEC_ENET_TXF | FEC_ENET_RXF |
++			FEC_ENET_TS_TIMER | FEC_ENET_TS_AVAIL);
++#else
+ 	fecp->fec_imask = (FEC_ENET_TXF | FEC_ENET_RXF);
++#endif
+ }
+ 
+ static void
+@@ -1181,6 +1254,10 @@ fec_stop(struct net_device *dev)
+ 
+ 	fecp->fec_imask = 0;
+ 	fecp->fec_mii_speed = fep->phy_speed;
++#ifdef CONFIG_FEC_1588
++	if (fep->ptimer_present)
++		fec_ptp_stop(&(fep->ptp_priv));
++#endif
+ }
+ 
+ static int fec_mdio_register(struct net_device *dev,
+@@ -1284,8 +1361,25 @@ static int __init fec_eth_probe(struct platform_device *pdev)
+ 			return -ENOMEM;
+ 		}
+ 
++#ifdef CONFIG_FEC_1588
++		fep->ptp_priv.hwp = fep->hwp;
++		{
++			int ret;
++			ret = fec_ptp_init(&(fep->ptp_priv));
++			if (ret)
++				printk(KERN_ERR "IEEE1588: "
++					"ptp-timer init failed\n");
++			else
++				fep->ptimer_present = 1;
++		}
++#endif
++
+ 		if (register_netdev(dev) != 0) {
+ 			/* XXX: missing cleanup here */
++#ifdef CONFIG_FEC_1588
++			if (fep->ptimer_present)
++				fec_ptp_cleanup(&(fep->ptp_priv));
++#endif
+ 			free_netdev(dev);
+ 			platform_set_drvdata(pdev, NULL);
+ 			kfree(chip);
+@@ -1314,6 +1408,10 @@ static int fec_eth_remove(struct platform_device *pdev)
+ 			fep = chip->fep_host[i];
+ 			dev = fep->netdev;
+ 			fep->sequence_done = 1;
++#ifdef CONFIG_FEC_1588
++			if (fep->ptimer_present)
++				fec_ptp_cleanup(&(fep->ptp_priv));
++#endif
+ 			unregister_netdev(dev);
+ 			free_netdev(dev);
+ 		}
+diff --git a/drivers/net/fec.h b/drivers/net/fec.h
+index 45e5494..ce849ee 100644
+--- a/drivers/net/fec.h
++++ b/drivers/net/fec.h
+@@ -4,7 +4,7 @@
+  *	fec.h  --  Fast Ethernet Controller for Motorola ColdFire SoC
+  *		   processors.
+  *
+- *      Copyright 2008-2009 Freescale Semiconductor,Inc.All Rights Reserved.
++ *      Copyright 2008-2010 Freescale Semiconductor,Inc.All Rights Reserved.
+  *	(C) Copyright 2000-2005, Greg Ungerer (gerg@snapgear.com)
+  *	(C) Copyright 2000-2001, Lineo (www.lineo.com)
+  */
+@@ -83,6 +83,16 @@
+ #if defined(CONFIG_M523x) || defined(CONFIG_M527x) || defined(CONFIG_M528x) || \
+     defined(CONFIG_M520x) || defined(CONFIG_M532x) || defined(CONFIG_M537x) || \
+     defined(CONFIG_M5301x) || defined(CONFIG_M5445X) || defined(CONFIG_M5441X)
++/* Define the FEC 1588 registers offset */
++#if defined(CONFIG_FEC_1588)
++#define FEC_ATIME_CTRL          0x400
++#define FEC_ATIME               0x404
++#define FEC_ATIME_EVT_OFFSET    0x408
++#define FEC_ATIME_EVT_PERIOD    0x40c
++#define FEC_ATIME_CORR          0x410
++#define FEC_ATIME_INC           0x414
++#define FEC_TS_TIMESTAMP        0x418
++#endif
+ /*
+  *	Just figures, Motorola would have to change the offsets for
+  *	registers in the same peripheral device on different models
+@@ -167,7 +177,9 @@ typedef struct fec {
+ 
+ #endif /* CONFIG_M5272 */
+ 
+-
++#if defined(CONFIG_FEC_1588)
++#define FEC_ENHANCED_MODE       1
++#endif
+ /*
+  *	Define the buffer descriptor structure.
+  */
+@@ -175,6 +187,14 @@ typedef struct bufdesc {
+ 	unsigned short	cbd_sc;			/* Control and status info */
+ 	unsigned short	cbd_datlen;		/* Data length */
+ 	unsigned long	cbd_bufaddr;		/* Buffer address */
++#ifdef FEC_ENHANCED_MODE
++	unsigned long cbd_esc;
++	unsigned long cbd_prot;
++	unsigned long cbd_bdu;
++	unsigned long ts;
++	unsigned short res0[4];
++#endif
++
+ } cbd_t;
+ 
+ /* Forward declarations of some structures to support different PHYs
+@@ -194,6 +214,112 @@ typedef struct {
+ 	const phy_cmd_t *shutdown;
+ } phy_info_t;
+ 
++/* IEEE 1588 definition */
++#ifdef CONFIG_FEC_1588
++#define FEC_ECNTRL_TS_EN        0x10
++#define PTP_MAJOR               232     /*the temporary major number
++					 *used by PTP driver, the major
++					*number 232~239 is unassigned*/
++
++#define DEFAULT_PTP_RX_BUF_SZ           2000
++#define PTP_MSG_SYNC                    0x0
++#define PTP_MSG_DEL_REQ                 0x1
++#define PTP_MSG_P_DEL_REQ               0x2
++#define PTP_MSG_P_DEL_RESP              0x3
++#define PTP_MSG_DEL_RESP                0x4
++#define PTP_MSG_ALL_OTHER               0x5
++
++#define PTP_GET_TX_TIMESTAMP            0x1
++#define PTP_GET_RX_TIMESTAMP            0x2
++#define PTP_SET_RTC_TIME                0x3
++#define PTP_SET_COMPENSATION            0x4
++#define PTP_GET_CURRENT_TIME            0x5
++#define PTP_FLUSH_TIMESTAMP             0x6
++#define PTP_ADJ_ADDEND                  0x7
++#define PTP_GET_ORIG_COMP               0x8
++#define PTP_GET_ADDEND                  0xB
++#define PTP_GET_RX_TIMESTAMP_PDELAY_REQ         0xC
++#define PTP_GET_RX_TIMESTAMP_PDELAY_RESP        0xD
++
++#define FEC_PTP_DOMAIN_DLFT             0xe0000181
++#define FEC_PTP_PKT_TYPE_OFFS           0x1f
++#define FEC_PTP_PROTOCOL_OFFS           0x20
++#define FEC_PTP_MULTI_ADDR_OFFS 0x26
++#define FEC_PTP_PORT_OFFS               0x2A
++#define FEC_PTP_MSG_TYPE_OFFS           0x32
++#define FEC_PTP_SEQ_ID_OFFS             0x50
++#define FEC_PTP_CTRL_OFFS               0x52
++#define FEC_PACKET_TYPE_UDP             0x11
++
++/* PTP standard time representation structure */
++struct ptp_time{
++	u64 sec;        /* seconds */
++	u32 nsec;       /* nanoseconds */
++};
++
++/* Structure for PTP Time Stamp */
++struct fec_ptp_data_t {
++	int             key;
++	struct ptp_time ts_time;
++};
++
++struct fec_ptp_circular_t {
++	int     front;
++	int     end;
++	int     size;
++	struct  fec_ptp_data_t *data_buf;
++};
++
++/* interface for PTP driver command GET_TX_TIME */
++struct ptp_ts_data {
++	/* PTP version */
++	u8 version;
++	/* PTP source port ID */
++	u8 spid[10];
++	/* PTP sequence ID */
++	u16 seq_id;
++	/* PTP message type */
++	u8 message_type;
++	/* PTP timestamp */
++	struct ptp_time ts;
++};
++
++/* interface for PTP driver command SET_RTC_TIME/GET_CURRENT_TIME */
++struct ptp_rtc_time {
++	struct ptp_time rtc_time;
++};
++
++/* PTP message version */
++#define PTP_1588_MSG_VER_1      1
++#define PTP_1588_MSG_VER_2      2
++
++#define BD_ENET_TX_TS           0x20000000
++#define BD_ENET_TX_BDU          0x80000000
++
++struct fec_ptp_private {
++	void __iomem *hwp;
++
++	struct  fec_ptp_circular_t rx_time_sync;
++	struct  fec_ptp_circular_t rx_time_del_req;
++	struct  fec_ptp_circular_t rx_time_pdel_req;
++	struct  fec_ptp_circular_t rx_time_pdel_resp;
++
++	u64     prtc;
++	struct ptp_time txstamp;
++};
++
++extern int fec_ptp_init(struct fec_ptp_private *priv);
++extern void fec_ptp_cleanup(struct fec_ptp_private *priv);
++extern int fec_ptp_start(struct fec_ptp_private *priv);
++extern void fec_ptp_stop(struct fec_ptp_private *priv);
++extern int fec_ptp_do_txstamp(struct sk_buff *skb);
++extern void fec_ptp_store_txstamp(struct fec_ptp_private *priv);
++extern void fec_ptp_store_rxstamp(struct fec_ptp_private *priv,
++				struct sk_buff *skb, struct bufdesc *bdp);
++extern int fec_ioctl_1588(struct fec_ptp_private *fpp,
++				struct ifreq *ifr, int cmd);
++#endif /* 1588 */
++
+ /* The FEC buffer descriptors track the ring buffers.  The rx_bd_base and
+  * tx_bd_base always point to the base of the buffer descriptors.  The
+  * cur_rx and cur_tx point to the currently available buffer.
+@@ -250,6 +376,10 @@ struct fec_enet_private {
+ 	int     duplex;
+ 	int     speed;
+ 	int     msg_enable;
++#ifdef CONFIG_FEC_1588
++	struct fec_ptp_private ptp_priv;
++	uint    ptimer_present;
++#endif
+ };
+ 
+ struct fec_platform_private {
+@@ -293,6 +423,8 @@ struct fec_platform_private {
+ #define BD_ENET_RX_CL           ((ushort)0x0001)
+ #define BD_ENET_RX_STATS        ((ushort)0x013f)        /* All status bits */
+ 
++#define BD_ENET_RX_INT          0x00800000
++
+ /* Buffer descriptor control/status used by Ethernet transmit.
+ */
+ #define BD_ENET_TX_READY        ((ushort)0x8000)
+@@ -310,6 +442,6 @@ struct fec_platform_private {
+ #define BD_ENET_TX_CSL          ((ushort)0x0001)
+ #define BD_ENET_TX_STATS        ((ushort)0x03ff)        /* All status bits */
+ 
+-
++#define BD_ENET_TX_INT          0x40000000
+ /****************************************************************************/
+ #endif /* FEC_H */
+-- 
+1.6.4
+

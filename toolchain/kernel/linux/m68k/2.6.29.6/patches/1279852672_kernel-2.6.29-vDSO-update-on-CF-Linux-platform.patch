@@ -1,0 +1,390 @@
+From b1464a2847e69f7835cb80f5a6690abd1e909fde Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Fri, 23 Jul 2010 10:37:52 +0800
+Subject: [PATCH 01/14] vDSO update on CF-Linux platform
+
+re-write vDSO kuser helper functions.
+
+Signed-off-by: Lanttor Guo <lanttor.guo@freescale.com>
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ arch/m68k/coldfire/common/entry.S  |   39 ++++++++++++++++-
+ arch/m68k/coldfire/vdso/vdso-lib.S |   20 ++++-----
+ arch/m68k/coldfire/vdso/vdso.c     |    9 ++++
+ arch/m68k/coldfire/vdso/vdso.lds   |   84 ------------------------------------
+ arch/m68k/coldfire/vdso/vdso.lds.S |   11 +++-
+ arch/m68k/include/asm/cf_entry.h   |    1 -
+ arch/m68k/include/asm/cfcache.h    |    1 +
+ arch/m68k/include/asm/entry_mm.h   |    6 +++
+ arch/m68k/kernel/asm-offsets.c     |    1 +
+ arch/m68k/kernel/sys_m68k.c        |    4 ++
+ 10 files changed, 76 insertions(+), 100 deletions(-)
+ delete mode 100644 arch/m68k/coldfire/vdso/vdso.lds
+
+diff --git a/arch/m68k/coldfire/common/entry.S b/arch/m68k/coldfire/common/entry.S
+index d011690..f397737 100644
+--- a/arch/m68k/coldfire/common/entry.S
++++ b/arch/m68k/coldfire/common/entry.S
+@@ -1,7 +1,7 @@
+ /*
+  *  arch/m68k/coldfire/entry.S
+  *
+- *  Copyright 2007-2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ *  Copyright (C) 2007-2010 Freescale Semiconductor, Inc. All Rights Reserved.
+  *  Matt Waddel Matt.Waddel@freescale.com
+  *  Kurt Mahan kmahan@freescale.com
+  *  Jason Jin Jason.Jin@freescale.com
+@@ -25,6 +25,7 @@
+ #include <asm/segment.h>
+ #include <asm/traps.h>
+ #include <asm/unistd.h>
++#include <asm/asm-offsets.h>
+ 
+ /*
+  * TASK_INFO:
+@@ -68,6 +69,9 @@ ENTRY(buserr)
+ 	movew	#0x2700,%sr		/* lock interrupts */
+ #endif
+ 	SAVE_ALL_INT
++#ifdef CONFIG_VDSO
++	jsr	check_vdso_atomic_cmpxchg_32
++#endif
+ #ifdef	CONFIG_COLDFIRE_FOO
+ 	movew	PT_SR(%sp),%d3		/* get original %sr */
+ 	oril	#0x2000,%d3		/* set supervisor mode in it */
+@@ -81,6 +85,9 @@ ENTRY(buserr)
+ 
+ ENTRY(trap)
+ 	SAVE_ALL_INT
++#ifdef	CONFIG_VDSO
++	jsr	check_vdso_atomic_cmpxchg_32
++#endif
+ 	GET_CURRENT(%d0)
+ 	movel   %sp,%sp@-		/* stack frame pointer argument */
+ 	jsr     trap_c
+@@ -212,10 +219,14 @@ do_delayed_trace:
+  */
+ ENTRY(inthandler)
+ 	SAVE_ALL_INT
++#ifdef	CONFIG_VDSO
++	jsr	check_vdso_atomic_cmpxchg_32
++#endif
+ 	GET_CURRENT(%d0)
+ 	movel   %curptr@(TASK_INFO+TINFO_PREEMPT),%d0
+ 	addil   #0x10000,%d0
+ 	movel   %d0,%curptr@(TASK_INFO+TINFO_PREEMPT)
++
+ 	/* put exception # in d0 */
+ 	movel	%sp@(PT_VECTOR),%d0
+ 	swap	%d0			/* extract bits 25:18 */
+@@ -405,7 +416,33 @@ resume:
+ 	movew	%a1@(TASK_THREAD+THREAD_SR),%d0
+ 	movew	%d0,%sr
+ 
++#ifdef CONFIG_VDSO
++	/* save thread pointer */
++	lea	_vdso_tp,%a0
++	movel	(%a0),%a0
++	movel	%a1@(TASK_INFO+TINFO_TP_VALUE),(%a0)
++#endif
++	rts
++
++#ifdef CONFIG_VDSO
++/* if interrupted PC is between 0x5fffe40c to 0x5ffffe412 */
++/* then set PC back to 0x5fffe40c (start addr of __kernel_atomic_cmpxchg_32) */
++/* note: these absolute addresses depend on vdso-lib.S and vdso.lds.S */
++ENTRY(check_vdso_atomic_cmpxchg_32)
++	movel   %sp@(PT_PC),%d0
++	cmpil	#0x5fffe414,%d0  /* __kernel_atomic_cmpxchg_32: line 4 */
++	ble	label1
++	cmpil	#0x5fffe412,%d0	 /* __kernel_atomic_cmpxchg_32: line 3 */
++	beql	label0
++	cmpil	#0x5fffe40e,%d0  /* __kernel_atomic_cmpxchg_32: line 2 */
++	beql	label0
++	jra	label1
++label0:
++	/* __kernel_atomic_cmpxchg_32: line 1 */
++	movel	#0x5fffe40c,%sp@(PT_PC)
++label1:
+ 	rts
++#endif
+ 
+ .data
+ ALIGN
+diff --git a/arch/m68k/coldfire/vdso/vdso-lib.S b/arch/m68k/coldfire/vdso/vdso-lib.S
+index 6dd66e4..caf67a0 100644
+--- a/arch/m68k/coldfire/vdso/vdso-lib.S
++++ b/arch/m68k/coldfire/vdso/vdso-lib.S
+@@ -19,8 +19,8 @@
+  */
+ ENTRY(__kernel_read_tp)
+ 	.cfi_startproc
+-	movel	#__NR_read_tp,%d0
+-	trap	#0
++	lea	kuser_vdso_tp,%a0
++	movel	(%a0), %d0
+ 	movel	%d0,%a0
+ 	rts
+ 	.cfi_endproc
+@@ -32,15 +32,13 @@ ENTRY(__kernel_read_tp)
+  */
+ ENTRY(__kernel_atomic_cmpxchg_32)
+ 	.cfi_startproc
+-	movel	%d2,%sp@-
+-	.cfi_adjust_cfa_offset 4
+-	.cfi_rel_offset %d2,0
+-	movel	%d0,%d2
+-	movel	#__NR_atomic_cmpxchg_32,%d0
+-	trap	#0
+-	movel	%sp@+,%d2
+-	.cfi_adjust_cfa_offset -4
+-	.cfi_restore d2
++	cmpl	(%a0),%d0
++	bne	label0
++	movel	%d1, (%a0)
++	jmp	label1
++label0:
++	movel	(%a0),%d0
++label1:
+ 	rts
+ 	.cfi_endproc
+ 	.size __kernel_atomic_cmpxchg_32,.-__kernel_atomic_cmpxchg_32
+diff --git a/arch/m68k/coldfire/vdso/vdso.c b/arch/m68k/coldfire/vdso/vdso.c
+index c67c653..0e9a85d 100644
+--- a/arch/m68k/coldfire/vdso/vdso.c
++++ b/arch/m68k/coldfire/vdso/vdso.c
+@@ -28,12 +28,18 @@
+  * so map it just before TASK_UNMAPPED_BASE.
+  */
+ #define VDSO_MBASE (TASK_UNMAPPED_BASE - PAGE_SIZE)
++#define VDSO_VAR_OFFSET	4096
+ 
+ unsigned int vdso_enabled = 1;
+ EXPORT_SYMBOL_GPL(vdso_enabled);
+ 
+ static struct page *vdso_pages[1];
+ 
++/* _vdso_var_start: vdso_page_start + offset_4K */
++/* it's used to save key values from kernel */
++void *_vdso_var_start;
++void *_vdso_tp;
++
+ extern const char vdso_bin_start, vdso_bin_end;
+ 
+ int __init vdso_init(void)
+@@ -41,6 +47,9 @@ int __init vdso_init(void)
+ 	void *vdso_page = (void *)get_zeroed_page(GFP_ATOMIC);
+ 	vdso_pages[0] = virt_to_page(vdso_page);
+ 
++	_vdso_var_start = (void *)(vdso_page + VDSO_VAR_OFFSET);
++	_vdso_tp = _vdso_var_start;
++
+ 	printk(KERN_INFO "** VDSO_INIT\n");
+ 
+ 	/* copy dso bin in */
+diff --git a/arch/m68k/coldfire/vdso/vdso.lds b/arch/m68k/coldfire/vdso/vdso.lds
+deleted file mode 100644
+index 5188423..0000000
+--- a/arch/m68k/coldfire/vdso/vdso.lds
++++ /dev/null
+@@ -1,84 +0,0 @@
+-/*
+- * Linker script for vdso DSO.  The vdso page is an ELF shared
+- * object prelinked to its virtual address, and with only one read-only
+- * segment (that fits in one page).  This script controls its layout.
+- *
+- * Based on arch/sh/kernel/vsyscall/vsyscall.lds.S
+- *
+- * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+- * Kurt Mahan <kmahan@freescale.com>
+- *
+- * This is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License as published by
+- * the Free Software Foundation; either version 2 of the License, or
+- * (at your option) any later version.
+- */
+-
+-OUTPUT_FORMAT("elf32-m68k", "elf32-m68k", "elf32-m68k")
+-OUTPUT_ARCH(m68k)
+-
+-/* The ELF entry point can be used to set the AT_SYSINFO value.  */
+-ENTRY(__kernel_read_tp);
+-
+-SECTIONS
+-{
+-	. = SIZEOF_HEADERS;
+-
+-	.hash		: { *(.hash) }			:text
+-	.gnu.hash	: { *(.gnu.hash) }
+-	.dynsym		: { *(.dynsym) }
+-	.dynstr		: { *(.dynstr) }
+-	.gnu.version	: { *(.gnu.version) }
+-	.gnu.version_d	: { *(.gnu.version_d) }
+-	.gnu.version_r	: { *(.gnu.version_r) }
+-
+-	/*
+-	 * This linker script is used both with -r and with -shared.
+-	 * For the layouts to match, we need to skip more than enough
+-	 * space for the dynamic symbol table et al.  If this amount
+-	 * is insufficient, ld -shared will barf.  Just increase it here.
+-	 */
+-	. = 0x400;
+-
+-	.text		: { *(.text) } 			:text	=0x90909090
+-	.note		: { *(.note.*) }		:text	:note
+-	.eh_frame_hdr	: { *(.eh_frame_hdr ) }		:text	:eh_frame_hdr
+-	.eh_frame	: {
+-		KEEP (*(.eh_frame))
+-		LONG (0)
+-	}						:text
+-	.dynamic	: { *(.dynamic) }		:text	:dynamic
+-	.useless	: {
+-	      *(.got.plt) *(.got)
+-	      *(.data .data.* .gnu.linkonce.d.*)
+-	      *(.dynbss)
+-	      *(.bss .bss.* .gnu.linkonce.b.*)
+-	}						:text
+-}
+-
+-/*
+- * We must supply the ELF program headers explicitly to get just one
+- * PT_LOAD segment, and set the flags explicitly to make segments read-only.
+- */
+-PHDRS
+-{
+-	text		PT_LOAD FILEHDR PHDRS FLAGS(5);	/* PF_R|PF_X */
+-	dynamic		PT_DYNAMIC FLAGS(4);		/* PF_R */
+-	note		PT_NOTE FLAGS(4);		/* PF_R */
+-	eh_frame_hdr	PT_GNU_EH_FRAME;
+-}
+-
+-/*
+- * This controls what symbols we export from the DSO.
+- */
+-VERSION
+-{
+-	LINUX_2.6 {
+-	global:
+-		__kernel_read_tp;
+-		__kernel_atomic_cmpxchg_32;
+-		__kernel_atomic_barrier;
+-
+-	local: *;
+-	};
+-}
+diff --git a/arch/m68k/coldfire/vdso/vdso.lds.S b/arch/m68k/coldfire/vdso/vdso.lds.S
+index 5188423..8db4551 100644
+--- a/arch/m68k/coldfire/vdso/vdso.lds.S
++++ b/arch/m68k/coldfire/vdso/vdso.lds.S
+@@ -19,10 +19,12 @@ OUTPUT_ARCH(m68k)
+ 
+ /* The ELF entry point can be used to set the AT_SYSINFO value.  */
+ ENTRY(__kernel_read_tp);
++ENTRY(__kernel_atomic_cmpxchg_32);
++ENTRY(__kernel_atomic_barrier);
+ 
+ SECTIONS
+ {
+-	. = SIZEOF_HEADERS;
++	. = 0x5fffe000 + SIZEOF_HEADERS;
+ 
+ 	.hash		: { *(.hash) }			:text
+ 	.gnu.hash	: { *(.gnu.hash) }
+@@ -38,9 +40,9 @@ SECTIONS
+ 	 * space for the dynamic symbol table et al.  If this amount
+ 	 * is insufficient, ld -shared will barf.  Just increase it here.
+ 	 */
+-	. = 0x400;
++	. = 0x5fffe000 + 0x400;
+ 
+-	.text		: { *(.text) } 			:text	=0x90909090
++	.text		: { *(.text) } 			:text
+ 	.note		: { *(.note.*) }		:text	:note
+ 	.eh_frame_hdr	: { *(.eh_frame_hdr ) }		:text	:eh_frame_hdr
+ 	.eh_frame	: {
+@@ -54,6 +56,9 @@ SECTIONS
+ 	      *(.dynbss)
+ 	      *(.bss .bss.* .gnu.linkonce.b.*)
+ 	}						:text
++
++	. = 0x5fffe000 + 0x1000;
++	kuser_vdso_tp = .;
+ }
+ 
+ /*
+diff --git a/arch/m68k/include/asm/cf_entry.h b/arch/m68k/include/asm/cf_entry.h
+index c8f37a4..fbbd753 100644
+--- a/arch/m68k/include/asm/cf_entry.h
++++ b/arch/m68k/include/asm/cf_entry.h
+@@ -5,7 +5,6 @@
+ #include <asm/page.h>
+ #include <asm/coldfire.h>
+ #include <asm/cfmmu.h>
+-#include <asm/asm-offsets.h>
+ 
+ /*
+  * Stack layout in 'ret_from_exception':
+diff --git a/arch/m68k/include/asm/cfcache.h b/arch/m68k/include/asm/cfcache.h
+index 24c9515..ff898d8 100644
+--- a/arch/m68k/include/asm/cfcache.h
++++ b/arch/m68k/include/asm/cfcache.h
+@@ -127,6 +127,7 @@
+ 				 CF_CACR_BEC+		\
+ 				 CF_CACR_IEC+		\
+ 				 CF_CACR_DESB+		\
++				 CF_CACR_DDCM_01+	\
+ 				 CF_CACR_EUSP)
+ #else
+ /* cache disabled for testing */
+diff --git a/arch/m68k/include/asm/entry_mm.h b/arch/m68k/include/asm/entry_mm.h
+index 5202f5a..83b3287 100644
+--- a/arch/m68k/include/asm/entry_mm.h
++++ b/arch/m68k/include/asm/entry_mm.h
+@@ -1,6 +1,11 @@
+ #ifndef __M68K_ENTRY_H
+ #define __M68K_ENTRY_H
+ 
++#ifdef CONFIG_COLDFIRE
++#include <asm/cf_entry.h>
++
++#else
++
+ #include <asm/setup.h>
+ #include <asm/page.h>
+ 
+@@ -134,4 +139,5 @@ PT_DTRACE_BIT = 2
+ 
+ #endif
+ 
++#endif
+ #endif /* __M68K_ENTRY_H */
+diff --git a/arch/m68k/kernel/asm-offsets.c b/arch/m68k/kernel/asm-offsets.c
+index b9de187..5a0d861 100644
+--- a/arch/m68k/kernel/asm-offsets.c
++++ b/arch/m68k/kernel/asm-offsets.c
+@@ -47,6 +47,7 @@ int main(void)
+ 	/* offsets into the thread_info struct */
+ 	DEFINE(TINFO_PREEMPT, offsetof(struct thread_info, preempt_count));
+ 	DEFINE(TINFO_FLAGS, offsetof(struct thread_info, flags));
++	DEFINE(TINFO_TP_VALUE, offsetof(struct thread_info, tp_value));
+ 
+ 	/* offsets into the pt_regs */
+ 	DEFINE(PT_D0, offsetof(struct pt_regs, d0));
+diff --git a/arch/m68k/kernel/sys_m68k.c b/arch/m68k/kernel/sys_m68k.c
+index 946a77c..352ee61 100644
+--- a/arch/m68k/kernel/sys_m68k.c
++++ b/arch/m68k/kernel/sys_m68k.c
+@@ -698,6 +698,10 @@ asmlinkage int
+ sys_write_tp(unsigned long tp)
+ {
+ 	current_thread_info()->tp_value = tp;
++#ifdef CONFIG_VDSO
++	extern void *_vdso_tp;
++	*(unsigned long*)_vdso_tp = tp;
++#endif
+ 	return 0;
+ }
+ 
+-- 
+1.6.4
+

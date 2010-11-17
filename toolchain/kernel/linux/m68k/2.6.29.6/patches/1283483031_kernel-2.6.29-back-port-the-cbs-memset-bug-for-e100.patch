@@ -1,0 +1,26 @@
+From 1bf6c8c80585a5c62c9a75db037c55e0ccbe406f Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Fri, 3 Sep 2010 11:03:51 +0800
+Subject: [PATCH 1/3] back port the cbs memset bug for e100
+
+Signed-off-by: Jason Jin <Jason.jin@freescale.com>
+---
+ drivers/net/e100.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/net/e100.c b/drivers/net/e100.c
+index 86bb876..a6cd9a6 100644
+--- a/drivers/net/e100.c
++++ b/drivers/net/e100.c
+@@ -1644,6 +1644,8 @@ static int e100_alloc_cbs(struct nic *nic)
+ 	if (!nic->cbs)
+ 		return -ENOMEM;
+ 
++	memset(nic->cbs, 0, count * sizeof(struct cb));
++
+ 	for (cb = nic->cbs, i = 0; i < count; cb++, i++) {
+ 		cb->next = (i + 1 < count) ? cb + 1 : nic->cbs;
+ 		cb->prev = (i == 0) ? nic->cbs + count - 1 : cb - 1;
+-- 
+1.6.4
+

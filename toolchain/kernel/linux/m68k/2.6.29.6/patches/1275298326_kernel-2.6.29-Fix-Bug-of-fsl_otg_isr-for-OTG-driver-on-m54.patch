@@ -1,0 +1,28 @@
+From c74c7f46582978ea3da98b215675998d472e7ee4 Mon Sep 17 00:00:00 2001
+From: Lanttor Guo <lanttor.guo@freescale.com>
+Date: Mon, 31 May 2010 17:32:06 +0800
+Subject: [PATCH] Fix Bug of fsl_otg_isr for OTG driver on m5441x platform
+
+Modify some in fsl_otg_isr() function at driver/usb/otg/fsl_otg.c file
+
+Signed-off-by: Lanttor Guo <lanttor.guo@freescale.com>
+---
+ drivers/usb/otg/fsl_otg.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/usb/otg/fsl_otg.c b/drivers/usb/otg/fsl_otg.c
+index 835ad0b..057045a 100644
+--- a/drivers/usb/otg/fsl_otg.c
++++ b/drivers/usb/otg/fsl_otg.c
+@@ -670,7 +670,7 @@ irqreturn_t fsl_otg_isr(int irq, void *dev_id)
+ 	u32 otg_int_src, otg_sc;
+ 
+ 	otg_sc = fsl_readl(&usb_dr_regs->otgsc);
+-	otg_int_src = otg_sc & OTGSC_INTSTS_MASK & (otg_sc >> 8);
++	otg_int_src = otg_sc & OTGSC_INTSTS_MASK;
+ 
+ 	/* Only clear otg interrupts */
+ 	fsl_writel(otg_sc, &usb_dr_regs->otgsc);
+-- 
+1.6.4
+

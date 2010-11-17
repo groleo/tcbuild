@@ -1,0 +1,27 @@
+From 6635c41eb184d76efde43624ad8bb00a1b22d196 Mon Sep 17 00:00:00 2001
+From: Shrek Wu <b16972@freescale.com>
+Date: Mon, 17 May 2010 11:29:55 +0800
+Subject: [PATCH] Fix the irq1 pinmux for ESDHC.
+
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ drivers/mmc/host/esdhc.c |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mmc/host/esdhc.c b/drivers/mmc/host/esdhc.c
+index 56633aa..00e7aa0 100644
+--- a/drivers/mmc/host/esdhc.c
++++ b/drivers/mmc/host/esdhc.c
+@@ -1667,7 +1667,8 @@ static int __init esdhc_probe(struct platform_device *pdev)
+ 
+ 	MCF_INTC2_ICR31 = 2;            /* SDHC irqstat */
+ #if defined(CONFIG_ESDHC_DETECT_USE_EXTERN_IRQ1)
+-	MCF_GPIO_PAR_IRQ0H |= MCF_GPIO_PAR_IRQH_IRQ1;
++	/*this is irq1 hardware work round*/
++	MCF_GPIO_PAR_IRQ0H |= 0x3;
+ 
+ 	MCF_EPORT_EPPAR   = MCF_EPORT_EPPAR | MCF_EPORT_EPPAR_EPPA1_BOTH;
+ 	MCF_EPORT_EPIER   = MCF_EPORT_EPIER | MCF_EPORT_EPIER_EPIE1;
+-- 
+1.6.4
+

@@ -1,0 +1,1013 @@
+From 6bc57d544f49a583dcd9f7eb3b1e6827c5ff7169 Mon Sep 17 00:00:00 2001
+From: Lanttor Guo <lanttor.guo@freescale.com>
+Date: Fri, 16 Apr 2010 17:54:54 +0800
+Subject: [PATCH 11/16] Add USB OTG support on m5441x platform
+
+support ULPI transceiver;
+support fs/ls on-chip transceiver;
+
+Signed-off-by: Lanttor Guo <lanttor.guo@freescale.com>
+---
+ arch/m68k/Kconfig                        |    2 +
+ arch/m68k/coldfire/m5441x/config.c       |    2 +-
+ arch/m68k/coldfire/m5441x/usb.c          |  216 ++++++++++++++++++++++++++++++
+ arch/m68k/coldfire/m5441x/usb.h          |  102 ++++++++++++++
+ arch/m68k/coldfire/m5441x/usb_dr.c       |  122 +++++++++++++++++
+ arch/m68k/coldfire/m5441x/xcvr.c         |  184 +++++++++++++++++++++++++
+ arch/m68k/include/asm/fsl_usb_platform.h |   65 +++++++++
+ arch/m68k/include/asm/mcf5441x_gpio.h    |    2 +-
+ arch/m68k/include/asm/mcf5441x_pm.h      |   33 +++++
+ arch/m68k/include/asm/mcf5445x_usb.h     |   55 --------
+ arch/m68k/include/asm/mcfsim.h           |    1 +
+ drivers/usb/Kconfig                      |    1 +
+ drivers/usb/gadget/Kconfig               |    2 +-
+ drivers/usb/host/Kconfig                 |   24 +++-
+ drivers/usb/host/ehci-fsl.h              |    4 +-
+ 15 files changed, 751 insertions(+), 64 deletions(-)
+ create mode 100644 arch/m68k/coldfire/m5441x/usb.c
+ create mode 100644 arch/m68k/coldfire/m5441x/usb.h
+ create mode 100644 arch/m68k/coldfire/m5441x/usb_dr.c
+ create mode 100644 arch/m68k/coldfire/m5441x/xcvr.c
+ create mode 100644 arch/m68k/include/asm/fsl_usb_platform.h
+ create mode 100644 arch/m68k/include/asm/mcf5441x_pm.h
+ delete mode 100644 arch/m68k/include/asm/mcf5445x_usb.h
+
+diff --git a/arch/m68k/Kconfig b/arch/m68k/Kconfig
+index e475515..154f5a2 100644
+--- a/arch/m68k/Kconfig
++++ b/arch/m68k/Kconfig
+@@ -424,6 +424,8 @@ config M5441X
+ 	bool "MCF5441x support"
+ 	depends on COLDFIRE
+ 	select GENERIC_TIME
++	select USB_EHCI_FSL
++	select HAVE_FSL_USB_DR
+ 	help
+ 	  This option will add support for the MCF5441x processor with mmu.
+ 
+diff --git a/arch/m68k/coldfire/m5441x/config.c b/arch/m68k/coldfire/m5441x/config.c
+index 5e2f904..543d489 100644
+--- a/arch/m68k/coldfire/m5441x/config.c
++++ b/arch/m68k/coldfire/m5441x/config.c
+@@ -367,7 +367,7 @@ static irqreturn_t coldfire_sched_clk_irq(int irq, void *dev)
+ }
+ 
+ /*
+- * Setup DTIM3 as the 5445x sched_clock() implementation.  The
++ * Setup DTIM3 as the 5441x sched_clock() implementation.  The
+  * input frequency to the clock is the internal bus clock (MCF_BUSCLK)
+  * which is the system clock (MCF_CLK) / 2.
+  *
+diff --git a/arch/m68k/coldfire/m5441x/usb.c b/arch/m68k/coldfire/m5441x/usb.c
+new file mode 100644
+index 0000000..bfe9b6f
+--- /dev/null
++++ b/arch/m68k/coldfire/m5441x/usb.c
+@@ -0,0 +1,216 @@
++/*
++ * Copyright (C) 2010 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++#include <linux/module.h>
++#include <linux/kernel.h>
++#include <linux/types.h>
++#include <linux/errno.h>
++#include <linux/err.h>
++#include <linux/platform_device.h>
++#include <linux/fsl_devices.h>
++#include <linux/usb/fsl_xcvr.h>
++#include <asm/mcfsim.h>
++
++#define MCF_SCM_BCR		MCF_REG32(0xFC040024)
++#define MCF_SCM_BCR_GBR		(1 << 9)	/* global bursts for read */
++#define MCF_SCM_BCR_GBW		(1 << 8)	/* global bursts for write */
++#define MCF_SCM_BCR_SBE_ALL	(0xff << 0)	/* slave burst enable */
++
++#define MAX_XCVR 3
++struct fsl_xcvr_ops *g_xc_ops[MAX_XCVR] = { NULL };
++
++#ifdef ULPI_DEBUG
++void print_ulpi_regs(void)
++{
++	pr_debug("MCF_SCM_BCR=0x%08lx  MCF_CCM_MISCCR=0x%08x  "
++		 "MCF_CCM_MISSCR2=0x%08x  "
++		 "MCF_GPIO_PAR_TIMER=0x%08x  MCF_GPIO_PAR_FEC=08%08x  "
++		 "MCF_GPIO_PAR_SIMP0H=08%08x  MCF_GPIO_PODR_G=08%08x\n",
++		 MCF_SCM_BCR, MCF_CCM_MISCCR, MCF_CCM_MISCCR2, MCF_GPIO_PAR_TIMER,
++		 MCF_GPIO_PAR_FEC, MCF_GPIO_PAR_SIMP0H, MCF_GPIO_PODR_G);
++}
++EXPORT_SYMBOL(print_ulpi_regs);
++#endif
++
++static inline void fsl_usb_enable_clk(void)
++{
++	pr_debug("%s\n", __func__);
++
++        /* Enable the clock for USB OTG */
++        MCF_PM_PPMCR0 = 0x2c;
++
++	/* Use external clock source if PLL isn't a multiple of 60MHz */
++	MCF_CCM_MISCCR &= ~MCF_CCM_MISCCR_USBSRC;
++
++	/* Initialize the USB Clock: use USB input clock */
++	MCF_GPIO_PAR_IRQ0L =
++		(MCF_GPIO_PAR_IRQ0L &
++		MCF_GPIO_PAR_IRQL_IRQ6_MASK) |
++		MCF_GPIO_PAR_IRQL_IRQ6_USBCLKIN;
++}
++
++static inline void fsl_usb_disable_clk(void)
++{
++	pr_debug("%s\n", __func__);
++}
++
++void fsl_usb_xcvr_register(struct fsl_xcvr_ops *xcvr_ops)
++{
++	int i;
++
++	pr_debug("%s '%s'\n", __func__, xcvr_ops->name);
++	for (i = 0; i < MAX_XCVR; i++) {
++		if (g_xc_ops[i] == NULL) {
++			g_xc_ops[i] = xcvr_ops;
++			return;
++		}
++	}
++
++	pr_debug("%s failed\n", __func__);
++}
++EXPORT_SYMBOL_GPL(fsl_usb_xcvr_register);
++
++void fsl_usb_xcvr_unregister(struct fsl_xcvr_ops *xcvr_ops)
++{
++	int i;
++
++	pr_debug("%s '%s'\n", __func__, xcvr_ops->name);
++	for (i = 0; i < MAX_XCVR; i++) {
++		if (g_xc_ops[i] == xcvr_ops) {
++			g_xc_ops[i] = NULL;
++			return;
++		}
++	}
++
++	pr_debug("%s failed\n", __func__);
++}
++EXPORT_SYMBOL_GPL(fsl_usb_xcvr_unregister);
++
++static struct fsl_xcvr_ops *fsl_usb_get_xcvr(char *name)
++{
++	int i;
++
++	pr_debug("%s '%s'\n", __func__, name);
++	if (name == NULL) {
++		printk(KERN_ERR "get_xcvr(): No tranceiver name\n");
++		return NULL;
++	}
++
++	for (i = 0; i < MAX_XCVR; i++) {
++		if (strcmp(g_xc_ops[i]->name, name) == 0)
++			return g_xc_ops[i];
++	}
++	pr_debug("Failed %s\n", __func__);
++	return NULL;
++}
++
++/* The dmamask must be set for EHCI to work */
++static u64 ehci_dmamask = ~(u32) 0;
++
++/*!
++ * Register an instance of a USB host platform device.
++ *
++ * @param	res:	resource pointer
++ * @param       n_res:	number of resources
++ * @param       config: config pointer
++ *
++ * @return      newly-registered platform_device
++ *
++ * Each supported host interface is registered as an instance
++ * of the "fsl-ehci" device.  Call this function multiple times
++ * to register each host interface.
++ */
++static int instance_id;
++struct platform_device *host_pdev_register(struct resource *res, int n_res,
++					   struct fsl_usb2_platform_data *config)
++{
++	struct platform_device *pdev;
++	int rc;
++
++	pr_debug("register host res=0x%p, size=%d\n", res, n_res);
++
++	pdev = platform_device_register_simple("fsl-ehci",
++					       instance_id, res, n_res);
++	if (IS_ERR(pdev)) {
++		printk(KERN_ERR "usb: can't register %s Host, %ld\n",
++		       config->name, PTR_ERR(pdev));
++		return NULL;
++	}
++
++	pdev->dev.coherent_dma_mask = 0xffffffff;
++	pdev->dev.dma_mask = &ehci_dmamask;
++
++	rc = platform_device_add_data(pdev, config,
++				      sizeof(struct fsl_usb2_platform_data));
++	if (rc) {
++		platform_device_unregister(pdev);
++		return NULL;
++	}
++
++	printk(KERN_INFO "usb: %s host (%s) registered\n", config->name,
++	       config->transceiver);
++	pr_debug("pdev=0x%p  dev=0x%p  resources=0x%p  pdata=0x%p\n",
++		 pdev, &pdev->dev, pdev->resource, pdev->dev.platform_data);
++
++	instance_id++;
++
++	return pdev;
++}
++
++
++static int dr_used;
++
++int usb_platform_dr_init(struct platform_device *pdev)
++{
++	struct fsl_usb2_platform_data *pdata = pdev->dev.platform_data;
++	struct fsl_xcvr_ops *xops;
++
++	pr_debug("%s: pdev=0x%p  pdata=0x%p\n", __func__, pdev, pdata);
++
++	xops = fsl_usb_get_xcvr(pdata->transceiver);
++	if (!xops) {
++		printk(KERN_ERR "DR transceiver ops missing\n");
++		return -EINVAL;
++	}
++	pdata->xcvr_ops = xops;
++	pdata->xcvr_type = xops->xcvr_type;
++	pdata->pdev = pdev;
++	xops->pdata = pdata;
++
++	/* enable USB read, write and slave bursts */
++	MCF_SCM_BCR = MCF_SCM_BCR_GBR | MCF_SCM_BCR_GBW | MCF_SCM_BCR_SBE_ALL;
++
++	if (!dr_used) {
++		fsl_usb_enable_clk();
++
++		if (xops->init)
++			xops->init(xops);
++	}
++
++	dr_used++;
++	pr_debug("%s: success\n", __func__);
++	return 0;
++}
++EXPORT_SYMBOL_GPL(usb_platform_dr_init);
++
++void usb_platform_dr_uninit(struct fsl_usb2_platform_data *pdata)
++{
++	pr_debug("%s\n", __func__);
++
++	dr_used--;
++	if (!dr_used) {
++		if (pdata->xcvr_ops && pdata->xcvr_ops->uninit)
++			pdata->xcvr_ops->uninit(pdata->xcvr_ops);
++
++		pdata->regs = NULL;
++		fsl_usb_disable_clk();
++	}
++}
++EXPORT_SYMBOL_GPL(usb_platform_dr_uninit);
+diff --git a/arch/m68k/coldfire/m5441x/usb.h b/arch/m68k/coldfire/m5441x/usb.h
+new file mode 100644
+index 0000000..4b8d189
+--- /dev/null
++++ b/arch/m68k/coldfire/m5441x/usb.h
+@@ -0,0 +1,102 @@
++/*
++ * Copyright (C) 2010 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++
++extern int usb_platform_dr_init(struct platform_device *pdev);
++extern void usb_platform_dr_uninit(struct fsl_usb2_platform_data *pdata);
++extern struct platform_device *host_pdev_register(struct resource *res,
++		  int n_res, struct fsl_usb2_platform_data *config);
++
++
++/*
++ * Determine which platform_data struct to use, based on which
++ * transceiver is configured.
++ * PDATA is a pointer to it.
++ */
++#ifdef CONFIG_USB_M5441X_ULPI
++static struct fsl_usb2_platform_data dr_config_ulpi;
++#define PDATA (&dr_config_ulpi)
++#else
++static struct fsl_usb2_platform_data dr_config_fsls;
++#define PDATA (&dr_config_fsls)
++#endif
++
++/*
++ * Used to set pdata->operating_mode before registering the platform_device.
++ * If OTG is configured, the controller operates in OTG mode,
++ * otherwise it's either host or device.
++ */
++#ifdef CONFIG_USB_OTG
++#define DR_UDC_MODE	FSL_USB2_DR_OTG
++#define DR_HOST_MODE	FSL_USB2_DR_OTG
++#else
++#define DR_UDC_MODE	FSL_USB2_DR_DEVICE
++#define DR_HOST_MODE	FSL_USB2_DR_HOST
++#endif
++
++
++#if defined CONFIG_USB_EHCI_HCD || defined CONFIG_USB_EHCI_HCD_MODULE
++static inline void dr_register_host(struct resource *r, int rs)
++{
++	PDATA->operating_mode = DR_HOST_MODE;
++	host_pdev_register(r, rs, PDATA);
++}
++#else
++static inline void dr_register_host(struct resource *r, int rs)
++{
++}
++#endif
++
++#ifdef CONFIG_USB_GADGET_FSL_USB2
++static struct platform_device dr_udc_device;
++
++static inline void dr_register_udc(void)
++{
++	PDATA->operating_mode = DR_UDC_MODE;
++	dr_udc_device.dev.platform_data = PDATA;
++
++	if (platform_device_register(&dr_udc_device))
++		printk(KERN_ERR "usb: can't register DR gadget\n");
++	else
++		printk(KERN_INFO "usb: DR gadget (%s) registered\n",
++		       PDATA->transceiver);
++}
++#else
++static inline void dr_register_udc(void)
++{
++}
++#endif
++
++#ifdef CONFIG_USB_OTG
++static struct platform_device dr_otg_device;
++
++/*
++ * set the proper operating_mode and
++ * platform_data pointer, then register the
++ * device.
++ */
++static inline void dr_register_otg(void)
++{
++	PDATA->operating_mode = FSL_USB2_DR_OTG;
++	dr_otg_device.dev.platform_data = PDATA;
++
++	if (platform_device_register(&dr_otg_device))
++		printk(KERN_ERR "usb: can't register otg device\n");
++	else
++		printk(KERN_INFO "usb: DR OTG registered\n");
++}
++#else
++static inline void dr_register_otg(void)
++{
++}
++#endif
+diff --git a/arch/m68k/coldfire/m5441x/usb_dr.c b/arch/m68k/coldfire/m5441x/usb_dr.c
+new file mode 100644
+index 0000000..00de76a
+--- /dev/null
++++ b/arch/m68k/coldfire/m5441x/usb_dr.c
+@@ -0,0 +1,122 @@
++/*
++ * Copyright (C) 2010 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++#define DEBUG
++#include <linux/kernel.h>
++#include <linux/types.h>
++#include <linux/platform_device.h>
++#include <linux/fsl_devices.h>
++#include <asm/mcfsim.h>
++
++#define USB_OTGREGS_BASE MCF_REG32(0xFC0B0000)
++#define INT_USB		(64 + 64 + 64 + 17)	/* INTC1:17 17.2.9.1*/
++#define INT_UOCSR	(64 + 64 + 64 + 27)	/* INTC1:27 17.2.9.1 */
++
++#include "usb.h"
++
++/*
++ * platform data structs
++ * 	- Which one to use is determined by CONFIG options in usb.h
++ * 	- operating_mode plugged at run time
++ */
++
++/* off-chip ULPI transceiver */
++static struct fsl_usb2_platform_data __maybe_unused dr_config_ulpi = {
++	.name            = "DR",
++	.platform_init   = usb_platform_dr_init,
++	.platform_uninit = usb_platform_dr_uninit,
++	.phy_mode	 = FSL_USB2_PHY_ULPI,
++	.transceiver     = "dr-ulpi",
++	.power_budget    = 500,
++	.es              = 1,
++	.big_endian_mmio = 1,
++	.big_endian_desc = 1,
++	.le_setup_buf    = 1,
++};
++
++/* on-chip FS/LS serial transceiver */
++static struct fsl_usb2_platform_data __maybe_unused dr_config_fsls = {
++	.name            = "DR",
++	.platform_init   = usb_platform_dr_init,
++	.platform_uninit = usb_platform_dr_uninit,
++	.phy_mode        = FSL_USB2_PHY_SERIAL,
++	.transceiver     = "dr-fsls",
++	.power_budget    = 500,
++	.es              = 1,
++	.big_endian_mmio = 1,
++	.big_endian_desc = 1,
++	.le_setup_buf    = 1,
++};
++
++/*
++ * resources
++ */
++static struct resource dr_resources[] = {
++	[0] = {
++		.start = (u32)(&USB_OTGREGS_BASE),
++		.end   = (u32)(&USB_OTGREGS_BASE + 0x1ff),
++		.flags = IORESOURCE_MEM,
++	},
++	[1] = {
++		.start = INT_USB,
++		.flags = IORESOURCE_IRQ,
++	},
++};
++
++static u64 dr_udc_dmamask = ~(u32) 0;
++static void dr_udc_release(struct device *dev)
++{
++}
++
++static u64 dr_otg_dmamask = ~(u32) 0;
++static void dr_otg_release(struct device *dev)
++{
++}
++
++/*
++ * platform device structs
++ * 	dev.platform_data field plugged at run time
++ */
++static struct platform_device __maybe_unused dr_udc_device = {
++	.name = "fsl-usb2-udc",
++	.id   = -1,
++	.dev  = {
++		.release           = dr_udc_release,
++		.dma_mask          = &dr_udc_dmamask,
++		.coherent_dma_mask = 0xffffffff,
++	},
++	.resource      = dr_resources,
++	.num_resources = ARRAY_SIZE(dr_resources),
++};
++
++static struct platform_device __maybe_unused dr_otg_device = {
++	.name = "fsl-usb2-otg",
++	.id = -1,
++	.dev = {
++		.release           = dr_otg_release,
++		.dma_mask          = &dr_otg_dmamask,
++		.coherent_dma_mask = 0xffffffff,
++	},
++	.resource      = dr_resources,
++	.num_resources = ARRAY_SIZE(dr_resources),
++};
++
++static int __init usb_dr_init(void)
++{
++	pr_debug("%s:\n", __func__);
++
++	dr_register_otg();
++	dr_register_host(dr_resources, ARRAY_SIZE(dr_resources));
++	dr_register_udc();
++
++	return 0;
++}
++
++module_init(usb_dr_init);
+diff --git a/arch/m68k/coldfire/m5441x/xcvr.c b/arch/m68k/coldfire/m5441x/xcvr.c
+new file mode 100644
+index 0000000..b56ebac
+--- /dev/null
++++ b/arch/m68k/coldfire/m5441x/xcvr.c
+@@ -0,0 +1,184 @@
++/*
++ * Copyright (C) 2010 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++#include <linux/module.h>
++#include <linux/kernel.h>
++#include <linux/types.h>
++#include <linux/init.h>
++#include <linux/io.h>
++#include <linux/usb/fsl_xcvr.h>
++#include <asm/mcfsim.h>
++
++/* Use the configured xcvr_ops */
++#ifdef CONFIG_USB_M5441X_ULPI
++#define XCVR_OPS &xcvr_ops_ulpi
++#elif defined CONFIG_USB_M5441X_FSLS
++#define XCVR_OPS &xcvr_ops_fsls
++#else
++#error "Invalid USB transceiver selection."
++#endif
++
++#define MCF_FEC_ENET0_RCR	MCF_REG32(0xFC0D4084)
++
++/*
++ * Init routine for on-chip FSLS xcvr
++ */
++static void xcvr_fsls_init(struct fsl_xcvr_ops *this)
++{
++	pr_debug("%s: name=%s\n", __func__, this->name);
++	/* Slew rate setting for OTG */
++	MCF_GPIO_SRCR_FEC = 0x0f;
++	MCF_GPIO_SRCR_TIMER = 0xc3;
++	MCF_GPIO_SRCR_IRQ0 = 0x03;
++
++	/* Configure USB_DP_PDOWN/USB_DM_PDOWN */
++	MCF_GPIO_PAR_DBGH1 &= ~MCF_GPIO_PAR_DEBUGH1_DAT0;
++	MCF_GPIO_PAR_DBGH1 &= ~MCF_GPIO_PAR_DEBUGH1_DAT1;
++
++	/* Enable VBUS_EN and VBUS_OC signals */
++	MCF_GPIO_PAR_TIMER =
++		(MCF_GPIO_PAR_TIMER &
++		MCF_GPIO_PAR_TIMER_T3IN_MASK) |
++		MCF_GPIO_PAR_TIMER_T3IN_USB0_VBUSEN;
++
++	MCF_GPIO_PAR_TIMER =
++		(MCF_GPIO_PAR_TIMER &
++		MCF_GPIO_PAR_TIMER_T0IN_MASK) |
++		MCF_GPIO_PAR_TIMER_T0IN_USBO_VBUSOC;
++
++	/* Setup USB_VBUS_OC signal to be active-low */
++	MCF_CCM_MISCCR &= (~MCF_CCM_MISCCR_USBOOC);
++	MCF_CCM_MISCCR |= MCF_CCM_MISCCR_USBPUE;
++
++}
++
++/*
++ * Init routine for off-chip ULPI xcvr
++ */
++static void xcvr_ulpi_init(struct fsl_xcvr_ops *this)
++{
++	pr_debug("%s: name=%s\n", __func__, this->name);
++
++	/* Chip select for ULPI: GPIO G4 as CS between ULPI and RMII1*/
++	MCF_GPIO_PAR_SIMP0H =
++		(MCF_GPIO_PAR_SIMP0H &
++		MCF_GPIO_PAR_SIMP0H_DAT_MASK) |
++		MCF_GPIO_PAR_SIMP0H_DAT_GPIO;
++
++	MCF_GPIO_PDDR_G =
++		(MCF_GPIO_PDDR_G &
++		MCF_GPIO_PDDR_G4_MASK) |
++		MCF_GPIO_PDDR_G4_OUTPUT;
++
++	MCF_GPIO_PODR_G =
++		(MCF_GPIO_PODR_G &
++		MCF_GPIO_PODR_G4_MASK) |
++		MCF_GPIO_PODR_G4_VAL;
++
++	/* Enable ULPI */
++	MCF_CCM_MISCCR2 = MCF_CCM_MISCCR2 & (~MCF_CCM_MISCCR2_ULPI);
++
++	/* Slew rate setting for OTG */
++	MCF_GPIO_SRCR_FEC = 0x0f;
++	MCF_GPIO_SRCR_TIMER = 0xc3;
++	MCF_GPIO_SRCR_IRQ0 = 0x03;
++
++	/* Enable the required ULPI signals */
++	MCF_GPIO_PAR_TIMER =
++		(MCF_GPIO_PAR_TIMER &
++		MCF_GPIO_PAR_TIMER_T3IN_MASK) |
++		MCF_GPIO_PAR_TIMER_T3IN_ULPI_DIR;
++
++	MCF_GPIO_PAR_TIMER =
++		(MCF_GPIO_PAR_TIMER &
++		MCF_GPIO_PAR_TIMER_T0IN_MASK) |
++		MCF_GPIO_PAR_TIMER_T0IN_ULPI_NXT;
++
++	MCF_FEC_ENET0_RCR = 0x104; /* FEC0 as RMII mode */
++
++	MCF_GPIO_PAR_FEC =
++		(MCF_GPIO_PAR_FEC &
++		MCF_GPIO_PAR_FEC_FEC_MASK) |
++		MCF_GPIO_PAR_FEC_FEC_RMII0FUL_ULPI;
++
++
++	pr_debug("MCF_GPIO_PAR_TIMER:0x%x, MCF_GPIO_PAR_FEC:0x%x,"
++		 "MCF_GPIO_PAR_SIMP0H:0x%x, MCF_GPIO_PDDR_G:0x%x,"
++		 "MCF_GPIO_PODR_G:0x%x, MCF_CCM_MISCCR2:0x%x\n\n",
++		 MCF_GPIO_PAR_TIMER, MCF_GPIO_PAR_FEC,
++		 MCF_GPIO_PAR_SIMP0H, MCF_GPIO_PDDR_G,
++		 MCF_GPIO_PODR_G, MCF_CCM_MISCCR2);
++
++	pr_debug("OTGSC:0x%lx, PORTSC:0x%lx, USBMODE:0x%lx, "
++		 "USBCMD:0x%lx, USBSTS:0x%lx, USBINTR:0x%lx, "
++		 "MCF_CCM_UOCSR:0x%x\n\n",
++		MCF_REG32(0xfc0b01a4), MCF_REG32(0xfc0b0184),
++		MCF_REG32(0xfc0b01a8), MCF_REG32(0xfc0b0140),
++		MCF_REG32(0xfc0b0144), MCF_REG32(0xfc0b0148),
++		MCF_CCM_UOCSR);
++}
++
++static void xcvr_uninit(struct fsl_xcvr_ops *this)
++{
++	pr_debug("%s\n", __func__);
++}
++
++static void xcvr_pullup(int on)
++{
++	unsigned short ccm = in_be16(&MCF_CCM_UOCSR);
++
++	pr_debug("%s(%d)\n", __func__, on);
++
++	ccm = in_be16(&MCF_CCM_UOCSR);
++	if (on) {
++		ccm |= MCF_CCM_UOCSR_BVLD;
++		ccm &= ~MCF_CCM_UOCSR_SEND;
++		out_be16(&MCF_CCM_UOCSR, ccm);
++	} else {
++		ccm &= ~MCF_CCM_UOCSR_BVLD;
++		out_be16(&MCF_CCM_UOCSR, ccm);
++	}
++}
++
++struct fsl_xcvr_ops xcvr_ops_ulpi = {
++	.init   = xcvr_ulpi_init,
++	.uninit = xcvr_uninit,
++	.pullup = xcvr_pullup,
++	.name   = "dr-ulpi",
++};
++
++struct fsl_xcvr_ops xcvr_ops_fsls = {
++	.init   = xcvr_fsls_init,
++	.uninit = xcvr_uninit,
++	.pullup = xcvr_pullup,
++	.name   = "dr-fsls",
++};
++
++static int __init usb_xcvr_init(void)
++{
++	struct fsl_xcvr_ops *xops = XCVR_OPS;
++
++	pr_debug("%s %s\n", __func__, xops->name);
++	fsl_usb_xcvr_register(xops);
++
++	return 0;
++}
++
++static void __exit usb_xcvr_exit(void)
++{
++	fsl_usb_xcvr_unregister(XCVR_OPS);
++}
++
++module_init(usb_xcvr_init);
++module_exit(usb_xcvr_exit);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("External ULPI xcvr driver");
++MODULE_LICENSE("GPL");
+diff --git a/arch/m68k/include/asm/fsl_usb_platform.h b/arch/m68k/include/asm/fsl_usb_platform.h
+new file mode 100644
+index 0000000..a7f874f
+--- /dev/null
++++ b/arch/m68k/include/asm/fsl_usb_platform.h
+@@ -0,0 +1,65 @@
++/*
++ * Copyright (C) 2005-2010 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/usb/fsl_xcvr.h>
++#include <linux/usb/fsl_usb2.h>
++#include <asm/mcfsim.h>
++
++/* ehci_arc_hc_driver.flags value */
++#define FSL_PLATFORM_HC_FLAGS (HCD_USB2 | HCD_MEMORY)
++
++static void fsl_setup_phy(struct ehci_hcd *ehci,
++			  enum fsl_usb2_phy_modes phy_mode,
++			  int port_offset);
++
++
++static inline void fsl_platform_usb_setup(struct ehci_hcd *ehci)
++{
++	struct fsl_usb2_platform_data *pdata;
++
++	pdata = ehci_to_hcd(ehci)->self.controller->platform_data;
++	fsl_setup_phy(ehci, pdata->phy_mode, 0);
++}
++
++static inline void fsl_platform_set_host_mode(struct usb_hcd *hcd)
++{
++	unsigned int temp;
++	struct fsl_usb2_platform_data *pdata;
++	struct fsl_usb_host_regs *regs;
++
++	pdata = hcd->self.controller->platform_data;
++	regs = pdata->regs;
++
++	if (pdata->xcvr_ops && pdata->xcvr_ops->set_host)
++		pdata->xcvr_ops->set_host();
++
++	/* set host mode and select "big endian" */
++	temp = in_be32(&regs->usbmode);
++	temp |= USBMODE_CM_HOST | (pdata->es ? USBMODE_ES : 0);
++	out_be32(&regs->usbmode, temp);
++
++	pr_debug("%s: set usbmode to 0x%x\n\n", __FUNCTION__,
++		in_be32(&regs->usbmode));
++
++}
++
++static inline void
++fsl_platform_set_vbus_power(struct fsl_usb2_platform_data *pdata, int on)
++{
++#ifdef CONFIG_USB_M5441X_FSLS
++	if (on)
++		MCF_CCM_UOCSR |= MCF_CCM_UOCSR_DRV_VBUS;
++	else
++		MCF_CCM_UOCSR &= (~MCF_CCM_UOCSR_DRV_VBUS);
++#endif
++}
+diff --git a/arch/m68k/include/asm/mcf5441x_gpio.h b/arch/m68k/include/asm/mcf5441x_gpio.h
+index ba21291..aefcde2 100644
+--- a/arch/m68k/include/asm/mcf5441x_gpio.h
++++ b/arch/m68k/include/asm/mcf5441x_gpio.h
+@@ -274,7 +274,7 @@
+ #define MCF_GPIO_PAR_TIMER_T3IN_EXTA3			(0xC0)
+ #define MCF_GPIO_PAR_TIMER_T3IN_T3OUT	(0x80)
+ #define MCF_GPIO_PAR_TIMER_T3IN_USB0_VBUSEN	(0x40)
+-#define MCF_GPIO_PAR_TIMER_T3IN_ULIPI_DIR	(0x40)
++#define MCF_GPIO_PAR_TIMER_T3IN_ULPI_DIR	(0x40)
+ #define MCF_GPIO_PAR_TIMER_T3IN_GPIO		(0x00)
+ #define MCF_GPIO_PAR_TIMER_T2IN(x)		(((x)&0x03)<<4)
+ #define MCF_GPIO_PAR_TIMER_T2IN_MASK		(0xCF)
+diff --git a/arch/m68k/include/asm/mcf5441x_pm.h b/arch/m68k/include/asm/mcf5441x_pm.h
+new file mode 100644
+index 0000000..7bbdbb2
+--- /dev/null
++++ b/arch/m68k/include/asm/mcf5441x_pm.h
+@@ -0,0 +1,33 @@
++/*
++ * Copyright(C) 2010 Freescale Semiconductor, Inc. All rights reserved.
++ *
++ * This program is free software; you can redistribute  it and/or modify it
++ * under  the terms of  the GNU General  Public License as published by the
++ * Free Software Foundation;  either version 2 of the  License, or (at your
++ * option) any later version.
++ */
++
++#ifndef __MCF5441X_PM_H__
++#define __MCF5441X_PM_H__
++
++/*********************************************************************
++*
++* Power Management Module Register Definition
++*
++*********************************************************************/
++
++#define MCF_PM_WCR	MCF_REG08(0xFC040013)
++#define MCF_PM_PPMSR0	MCF_REG08(0xFC04002C)
++#define MCF_PM_PPMCR0	MCF_REG08(0xFC04002D)
++#define MCF_PM_PPMSR1	MCF_REG08(0xFC04002E)
++#define MCF_PM_PPMCR1	MCF_REG08(0xFC04002F)
++#define MCF_PM_PPMHR0	MCF_REG32(0xFC040030)
++#define MCF_PM_PPMLR0	MCF_REG32(0xFC040034)
++#define MCF_PM_PPMHR1	MCF_REG32(0xFC040038)
++#define MCF_PM_PPMLR1	MCF_REG32(0xFC04003C)
++#define MCF_PM_LPCR	MCF_REG08(0xEC090007)
++#define MCF_PM_MISCCR	MCF_REG16(0xEC09000E)
++#define MCF_PM_CDHR	MCF_REG16(0xEC090010)
++#define MCF_PM_CDLR	MCF_REG16(0xEC090012)
++
++#endif
+diff --git a/arch/m68k/include/asm/mcf5445x_usb.h b/arch/m68k/include/asm/mcf5445x_usb.h
+deleted file mode 100644
+index 915c8bb..0000000
+--- a/arch/m68k/include/asm/mcf5445x_usb.h
++++ /dev/null
+@@ -1,55 +0,0 @@
+-/*
+- * Copyright 2005-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+- *
+- * This program is free software; you can redistribute  it and/or modify it
+- * under  the terms of  the GNU General  Public License as published by the
+- * Free Software Foundation;  either version 2 of the  License, or (at your
+- * option) any later version.
+- */
+-
+-#include <linux/usb/fsl_xcvr.h>
+-#include <linux/usb/fsl_usb2.h>
+-#include <asm/mcfsim.h>
+-
+-/* ehci_arc_hc_driver.flags value */
+-#define FSL_PLATFORM_HC_FLAGS (HCD_USB2 | HCD_MEMORY)
+-
+-static void fsl_setup_phy(struct ehci_hcd *ehci,
+-			  enum fsl_usb2_phy_modes phy_mode,
+-			  int port_offset);
+-
+-
+-static inline void fsl_platform_usb_setup(struct ehci_hcd *ehci)
+-{
+-	struct fsl_usb2_platform_data *pdata;
+-
+-	pdata = ehci_to_hcd(ehci)->self.controller->platform_data;
+-	fsl_setup_phy(ehci, pdata->phy_mode, 0);
+-}
+-
+-static inline void fsl_platform_set_host_mode(struct usb_hcd *hcd)
+-{
+-	unsigned int temp;
+-	struct fsl_usb2_platform_data *pdata;
+-	struct fsl_usb_host_regs *regs;
+-
+-	pdata = hcd->self.controller->platform_data;
+-	regs = pdata->regs;
+-
+-	if (pdata->xcvr_ops && pdata->xcvr_ops->set_host)
+-		pdata->xcvr_ops->set_host();
+-
+-	/* set host mode and select "big endian" */
+-	temp = in_be32(&regs->usbmode);
+-	temp |= USBMODE_CM_HOST | (pdata->es ? USBMODE_ES : 0);
+-	out_be32(&regs->usbmode, temp);
+-
+-	pr_debug("%s: set usbmode to 0x%x\n\n", __FUNCTION__,
+-		in_be32(&regs->usbmode));
+-
+-}
+-
+-static inline void
+-fsl_platform_set_vbus_power(struct fsl_usb2_platform_data *pdata, int on)
+-{
+-}
+diff --git a/arch/m68k/include/asm/mcfsim.h b/arch/m68k/include/asm/mcfsim.h
+index 007d3c1..25fea33 100644
+--- a/arch/m68k/include/asm/mcfsim.h
++++ b/arch/m68k/include/asm/mcfsim.h
+@@ -67,6 +67,7 @@
+ #include <asm/mcf5441x_dtim.h>
+ #include <asm/mcf5441x_rtc.h>
+ #include <asm/mcf5441x_scm.h>
++#include <asm/mcf5441x_pm.h>
+ #endif
+ 
+ /*
+diff --git a/drivers/usb/Kconfig b/drivers/usb/Kconfig
+index 9374d84..8446726 100644
+--- a/drivers/usb/Kconfig
++++ b/drivers/usb/Kconfig
+@@ -57,6 +57,7 @@ config USB_ARCH_HAS_EHCI
+ 	default y if SOC_AU1200
+ 	default y if ARCH_IXP4XX
+ 	default y if M5445X
++	default y if M5441X
+ 	default PCI
+ 
+ # ARM SA1111 chips have a non-PCI based "OHCI-compatible" USB host interface.
+diff --git a/drivers/usb/gadget/Kconfig b/drivers/usb/gadget/Kconfig
+index 4997e67..0365292 100644
+--- a/drivers/usb/gadget/Kconfig
++++ b/drivers/usb/gadget/Kconfig
+@@ -156,7 +156,7 @@ config USB_ATMEL_USBA
+ 
+ config USB_GADGET_FSL_USB2
+ 	boolean "Freescale Highspeed USB DR Peripheral Controller"
+-	depends on FSL_SOC || (HAVE_FSL_USB_DR && USB_M5445X_ULPI)
++	depends on FSL_SOC || (HAVE_FSL_USB_DR && (USB_M5445X_ULPI ||USB_M5441X_ULPI))
+ 	select USB_GADGET_DUALSPEED
+ 	help
+ 	   Some of Freescale processors have a High Speed
+diff --git a/drivers/usb/host/Kconfig b/drivers/usb/host/Kconfig
+index 0da34eb..b358138 100644
+--- a/drivers/usb/host/Kconfig
++++ b/drivers/usb/host/Kconfig
+@@ -58,6 +58,7 @@ config USB_EHCI_TT_NEWSCHED
+ 	bool "Improved Transaction Translator scheduling (EXPERIMENTAL)"
+ 	depends on USB_EHCI_HCD && EXPERIMENTAL
+ 	default y if M5445X
++	default y if M5441X
+ 	---help---
+ 	  This changes the periodic scheduling code to fill more of the low
+ 	  and full speed bandwidth available from the Transaction Translator
+@@ -74,12 +75,12 @@ config USB_EHCI_TT_NEWSCHED
+ 
+ config USB_EHCI_BIG_ENDIAN_MMIO
+ 	bool
+-	depends on USB_EHCI_HCD && (PPC_CELLEB || PPC_PS3 || 440EPX || ARCH_IXP4XX || M5445X)
++	depends on USB_EHCI_HCD && (PPC_CELLEB || PPC_PS3 || 440EPX || ARCH_IXP4XX || M5445X || M5441X)
+ 	default y
+ 
+ config USB_EHCI_BIG_ENDIAN_DESC
+ 	bool
+-	depends on USB_EHCI_HCD && (440EPX || ARCH_IXP4XX || M5445X)
++	depends on USB_EHCI_HCD && (440EPX || ARCH_IXP4XX || M5445X || M5441X)
+ 	default y
+ 
+ config USB_EHCI_FSL
+@@ -356,11 +357,13 @@ config USB_HWA_HCD
+ 
+ choice
+  	prompt "Select transceiver"
+- 	depends on M5445X
+- 	default USB_M5445X_ULPI 
++	depends on M5445X || M5441X
++	default USB_M5445X_ULPI if M5445X
++	default USB_M5441X_ULPI if M5441X
+  
+ config USB_M5445X_ULPI
+  	bool "External ULPI"
++	depends on M5445X
+  	---help---
+  	  Enable support for the external HS ULPI transceiver.
+  
+@@ -369,5 +372,18 @@ config USB_M5445X_FSLS
+  	depends on M54455EVB
+  	---help---
+  	  Enable support for the on-chip FL/LS transceiver.
++
++config USB_M5441X_ULPI
++	bool "External ULPI"
++	depends on M5441X
++	---help---
++	  Enable support for the external HS ULPI transceiver.
++
++config USB_M5441X_FSLS
++	bool "On-chip (FL/LS only)"
++	depends on M54418EVB
++	---help---
++	  Enable support for the on-chip FL/LS transceiver.
++
+ endchoice
+ 
+diff --git a/drivers/usb/host/ehci-fsl.h b/drivers/usb/host/ehci-fsl.h
+index 6ea487a..751458d 100644
+--- a/drivers/usb/host/ehci-fsl.h
++++ b/drivers/usb/host/ehci-fsl.h
+@@ -1,4 +1,4 @@
+-/* Copyright 2005, 2009 Freescale Semiconductor, Inc. All Rights Reserved.
++/* Copyright (C) 2005, 2009-2010 Freescale Semiconductor, Inc. All Rights Reserved.
+  * Copyright (c) 2005 MontaVista Software
+  *
+  * This program is free software; you can redistribute  it and/or modify it
+@@ -49,7 +49,7 @@
+ #elif CONFIG_PPC32
+ #include <asm/fsl_usb.h>
+ #elif CONFIG_COLDFIRE
+-#include <asm/mcf5445x_usb.h>
++#include <asm/fsl_usb_platform.h>
+ #endif
+ 
+ #endif				/* _EHCI_FSL_H */
+-- 
+1.6.4
+

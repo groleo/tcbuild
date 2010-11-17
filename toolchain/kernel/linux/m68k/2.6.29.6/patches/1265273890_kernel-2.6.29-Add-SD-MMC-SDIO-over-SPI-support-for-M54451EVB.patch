@@ -1,0 +1,346 @@
+From 4398a193940b27666eb47e86b2bd1d2e6a6c5b93 Mon Sep 17 00:00:00 2001
+From: Wang Huan <wanghuan@zch06.freescale.net>
+Date: Thu, 4 Feb 2010 16:58:10 +0800
+Subject: [PATCH 21/25] Add SD/MMC/SDIO over SPI support for M54451EVB
+
+Modify original mmc_spi.c for long timeout on our board according later kernel
+version, support hotplug by hardware irq.
+
+The recommend sd/mmc card file system is VFAT for the SPI mode here is a bit
+slow for ext2 and ext3 which mechanism may cause card timeout.
+
+Signed-off-by: Jingchang Lu <b22599@freescale.com>
+---
+ drivers/mmc/core/sdio.c    |    9 +++-
+ drivers/mmc/host/Kconfig   |    7 +++
+ drivers/mmc/host/mmc_spi.c |  129 ++++++++++++++++++++++++++++++++++++++------
+ 3 files changed, 128 insertions(+), 17 deletions(-)
+
+diff --git a/drivers/mmc/core/sdio.c b/drivers/mmc/core/sdio.c
+index fb99ccf..af4b334 100644
+--- a/drivers/mmc/core/sdio.c
++++ b/drivers/mmc/core/sdio.c
+@@ -230,8 +230,15 @@ static void mmc_sdio_detect(struct mmc_host *host)
+ 	/*
+ 	 * Just check if our card has been removed.
+ 	 */
++#if defined(M54451_SD_HW_DETECT)
++	{
++		unsigned char  x;
++		err = mmc_io_rw_direct(host->card, 0, 0,
++				SDIO_FBR_BASE(0) + SDIO_FBR_CIS + 0, 0, &x);
++	}
++#else
+ 	err = mmc_select_card(host->card);
+-
++#endif
+ 	mmc_release_host(host);
+ 
+ 	if (err) {
+diff --git a/drivers/mmc/host/Kconfig b/drivers/mmc/host/Kconfig
+index 99d4b28..7772b44 100644
+--- a/drivers/mmc/host/Kconfig
++++ b/drivers/mmc/host/Kconfig
+@@ -185,6 +185,13 @@ config MMC_SPI
+ 
+ 	  If unsure, or if your system has no SPI master driver, say N.
+ 
++config M54451_SD_HW_DETECT
++	depends on MMC_SPI && M54451
++	default y
++	help
++	  MMC/SD interface on 54551evb was over SPI. Enable this option will
++	  use irq7 to dectect the card inserting/removing.
++
+ config MMC_S3C
+ 	tristate "Samsung S3C SD/MMC Card Interface support"
+ 	depends on ARCH_S3C2410
+diff --git a/drivers/mmc/host/mmc_spi.c b/drivers/mmc/host/mmc_spi.c
+index 87e211d..00884a1 100644
+--- a/drivers/mmc/host/mmc_spi.c
++++ b/drivers/mmc/host/mmc_spi.c
+@@ -9,6 +9,10 @@
+  * (C) Copyright 2007, ATRON electronic GmbH,
+  *		Jan Nikitenko <jan.nikitenko@gmail.com>
+  *
++ * Copyright (C) 2009 Freescale Semiconductor, Inc. All rights reserved.
++ * 		Modified for M54451EVB board.
++ * 		Shrek Wu <b16972@freescale.com>
++ * 		Jingchang Lu <b22599@freescale.com>
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -31,6 +35,11 @@
+ #include <linux/crc7.h>
+ #include <linux/crc-itu-t.h>
+ #include <linux/scatterlist.h>
++#if defined(CONFIG_M54451_SD_HW_DETECT)
++#include <asm/mcf5445x_eport.h>
++#include <asm/mcf5445x_intc.h>
++#include <asm/mcfsim.h>
++#endif
+ 
+ #include <linux/mmc/host.h>
+ #include <linux/mmc/mmc.h>		/* for R1_SPI_* bit values */
+@@ -187,9 +196,14 @@ static int
+ mmc_spi_skip(struct mmc_spi_host *host, ktime_t timeout, unsigned n, u8 byte)
+ {
+ 	u8		*cp = host->data->status;
+-
++#if 0
+ 	timeout = ktime_add(timeout, ktime_get());
+-
++#else
++	struct timeval tv = ktime_to_timeval(timeout);
++	unsigned long timeout_jiffies =
++		tv.tv_sec * HZ +  (tv.tv_usec * HZ) / USEC_PER_SEC;
++	unsigned long starttime = jiffies;
++#endif
+ 	while (1) {
+ 		int		status;
+ 		unsigned	i;
+@@ -206,8 +220,17 @@ mmc_spi_skip(struct mmc_spi_host *host, ktime_t timeout, unsigned n, u8 byte)
+ 		/* REVISIT investigate msleep() to avoid busy-wait I/O
+ 		 * in at least some cases.
+ 		 */
+-		if (ktime_to_ns(ktime_sub(ktime_get(), timeout)) > 0)
++#if 0
++		if (ktime_to_ns(ktime_sub(ktime_get(), timeout)) > 0) {
++#else
++		if ((jiffies - starttime) > timeout_jiffies) {
++#endif
+ 			break;
++		}
++#if 1
++		if ((jiffies - starttime) > 1)
++			schedule();
++#endif
+ 	}
+ 	return -ETIMEDOUT;
+ }
+@@ -252,6 +275,9 @@ static int mmc_spi_response_get(struct mmc_spi_host *host,
+ 	u8	*end = cp + host->t.len;
+ 	int	value = 0;
+ 	char	tag[32];
++#if defined(CONFIG_M54451_SD_HW_DETECT)
++	u8      oldcp_value = 0;
++#endif
+ 
+ 	snprintf(tag, sizeof(tag), "  ... CMD%d response SPI_%s",
+ 		cmd->opcode, maptype(cmd));
+@@ -262,6 +288,9 @@ static int mmc_spi_response_get(struct mmc_spi_host *host,
+ 	 * first byte.  After STOP_TRANSMISSION command it may include
+ 	 * two data bits, but otherwise it's all ones.
+ 	 */
++#if defined(CONFIG_M54451_SD_HW_DETECT)
++	oldcp_value = *cp;
++#endif
+ 	cp += 8;
+ 	while (cp < end && *cp == 0xff)
+ 		cp++;
+@@ -280,7 +309,13 @@ static int mmc_spi_response_get(struct mmc_spi_host *host,
+ 		 * It'd probably be better to memcpy() the first chunk and
+ 		 * avoid extra i/o calls...
+ 		 */
++#if 0
+ 		for (i = 2; i < 9; i++) {
++#else
++		/* Note we check for more than 8 bytes, because in practice,
++		some SD cards are slow... */
++		for (i = 2; i < 16; i++) {
++#endif
+ 			value = mmc_spi_readbytes(host, 1);
+ 			if (value < 0)
+ 				goto done;
+@@ -292,6 +327,15 @@ static int mmc_spi_response_get(struct mmc_spi_host *host,
+ 	}
+ 
+ checkstatus:
++#if defined(CONFIG_M54451_SD_HW_DETECT)
++	if ((*cp == 0) && (oldcp_value == 0)) {
++		dev_dbg(&host->spi->dev, "NO CARD in the SD SOCKET, "
++			"new status %02x, old status %02x\n",
++			*cp, oldcp_value);
++		value = -EBADR;
++		goto done;
++	}
++#endif
+ 	if (*cp & 0x80) {
+ 		dev_dbg(&host->spi->dev, "%s: INVALID RESPONSE, %02x\n",
+ 					tag, *cp);
+@@ -609,7 +653,16 @@ mmc_spi_writeblock(struct mmc_spi_host *host, struct spi_transfer *t,
+ 	struct spi_device	*spi = host->spi;
+ 	int			status, i;
+ 	struct scratch		*scratch = host->data;
+-
++#if 1
++	u32			pattern;
++	/* The MMC framework does a good job of computing timeouts
++	according to the mmc/sd standard. However, we found that in
++	SPI mode, there are many cards which need a longer timeout
++	of 1s after receiving a long stream of write data. */
++	struct timeval tv = ktime_to_timeval(timeout);
++	if (tv.tv_sec == 0)
++		timeout = ktime_set(1, 0);
++#endif
+ 	if (host->mmc->use_spi_crc)
+ 		scratch->crc_val = cpu_to_be16(
+ 				crc_itu_t(0, t->tx_buf, t->len));
+@@ -619,7 +672,6 @@ mmc_spi_writeblock(struct mmc_spi_host *host, struct spi_transfer *t,
+ 				DMA_BIDIRECTIONAL);
+ 
+ 	status = spi_sync(spi, &host->m);
+-
+ 	if (status != 0) {
+ 		dev_dbg(&spi->dev, "write error (%d)\n", status);
+ 		return status;
+@@ -637,7 +689,22 @@ mmc_spi_writeblock(struct mmc_spi_host *host, struct spi_transfer *t,
+ 	 * it just says if the transmission was ok and whether *earlier*
+ 	 * writes succeeded; see the standard.
+ 	 */
++#if 0
+ 	switch (SPI_MMC_RESPONSE_CODE(scratch->status[0])) {
++#else
++	pattern  = scratch->status[0] << 24;
++	pattern |= scratch->status[1] << 16;
++	pattern |= scratch->status[2] << 8;
++	pattern |= scratch->status[3];
++
++	/* left-adjust to leading 0 bit */
++	while (pattern & 0x80000000)
++		pattern <<= 1;
++	/* right-adjust for pattern matching. Code is in bit 4..0 now. */
++	pattern >>= 27;
++
++	switch (pattern) {
++#endif
+ 	case SPI_RESPONSE_ACCEPTED:
+ 		status = 0;
+ 		break;
+@@ -668,8 +735,13 @@ mmc_spi_writeblock(struct mmc_spi_host *host, struct spi_transfer *t,
+ 	/* Return when not busy.  If we didn't collect that status yet,
+ 	 * we'll need some more I/O.
+ 	 */
++#if 0
+ 	for (i = 1; i < sizeof(scratch->status); i++) {
+ 		if (scratch->status[i] != 0)
++#else
++	for (i = 4; i < sizeof(scratch->status); i++) {
++		if (scratch->status[i] & 0x01)
++#endif
+ 			return 0;
+ 	}
+ 	return mmc_spi_wait_unbusy(host, timeout);
+@@ -795,17 +867,19 @@ mmc_spi_data_do(struct mmc_spi_host *host, struct mmc_command *cmd,
+ 
+ 	timeout = ktime_add_ns(ktime_set(0, 0), data->timeout_ns +
+ 			data->timeout_clks * 1000000 / clock_rate);
+-
+ 	/* Handle scatterlist segments one at a time, with synch for
+ 	 * each 512-byte block
+ 	 */
++#if 0
+ 	for (sg = data->sg, n_sg = data->sg_len; n_sg; n_sg--, sg++) {
++#else
++	for_each_sg(data->sg, sg, data->sg_len, n_sg) {
++#endif
+ 		int			status = 0;
+ 		dma_addr_t		dma_addr = 0;
+ 		void			*kmap_addr;
+ 		unsigned		length = sg->length;
+ 		enum dma_data_direction	dir = direction;
+-
+ 		/* set up dma mapping for controller drivers that might
+ 		 * use DMA ... though they may fall back to PIO
+ 		 */
+@@ -825,11 +899,17 @@ mmc_spi_data_do(struct mmc_spi_host *host, struct mmc_command *cmd,
+ 
+ 		/* allow pio too; we don't allow highmem */
+ 		kmap_addr = kmap(sg_page(sg));
+-		if (direction == DMA_TO_DEVICE)
++		if (direction == DMA_TO_DEVICE) {
+ 			t->tx_buf = kmap_addr + sg->offset;
+-		else
++		} else {
+ 			t->rx_buf = kmap_addr + sg->offset;
+-
++			/*
++			 * on coldfire M54451evb platform, we have default
++			 * write data, i.e,0xFF, so just set it to NULL to
++			 * avoid copying.
++			 */
++			t->tx_buf = 0;
++		}
+ 		/* transfer each block, and update request status */
+ 		while (length) {
+ 			t->len = min(length, blk_size);
+@@ -854,7 +934,6 @@ mmc_spi_data_do(struct mmc_spi_host *host, struct mmc_command *cmd,
+ 			if (!multiple)
+ 				break;
+ 		}
+-
+ 		/* discard mappings */
+ 		if (direction == DMA_FROM_DEVICE)
+ 			flush_kernel_dcache_page(sg_page(sg));
+@@ -871,7 +950,6 @@ mmc_spi_data_do(struct mmc_spi_host *host, struct mmc_command *cmd,
+ 			break;
+ 		}
+ 	}
+-
+ 	/* NOTE some docs describe an MMC-only SET_BLOCK_COUNT (CMD23) that
+ 	 * can be issued before multiblock writes.  Unlike its more widely
+ 	 * documented analogue for SD cards (SET_WR_BLK_ERASE_COUNT, ACMD23),
+@@ -971,7 +1049,6 @@ static void mmc_spi_request(struct mmc_host *mmc, struct mmc_request *mrq)
+ 		}
+ 	}
+ #endif
+-
+ 	/* issue command; then optionally data and stop */
+ 	status = mmc_spi_command_send(host, mrq, mrq->cmd, mrq->data != NULL);
+ 	if (status == 0 && mrq->data) {
+@@ -1173,8 +1250,30 @@ mmc_spi_detect_irq(int irq, void *mmc)
+ {
+ 	struct mmc_spi_host *host = mmc_priv(mmc);
+ 	u16 delay_msec = max(host->pdata->detect_delay, (u16)100);
+-
++#if defined(CONFIG_M54451_SD_HW_DETECT)
++	dev_dbg(&host->spi->dev, "mmc_spi_detect_irq "
++		"MCF_EPORT_EPPAR %x, MCF_EPORT_EPIER %x,"
++		"MCF_INTC0_ICR7 %x, MCF_GPIO_PAR_IRQ %x,"
++		"MCF_EPORT_EPDDR %x, MCF_EPORT_EPFR %x\n",
++		MCF_EPORT_EPPAR, MCF_EPORT_EPIER,
++		MCF_INTC0_ICR7, MCF_GPIO_PAR_IRQ,
++		MCF_EPORT_EPDDR, MCF_EPORT_EPFR);
++
++	MCF_EPORT_EPIER &= (~MCF_EPORT_EPIER_EPIE7);
++#endif
+ 	mmc_detect_change(mmc, msecs_to_jiffies(delay_msec));
++#if defined(CONFIG_M54451_SD_HW_DETECT)
++	MCF_EPORT_EPPAR |= MCF_EPORT_EPPAR_EPPA7_BOTH;
++	MCF_EPORT_EPIER = MCF_EPORT_EPIER | MCF_EPORT_EPIER_EPIE7;
++	MCF_EPORT_EPFR |= MCF_EPORT_EPFR_EPF7;
++	dev_dbg(&host->spi->dev, "mmc_spi_detect_irq "
++		"MCF_EPORT_EPPAR %x, MCF_EPORT_EPIER %x,"
++		"MCF_INTC0_ICR7 %x, MCF_GPIO_PAR_IRQ %x,"
++		"MCF_EPORT_EPDDR %x, MCF_EPORT_EPFR %x\n",
++		MCF_EPORT_EPPAR, MCF_EPORT_EPIER,
++		MCF_INTC0_ICR7, MCF_GPIO_PAR_IRQ,
++		MCF_EPORT_EPDDR, MCF_EPORT_EPFR);
++#endif
+ 	return IRQ_HANDLED;
+ }
+ 
+@@ -1304,10 +1403,8 @@ static int mmc_spi_probe(struct spi_device *spi)
+ 	host->data = kmalloc(sizeof(*host->data), GFP_KERNEL);
+ 	if (!host->data)
+ 		goto fail_nobuf1;
+-
+ 	if (spi->master->dev.parent->dma_mask) {
+ 		struct device	*dev = spi->master->dev.parent;
+-
+ 		host->dma_dev = dev;
+ 		host->ones_dma = dma_map_single(dev, ones,
+ 				MMC_SPI_BLOCKSIZE, DMA_TO_DEVICE);
+-- 
+1.6.4
+

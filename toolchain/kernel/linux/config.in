@@ -254,9 +254,9 @@ config KERNEL_V_2_6_29_3
     bool
     prompt "2.6.29.3"
 
-config KERNEL_V_2_6_29_4
+config KERNEL_V_2_6_29_6
     bool
-    prompt "2.6.29.4"
+    prompt "2.6.29.6"
 
 # CT_INSERT_VERSION_ABOVE
 # Don't remove above line!
@@ -265,10 +265,10 @@ endchoice
 config KERNEL_CONFIG_FILE
     string
     prompt "Configuration file"
-    default "${CT_PKG_DIR}/kernel/linux/${CT_ARCH}/linux.config"
+    default "${CT_TLC_DIR}/kernel/linux/${CT_ARCH}/${CT_KERNEL_VERSION}/linux.config"
     help
       Path to the configuration file.
-      Default is "${CT_PKG_DIR}/kernel/linux/${CT_ARCH}/linux.config"
+      Default is "${CT_TLC_DIR}/kernel/linux/${CT_ARCH}/${CT_KERNEL_VERSION}/linux.config"
       You _must_ provide one (for now).
 
 config KERNEL_RUN_CONFIG
@@ -331,7 +331,7 @@ config KERNEL_VERSION
     default "2.6.29.1" if KERNEL_V_2_6_29_1
     default "2.6.29.2" if KERNEL_V_2_6_29_2
     default "2.6.29.3" if KERNEL_V_2_6_29_3
-    default "2.6.29.4" if KERNEL_V_2_6_29_4
+    default "2.6.29.6" if KERNEL_V_2_6_29_6
 # CT_INSERT_VERSION_STRING_ABOVE
 # Don't remove above line!
 

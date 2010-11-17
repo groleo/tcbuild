@@ -1,0 +1,286 @@
+From d293f9ff6dfcc4b5dea83465f1584e9d07f0afe5 Mon Sep 17 00:00:00 2001
+From: Shrek Wu <b16972@freescale.com>
+Date: Wed, 21 Apr 2010 11:02:44 +0800
+Subject: [PATCH 15/16] Add eSDHC dma and card detect function for modelo
+
+Enable eSDHC DMA read/write work.
+
+Enable card detect using extern irq.
+
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ drivers/mmc/host/Kconfig |   19 +++++++++
+ drivers/mmc/host/esdhc.c |   93 +++++++++++++++++++++++++++++++++-------------
+ drivers/mmc/host/esdhc.h |    3 +-
+ 3 files changed, 88 insertions(+), 27 deletions(-)
+
+diff --git a/drivers/mmc/host/Kconfig b/drivers/mmc/host/Kconfig
+index b273585..3517f34 100644
+--- a/drivers/mmc/host/Kconfig
++++ b/drivers/mmc/host/Kconfig
+@@ -208,6 +208,25 @@ config ESDHC_FORCE_PIO
+ 	  The controller is used in MCF5441x.
+ 	  If unsure, say N.
+ 
++choice
++	prompt "MMC/SD card detect "
++	depends on MMC_ESDHC
++
++config ESDHC_DETECT_USE_EXTERN_IRQ7
++	tristate "based extern IRQ7"
++	depends on MMC_ESDHC
++	help
++	  MMC/SD cards using esdhc controller,
++	  we use the extern irq7 to detect card.
++config ESDHC_DETECT_USE_EXTERN_IRQ1
++	tristate "based extern IRQ1"
++	depends on MMC_ESDHC
++	help
++	  MMC/SD cards using esdhc controller,
++	  we use the extern irq7 to detect card.
++
++endchoice
++
+ config MMC_S3C
+ 	tristate "Samsung S3C SD/MMC Card Interface support"
+ 	depends on ARCH_S3C2410
+diff --git a/drivers/mmc/host/esdhc.c b/drivers/mmc/host/esdhc.c
+index 98442db..56633aa 100644
+--- a/drivers/mmc/host/esdhc.c
++++ b/drivers/mmc/host/esdhc.c
+@@ -6,7 +6,8 @@
+  *		Xiaobo Xie <X.Xie@freescale.com>
+  *
+  *	Freescale Enhanced Secure Digital Host Controller driver.
+- *	Derived from sdhci.c
++ *	Based on mpc837x/driver/mmc/host/esdhc.c done by Xiaobo Xie
++ *      Ported to Coldfire platform by Chenghu Wu
+  *
+  * This program is free software; you can redistribute  it and/or modify it
+  * under  the terms of  the GNU General  Public License as published by the
+@@ -38,6 +39,15 @@
+ #include "esdhc.h"
+ #define DRIVER_NAME "esdhc"
+ 
++
++#if defined(CONFIG_ESDHC_DETECT_USE_EXTERN_IRQ1)
++#define card_detect_extern_irq (64 + 1)
++#elif defined(CONFIG_ESDHC_DETECT_USE_EXTERN_IRQ7)
++#define card_detect_extern_irq (64 + 7)
++#else
++#define card_detect_extern_irq (64 + 7)
++#endif
++
+ #undef ESDHC_DMA_KMALLOC
+ 
+ #define SYS_BUSCLOCK 80000000
+@@ -45,7 +55,6 @@
+ 
+ #undef MMC_ESDHC_DEBUG
+ #undef MMC_ESDHC_DEBUG_REG
+-/* #define MMC_ESDHC_DEBUG 1 */
+ 
+ #ifdef MMC_ESDHC_DEBUG
+ #define DBG(fmt, args...) printk(KERN_INFO "[%s] " fmt "\n", __func__, ## args)
+@@ -189,10 +198,6 @@ static void esdhc_init(struct esdhc_host *host)
+ 	/* Modelo does not support */
+ 	/*MCF_ESDHC_SCR = MCF_ESDHC_SCR  | ESDHC_DMA_SNOOP | 0xC0;*/
+ 
+-	/*
+-	  Becuase eSDHC in 53017 have no SD_CD pin,
+-	  we need let the SD_DATA3 work on SD_CD
+-	*/
+ 	intmask = fsl_readl(host->ioaddr + ESDHC_PROTOCOL_CONTROL);
+ 	intmask &= ~ESDHC_CTRL_D3_DETEC;
+ 
+@@ -231,7 +236,6 @@ static void reset_regs(struct esdhc_host *host)
+ /* Return the SG's virtual address */
+ static inline char *esdhc_sg_to_buffer(struct esdhc_host *host)
+ {
+-	/*return page_address(host->cur_sg->page) + host->cur_sg->offset;*/
+ 	DBG("cur_sg %x virt %x\n", host->cur_sg, sg_virt(host->cur_sg));
+ 	return sg_virt(host->cur_sg);
+ }
+@@ -464,7 +468,7 @@ static void esdhc_prepare_data(struct esdhc_host *host, struct mmc_data *data)
+ 		unsigned int wml_value;
+ 		unsigned int timeout;
+ 
+-		/* DMA address eSDHC in 53017 must be 4 bytes aligned */
++		/* DMA address eSDHC in Modelo must be 4 bytes aligned */
+ 		if ((data->sg->offset & 0x3) == 0)
+ 			host->offset = 0;
+ 		else
+@@ -795,7 +799,6 @@ static void esdhc_set_clock(struct esdhc_host *host, unsigned int clock)
+ 	* get closer value with SDCLKDIV and DIV combination
+ 	*/
+ 	vco = 500000000;
+-#define MCF_CLOCK_PLL_DR        (*(volatile unsigned long *)(0xFC0C0004))
+ 	MCF_CLOCK_PLL_DR &= 0xFFFF83FF;         /* Disable SD Clock */
+ 
+ 	for (outdiv = 2; outdiv <= 32; outdiv++) {
+@@ -1192,11 +1195,16 @@ static irqreturn_t esdhc_detect_irq(int irq, void *dev_id)
+ 	spin_lock(&host->lock);
+ 
+ 	irq_status = MCF_EPORT_EPPDR & 0x2;
+-	printk("***Extern IRQ %x %x %x %x %x %x\n", MCF_EPORT_EPPAR,
++	DBG("***Extern IRQ %x %x %x %x %x %x\n", MCF_EPORT_EPPAR,
+ 		MCF_EPORT_EPDDR, MCF_EPORT_EPDR, MCF_EPORT_EPFR,
+ 		MCF_EPORT_EPIER, MCF_EPORT_EPPDR);
+-
+-	MCF_EPORT_EPIER   = MCF_EPORT_EPIER & (~MCF_EPORT_EPIER_EPIE1);
++#if defined(CONFIG_ESDHC_DETECT_USE_EXTERN_IRQ1)
++	MCF_EPORT_EPIER = MCF_EPORT_EPIER & (~MCF_EPORT_EPIER_EPIE1);
++#elif defined(CONFIG_ESDHC_DETECT_USE_EXTERN_IRQ7)
++	MCF_EPORT_EPIER = MCF_EPORT_EPIER & (~MCF_EPORT_EPIER_EPIE7);
++#else
++	MCF_EPORT_EPIER = MCF_EPORT_EPIER & (~MCF_EPORT_EPIER_EPIE7);
++#endif
+ 	if (irq_status == 0x0) {
+ 		DBG("***  Card insert interrupt Extern IRQ\n");
+ 		esdhc_reset(host, ESDHC_INIT_CARD);
+@@ -1219,10 +1227,19 @@ static irqreturn_t esdhc_detect_irq(int irq, void *dev_id)
+ 	}
+ 
+ 	mmc_detect_change(host->mmc, msecs_to_jiffies(500));
+-
++#if defined(CONFIG_ESDHC_DETECT_USE_EXTERN_IRQ1)
+ 	MCF_EPORT_EPPAR   = MCF_EPORT_EPPAR | MCF_EPORT_EPPAR_EPPA1_BOTH;
+ 	MCF_EPORT_EPIER   = MCF_EPORT_EPIER | MCF_EPORT_EPIER_EPIE1;
+ 	MCF_EPORT_EPFR    = MCF_EPORT_EPFR  | MCF_EPORT_EPFR_EPF1;
++#elif defined(CONFIG_ESDHC_DETECT_USE_EXTERN_IRQ7)
++	MCF_EPORT_EPPAR   = MCF_EPORT_EPPAR | MCF_EPORT_EPPAR_EPPA7_BOTH;
++	MCF_EPORT_EPIER   = MCF_EPORT_EPIER | MCF_EPORT_EPIER_EPIE7;
++	MCF_EPORT_EPFR    = MCF_EPORT_EPFR  | MCF_EPORT_EPFR_EPF7;
++#else
++	MCF_EPORT_EPPAR   = MCF_EPORT_EPPAR | MCF_EPORT_EPPAR_EPPA7_BOTH;
++	MCF_EPORT_EPIER   = MCF_EPORT_EPIER | MCF_EPORT_EPIER_EPIE7;
++	MCF_EPORT_EPFR    = MCF_EPORT_EPFR  | MCF_EPORT_EPFR_EPF7;
++#endif
+ 	DBG("***Extern IRQ return %x %x %x %x %x %x\n", MCF_EPORT_EPPAR,
+ 		MCF_EPORT_EPDDR, MCF_EPORT_EPDR, MCF_EPORT_EPFR,
+ 		MCF_EPORT_EPIER, MCF_EPORT_EPPDR);
+@@ -1416,7 +1433,7 @@ static int esdhc_probe_slot(struct platform_device *pdev, int slot)
+ 			__func__, (unsigned int)res);
+ 		goto release;
+ 	}
+-	/*nommu*/
++
+ 	host->ioaddr = ioremap_nocache(host->addr, host->size);
+ 	if (!host->ioaddr) {
+ 		ret = -ENOMEM;
+@@ -1427,7 +1444,7 @@ static int esdhc_probe_slot(struct platform_device *pdev, int slot)
+ 
+ 	esdhc_reset(host, ESDHC_RESET_ALL);
+ 
+-	fsl_readl(host->ioaddr + ESDHC_HOST_VERSION);
++	version = fsl_readl(host->ioaddr + ESDHC_HOST_VERSION);
+ 	if ((version & 1) != 0x01)
+ 		printk(KERN_INFO "%s: Unknown controller version (%d). "
+ 			"You may experience problems.\n", host->slot_descr,
+@@ -1458,7 +1475,7 @@ static int esdhc_probe_slot(struct platform_device *pdev, int slot)
+ 	/*
+ 	 * Set host parameters.
+ 	 */
+-	host->max_clk = 20000000;/*25000000*/
++	host->max_clk = 25000000;
+ 
+ 	/* if 4 bit , freq can be 50MHz */
+ 	mmc->ops = &esdhc_ops;
+@@ -1546,8 +1563,9 @@ static int esdhc_probe_slot(struct platform_device *pdev, int slot)
+ 		goto untasklet;
+ 	}
+ 
+-	ret = request_irq(64 + 1, esdhc_detect_irq, IRQF_DISABLED,
+-		host->slot_descr, host);
++	ret = request_irq(card_detect_extern_irq,
++			esdhc_detect_irq, IRQF_DISABLED,
++			host->slot_descr, host);
+ 	if (ret) {
+ 		printk(KERN_INFO "%s: request irq fail %x\n", __func__, ret);
+ 		goto untasklet1;
+@@ -1580,7 +1598,7 @@ static int esdhc_probe_slot(struct platform_device *pdev, int slot)
+ 	return 0;
+ 
+ unaddhost:
+-	free_irq(64 + 1, host);
++	free_irq(card_detect_extern_irq, host);
+ untasklet1:
+ 	free_irq(host->irq, host);
+ untasklet:
+@@ -1612,7 +1630,7 @@ static void esdhc_remove_slot(struct platform_device *pdev, int slot)
+ 
+ 	esdhc_reset(host, ESDHC_RESET_ALL);
+ 
+-	free_irq(64 + 1, host);
++	free_irq(card_detect_extern_irq, host);
+ 
+ 	free_irq(host->irq, host);
+ 
+@@ -1648,16 +1666,39 @@ static int __init esdhc_probe(struct platform_device *pdev)
+ 	MCF_ESDHC_VSR = 2;              /* disabled adma and set 3.0V */
+ 
+ 	MCF_INTC2_ICR31 = 2;            /* SDHC irqstat */
+-	MCF_INTC0_ICR7  = 2;            /* IRQ7 */
++#if defined(CONFIG_ESDHC_DETECT_USE_EXTERN_IRQ1)
++	MCF_GPIO_PAR_IRQ0H |= MCF_GPIO_PAR_IRQH_IRQ1;
+ 
+-	MCF_GPIO_PAR_IRQ0H = 0x11;      /* IRQ1 & IRQ7 */
++	MCF_EPORT_EPPAR   = MCF_EPORT_EPPAR | MCF_EPORT_EPPAR_EPPA1_BOTH;
++	MCF_EPORT_EPIER   = MCF_EPORT_EPIER | MCF_EPORT_EPIER_EPIE1;
+ 
+-	MCF_EPORT_EPPAR   = MCF_EPORT_EPPAR | MCF_EPORT_EPPAR_EPPA1_BOTH |
+-				MCF_EPORT_EPPAR_EPPA7_BOTH;
+-	MCF_EPORT_EPIER   = MCF_EPORT_EPIER | MCF_EPORT_EPIER_EPIE1 |
+-				MCF_EPORT_EPIER_EPIE7;
++	MCF_INTC0_ICR1  = 7;           /* IRQ1 */
++	DBG("MCF_INTC0_ICR1 %x MCF_EPORT_EPPAR %x "
++		"MCF_EPORT_EPFR %x MCF_EPORT_EPIER %x "
++		"MCF_INTC0_IMRL %x MCF_INTC0_INTFRCL %x "
++		"MCF_INTC0_IPRL %x\n",
++			MCF_INTC0_ICR1, MCF_EPORT_EPPAR, MCF_EPORT_EPFR,
++			MCF_EPORT_EPIER, MCF_INTC0_IMRL, MCF_INTC0_INTFRCL,
++			MCF_INTC0_IPRL);
++#elif defined(CONFIG_ESDHC_DETECT_USE_EXTERN_IRQ7)
++	MCF_GPIO_PAR_IRQ0H |= MCF_GPIO_PAR_IRQH_IRQ7;
++
++	MCF_EPORT_EPPAR   = MCF_EPORT_EPPAR | MCF_EPORT_EPPAR_EPPA7_BOTH;
++	MCF_EPORT_EPIER   = MCF_EPORT_EPIER | MCF_EPORT_EPIER_EPIE7;
++
++	MCF_INTC0_ICR7  = 2;           /* IRQ7 */
+ 	DBG("MCF_INTC0_ICR7 %x MCF_EPORT_EPPAR %x\n",
+ 		MCF_INTC0_ICR7, MCF_EPORT_EPPAR);
++#else
++	MCF_GPIO_PAR_IRQ0H |= MCF_GPIO_PAR_IRQH_IRQ7;
++
++	MCF_EPORT_EPPAR   = MCF_EPORT_EPPAR | MCF_EPORT_EPPAR_EPPA7_BOTH;
++	MCF_EPORT_EPIER   = MCF_EPORT_EPIER | MCF_EPORT_EPIER_EPIE7;
++
++	MCF_INTC0_ICR7  = 2;           /* IRQ7 */
++	DBG("MCF_INTC0_ICR1 %x MCF_EPORT_EPPAR %x\n",
++		MCF_INTC0_ICR7, MCF_EPORT_EPPAR);
++#endif
+ 
+ 	slots = ESDHC_SLOTS_NUMBER;
+ 	DBG("found %d slot(s)\n", slots);
+diff --git a/drivers/mmc/host/esdhc.h b/drivers/mmc/host/esdhc.h
+index f59fe29..defa8e1 100644
+--- a/drivers/mmc/host/esdhc.h
++++ b/drivers/mmc/host/esdhc.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2008-2009 Freescale Semiconductor, Inc. All rights reserved.
++ * Copyright (C) 2008-2010 Freescale Semiconductor, Inc. All rights reserved.
+  *  Author: Chenghu Wu <b16972@freescale.com>
+  *	     Xiaobo Xie <X.Xie@freescale.com>
+  *
+@@ -21,6 +21,7 @@
+ #define MMC_ERR_FAILED  4
+ #define MMC_ERR_INVALID 5
+ 
++#define MCF_CLOCK_PLL_DR        (*(volatile unsigned long *)(0xFC0C0004))
+ #define MCF_ESDHC_HOSTCAPBLT    (*(volatile unsigned long *)(0xFC0CC040))
+ #define MCF_ESDHC_ADMAESR       (*(volatile unsigned long *)(0xFC0CC054))
+ #define MCF_ESDHC_ADMASAR       (*(volatile unsigned long *)(0xFC0CC058))
+-- 
+1.6.4
+

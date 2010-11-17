@@ -1,0 +1,1080 @@
+From 569152005aad57db980a3725d3b0721ef088ac49 Mon Sep 17 00:00:00 2001
+From: Jason Jin <Jason.jin@freescale.com>
+Date: Thu, 3 Jun 2010 12:25:46 +0800
+Subject: [PATCH 11/18] Add dual FEC 1588 functions support
+
+Signed-off-by: Shrek Wu <b16972@freescale.com>
+---
+ drivers/net/fec.c      |  101 +++++++++--
+ drivers/net/fec.h      |  187 +-----------------
+ drivers/net/fec_1588.c |  503 ++++++++++++++++++++++++++++++++++++++++++++++++
+ drivers/net/fec_1588.h |  157 +++++++++++++++
+ 4 files changed, 759 insertions(+), 189 deletions(-)
+ create mode 100644 drivers/net/fec_1588.c
+ create mode 100644 drivers/net/fec_1588.h
+
+diff --git a/drivers/net/fec.c b/drivers/net/fec.c
+index ed52543..c20f2f5 100644
+--- a/drivers/net/fec.c
++++ b/drivers/net/fec.c
+@@ -62,6 +62,7 @@
+ #include <asm/coldfire.h>
+ #include <asm/mcfsim.h>
+ #include "fec.h"
++#include "fec_1588.h"
+ 
+ #if defined(CONFIG_FEC2)
+ #define	FEC_MAX_PORTS	2
+@@ -69,6 +70,73 @@
+ #define	FEC_MAX_PORTS	1
+ #endif
+ 
++/* The FEC buffer descriptors track the ring buffers.  The rx_bd_base and
++ * tx_bd_base always point to the base of the buffer descriptors.  The
++ * cur_rx and cur_tx point to the currently available buffer.
++ * The dirty_tx tracks the current buffer that is being sent by the
++ * controller.  The cur_tx and dirty_tx are equal under both completely
++ * empty and completely full conditions.  The empty/ready indicator in
++ * the buffer descriptor determines the actual condition.
++ */
++struct fec_enet_private {
++	/* Hardware registers of the FEC device */
++	volatile fec_t  *hwp;
++
++	struct net_device *netdev;
++	struct platform_device *pdev;
++	/* The saved address of a sent-in-place packet/buffer, for skfree(). */
++	unsigned char *tx_bounce[TX_RING_SIZE];
++	struct  sk_buff *tx_skbuff[TX_RING_SIZE];
++	ushort  skb_cur;
++	ushort  skb_dirty;
++
++	/* CPM dual port RAM relative addresses.*/
++	cbd_t   *rx_bd_base;      /* Address of Rx and Tx buffers. */
++	cbd_t   *tx_bd_base;
++	cbd_t   *cur_rx, *cur_tx; /* The next free ring entry */
++	cbd_t   *dirty_tx;        /* The ring entries to be free()ed. */
++	uint    tx_full;
++	/* hold while accessing the HW like ringbuffer for tx/rx but not MAC */
++	spinlock_t hw_lock;
++	/* hold while accessing the mii_list_t() elements */
++	spinlock_t mii_lock;
++	struct mii_bus *mdio_bus;
++	struct phy_device *phydev;
++
++	uint    phy_id;
++	uint    phy_id_done;
++	uint    phy_status;
++	uint    phy_speed;
++	phy_info_t const        *phy;
++	struct work_struct phy_task;
++	volatile fec_t  *phy_hwp;
++
++	uint    sequence_done;
++	uint    mii_phy_task_queued;
++
++	uint    phy_addr;
++
++	int     index;
++	int     opened;
++	int     link;
++	int     old_link;
++	int     full_duplex;
++	int     duplex;
++	int     speed;
++	int     msg_enable;
++#ifdef CONFIG_FEC_1588
++	struct fec_ptp_private *ptp_priv;
++	uint    ptimer_present;
++#endif
++};
++
++struct fec_platform_private {
++	struct platform_device  *pdev;
++
++	unsigned long           quirks;
++	int                     num_slots;      /* Slots on controller */
++	struct fec_enet_private *fep_host[0];      /* Pointers to hosts */
++};
+ /* Interrupt events/masks.
+ */
+ #define FEC_ENET_HBERR	((uint)0x80000000)	/* Heartbeat error */
+@@ -279,7 +347,7 @@ fec_enet_interrupt(int irq, void *dev_id)
+ 	irqreturn_t ret = IRQ_NONE;
+ #ifdef CONFIG_FEC_1588
+ 	struct fec_enet_private *fep = netdev_priv(dev);
+-	struct fec_ptp_private *fpp = &(fep->ptp_priv);
++	struct fec_ptp_private *fpp = fep->ptp_priv;
+ #endif
+ 
+ 	fecp = (volatile fec_t *)dev->base_addr;
+@@ -309,7 +377,7 @@ fec_enet_interrupt(int irq, void *dev_id)
+ #ifdef CONFIG_FEC_1588
+ 		if (int_events & FEC_ENET_TS_AVAIL) {
+ 			ret = IRQ_HANDLED;
+-			fec_ptp_store_txstamp(&(fep->ptp_priv));
++			fec_ptp_store_txstamp(fep->ptp_priv);
+ 		}
+ 
+ 		if (int_events & FEC_ENET_TS_TIMER) {
+@@ -429,7 +497,7 @@ fec_enet_rx(struct net_device *dev)
+ 
+ 	fep = netdev_priv(dev);
+ #ifdef CONFIG_FEC_1588
+-	fpp = &(fep->ptp_priv);
++	fpp = fep->ptp_priv;
+ #endif
+ 	fecp = (volatile fec_t *)dev->base_addr;
+ 
+@@ -1196,7 +1264,7 @@ fec_restart(struct net_device *dev, int duplex)
+ 	if (fep->ptimer_present) {
+ 		int ret;
+ 		/* Set Timer count */
+-		ret = fec_ptp_start(&(fep->ptp_priv));
++		ret = fec_ptp_start(fep->ptp_priv);
+ 		if (ret)
+ 			fep->ptimer_present = 0;
+ 		else
+@@ -1256,7 +1324,7 @@ fec_stop(struct net_device *dev)
+ 	fecp->fec_mii_speed = fep->phy_speed;
+ #ifdef CONFIG_FEC_1588
+ 	if (fep->ptimer_present)
+-		fec_ptp_stop(&(fep->ptp_priv));
++		fec_ptp_stop(fep->ptp_priv);
+ #endif
+ }
+ 
+@@ -1362,23 +1430,28 @@ static int __init fec_eth_probe(struct platform_device *pdev)
+ 		}
+ 
+ #ifdef CONFIG_FEC_1588
+-		fep->ptp_priv.hwp = fep->hwp;
+-		{
+-			int ret;
+-			ret = fec_ptp_init(&(fep->ptp_priv));
+-			if (ret)
++		fep->ptp_priv = kzalloc(sizeof(struct fec_ptp_private),
++					GFP_KERNEL);
++		if (fep->ptp_priv) {
++			fep->ptp_priv->hwp = fep->hwp;
++			err = fec_ptp_init(fep->ptp_priv, i);
++			if (err)
+ 				printk(KERN_ERR "IEEE1588: "
+ 					"ptp-timer init failed\n");
+ 			else
+ 				fep->ptimer_present = 1;
+-		}
++		} else
++			printk(KERN_ERR "IEEE1588: failed to "
++					"malloc memory\n");
+ #endif
+ 
+ 		if (register_netdev(dev) != 0) {
+ 			/* XXX: missing cleanup here */
+ #ifdef CONFIG_FEC_1588
+ 			if (fep->ptimer_present)
+-				fec_ptp_cleanup(&(fep->ptp_priv));
++				fec_ptp_cleanup(fep->ptp_priv);
++
++			kfree(fep->ptp_priv);
+ #endif
+ 			free_netdev(dev);
+ 			platform_set_drvdata(pdev, NULL);
+@@ -1410,7 +1483,9 @@ static int fec_eth_remove(struct platform_device *pdev)
+ 			fep->sequence_done = 1;
+ #ifdef CONFIG_FEC_1588
+ 			if (fep->ptimer_present)
+-				fec_ptp_cleanup(&(fep->ptp_priv));
++				fec_ptp_cleanup(fep->ptp_priv);
++
++			kfree(fep->ptp_priv);
+ #endif
+ 			unregister_netdev(dev);
+ 			free_netdev(dev);
+diff --git a/drivers/net/fec.h b/drivers/net/fec.h
+index ce849ee..30d6719 100644
+--- a/drivers/net/fec.h
++++ b/drivers/net/fec.h
+@@ -136,6 +136,15 @@ typedef struct fec {
+ 	unsigned long	fec_r_buff_size;	/* Maximum receive buff size */
+ } fec_t;
+ 
++/* Define the FEC 1588 registers offset */
++#define FEC_ATIME_CTRL		0x400
++#define FEC_ATIME		0x404
++#define FEC_ATIME_EVT_OFFSET    0x408
++#define FEC_ATIME_EVT_PERIOD	0x40c
++#define FEC_ATIME_CORR		0x410
++#define FEC_ATIME_INC		0x414
++#define FEC_TS_TIMESTAMP	0x418
++
+ #else
+ 
+ /*
+@@ -214,182 +223,6 @@ typedef struct {
+ 	const phy_cmd_t *shutdown;
+ } phy_info_t;
+ 
+-/* IEEE 1588 definition */
+-#ifdef CONFIG_FEC_1588
+-#define FEC_ECNTRL_TS_EN        0x10
+-#define PTP_MAJOR               232     /*the temporary major number
+-					 *used by PTP driver, the major
+-					*number 232~239 is unassigned*/
+-
+-#define DEFAULT_PTP_RX_BUF_SZ           2000
+-#define PTP_MSG_SYNC                    0x0
+-#define PTP_MSG_DEL_REQ                 0x1
+-#define PTP_MSG_P_DEL_REQ               0x2
+-#define PTP_MSG_P_DEL_RESP              0x3
+-#define PTP_MSG_DEL_RESP                0x4
+-#define PTP_MSG_ALL_OTHER               0x5
+-
+-#define PTP_GET_TX_TIMESTAMP            0x1
+-#define PTP_GET_RX_TIMESTAMP            0x2
+-#define PTP_SET_RTC_TIME                0x3
+-#define PTP_SET_COMPENSATION            0x4
+-#define PTP_GET_CURRENT_TIME            0x5
+-#define PTP_FLUSH_TIMESTAMP             0x6
+-#define PTP_ADJ_ADDEND                  0x7
+-#define PTP_GET_ORIG_COMP               0x8
+-#define PTP_GET_ADDEND                  0xB
+-#define PTP_GET_RX_TIMESTAMP_PDELAY_REQ         0xC
+-#define PTP_GET_RX_TIMESTAMP_PDELAY_RESP        0xD
+-
+-#define FEC_PTP_DOMAIN_DLFT             0xe0000181
+-#define FEC_PTP_PKT_TYPE_OFFS           0x1f
+-#define FEC_PTP_PROTOCOL_OFFS           0x20
+-#define FEC_PTP_MULTI_ADDR_OFFS 0x26
+-#define FEC_PTP_PORT_OFFS               0x2A
+-#define FEC_PTP_MSG_TYPE_OFFS           0x32
+-#define FEC_PTP_SEQ_ID_OFFS             0x50
+-#define FEC_PTP_CTRL_OFFS               0x52
+-#define FEC_PACKET_TYPE_UDP             0x11
+-
+-/* PTP standard time representation structure */
+-struct ptp_time{
+-	u64 sec;        /* seconds */
+-	u32 nsec;       /* nanoseconds */
+-};
+-
+-/* Structure for PTP Time Stamp */
+-struct fec_ptp_data_t {
+-	int             key;
+-	struct ptp_time ts_time;
+-};
+-
+-struct fec_ptp_circular_t {
+-	int     front;
+-	int     end;
+-	int     size;
+-	struct  fec_ptp_data_t *data_buf;
+-};
+-
+-/* interface for PTP driver command GET_TX_TIME */
+-struct ptp_ts_data {
+-	/* PTP version */
+-	u8 version;
+-	/* PTP source port ID */
+-	u8 spid[10];
+-	/* PTP sequence ID */
+-	u16 seq_id;
+-	/* PTP message type */
+-	u8 message_type;
+-	/* PTP timestamp */
+-	struct ptp_time ts;
+-};
+-
+-/* interface for PTP driver command SET_RTC_TIME/GET_CURRENT_TIME */
+-struct ptp_rtc_time {
+-	struct ptp_time rtc_time;
+-};
+-
+-/* PTP message version */
+-#define PTP_1588_MSG_VER_1      1
+-#define PTP_1588_MSG_VER_2      2
+-
+-#define BD_ENET_TX_TS           0x20000000
+-#define BD_ENET_TX_BDU          0x80000000
+-
+-struct fec_ptp_private {
+-	void __iomem *hwp;
+-
+-	struct  fec_ptp_circular_t rx_time_sync;
+-	struct  fec_ptp_circular_t rx_time_del_req;
+-	struct  fec_ptp_circular_t rx_time_pdel_req;
+-	struct  fec_ptp_circular_t rx_time_pdel_resp;
+-
+-	u64     prtc;
+-	struct ptp_time txstamp;
+-};
+-
+-extern int fec_ptp_init(struct fec_ptp_private *priv);
+-extern void fec_ptp_cleanup(struct fec_ptp_private *priv);
+-extern int fec_ptp_start(struct fec_ptp_private *priv);
+-extern void fec_ptp_stop(struct fec_ptp_private *priv);
+-extern int fec_ptp_do_txstamp(struct sk_buff *skb);
+-extern void fec_ptp_store_txstamp(struct fec_ptp_private *priv);
+-extern void fec_ptp_store_rxstamp(struct fec_ptp_private *priv,
+-				struct sk_buff *skb, struct bufdesc *bdp);
+-extern int fec_ioctl_1588(struct fec_ptp_private *fpp,
+-				struct ifreq *ifr, int cmd);
+-#endif /* 1588 */
+-
+-/* The FEC buffer descriptors track the ring buffers.  The rx_bd_base and
+- * tx_bd_base always point to the base of the buffer descriptors.  The
+- * cur_rx and cur_tx point to the currently available buffer.
+- * The dirty_tx tracks the current buffer that is being sent by the
+- * controller.  The cur_tx and dirty_tx are equal under both completely
+- * empty and completely full conditions.  The empty/ready indicator in
+- * the buffer descriptor determines the actual condition.
+- */
+-struct fec_enet_private {
+-	/* Hardware registers of the FEC device */
+-	volatile fec_t  *hwp;
+-
+-	struct net_device *netdev;
+-	struct platform_device *pdev;
+-	/* The saved address of a sent-in-place packet/buffer, for skfree(). */
+-	unsigned char *tx_bounce[TX_RING_SIZE];
+-	struct  sk_buff *tx_skbuff[TX_RING_SIZE];
+-	ushort  skb_cur;
+-	ushort  skb_dirty;
+-
+-	/* CPM dual port RAM relative addresses.
+-	 */
+-	cbd_t   *rx_bd_base;            /* Address of Rx and Tx buffers. */
+-	cbd_t   *tx_bd_base;
+-	cbd_t   *cur_rx, *cur_tx;               /* The next free ring entry */
+-	cbd_t   *dirty_tx;      /* The ring entries to be free()ed. */
+-	uint    tx_full;
+-	/* hold while accessing the HW like ringbuffer for tx/rx but not MAC */
+-	spinlock_t hw_lock;
+-
+-	/* hold while accessing the mii_list_t() elements */
+-	spinlock_t mii_lock;
+-	struct mii_bus *mdio_bus;
+-	struct phy_device *phydev;
+-
+-	uint    phy_id;
+-	uint    phy_id_done;
+-	uint    phy_status;
+-	uint    phy_speed;
+-	phy_info_t const        *phy;
+-	struct work_struct phy_task;
+-	volatile fec_t  *phy_hwp;
+-
+-	uint    sequence_done;
+-	uint    mii_phy_task_queued;
+-
+-	uint    phy_addr;
+-
+-	int     index;
+-	int     opened;
+-	int     link;
+-	int     old_link;
+-	int     full_duplex;
+-	int     duplex;
+-	int     speed;
+-	int     msg_enable;
+-#ifdef CONFIG_FEC_1588
+-	struct fec_ptp_private ptp_priv;
+-	uint    ptimer_present;
+-#endif
+-};
+-
+-struct fec_platform_private {
+-	struct platform_device  *pdev;
+-
+-	unsigned long           quirks;
+-	int                     num_slots;      /* Slots on controller */
+-	struct fec_enet_private *fep_host[0];      /* Pointers to hosts */
+-};
+-
+ /*
+  *	The following definitions courtesy of commproc.h, which where
+  *	Copyright (c) 1997 Dan Malek (dmalek@jlc.net).
+@@ -425,6 +258,8 @@ struct fec_platform_private {
+ 
+ #define BD_ENET_RX_INT          0x00800000
+ 
++#define BD_ENET_RX_INT		0x00800000
++
+ /* Buffer descriptor control/status used by Ethernet transmit.
+ */
+ #define BD_ENET_TX_READY        ((ushort)0x8000)
+diff --git a/drivers/net/fec_1588.c b/drivers/net/fec_1588.c
+new file mode 100644
+index 0000000..37b1b01
+--- /dev/null
++++ b/drivers/net/fec_1588.c
+@@ -0,0 +1,503 @@
++/*
++ * drivers/net/fec_1588.c
++ *
++ * Copyright (C) 2010 Freescale Semiconductor, Inc.
++ * Copyright (C) 2009 IXXAT Automation, GmbH
++ *
++ * FEC Ethernet Driver -- IEEE 1588 interface functionality
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ */
++
++#include <linux/io.h>
++#include <linux/device.h>
++#include <linux/fs.h>
++#include <linux/vmalloc.h>
++#include <linux/spinlock.h>
++#include <linux/ip.h>
++#include <linux/udp.h>
++#include "fec.h"
++#include "fec_1588.h"
++
++static DECLARE_WAIT_QUEUE_HEAD(ptp_rx_ts_wait);
++#define PTP_GET_RX_TIMEOUT      (HZ/10)
++
++static struct fec_ptp_private *ptp_private[2];
++
++/* Alloc the ring resource */
++static int fec_ptp_init_circ(struct circ_buf *ptp_buf)
++{
++	ptp_buf->buf = vmalloc(DEFAULT_PTP_RX_BUF_SZ *
++					sizeof(struct fec_ptp_data_t));
++
++	if (!ptp_buf->buf)
++		return 1;
++	ptp_buf->head = 0;
++	ptp_buf->tail = 0;
++
++	return 0;
++}
++
++static inline int fec_ptp_calc_index(int size, int curr_index, int offset)
++{
++	return (curr_index + offset) % size;
++}
++
++static int fec_ptp_is_empty(struct circ_buf *buf)
++{
++	return (buf->head == buf->tail);
++}
++
++static int fec_ptp_nelems(struct circ_buf *buf)
++{
++	const int front = buf->head;
++	const int end = buf->tail;
++	const int size = DEFAULT_PTP_RX_BUF_SZ;
++	int n_items;
++
++	if (end > front)
++		n_items = end - front;
++	else if (end < front)
++		n_items = size - (front - end);
++	else
++		n_items = 0;
++
++	return n_items;
++}
++
++static int fec_ptp_is_full(struct circ_buf *buf)
++{
++	if (fec_ptp_nelems(buf) ==
++				(DEFAULT_PTP_RX_BUF_SZ - 1))
++		return 1;
++	else
++		return 0;
++}
++
++static int fec_ptp_insert(struct circ_buf *ptp_buf,
++			  struct fec_ptp_data_t *data,
++			  struct fec_ptp_private *priv)
++{
++	struct fec_ptp_data_t *tmp;
++
++	if (fec_ptp_is_full(ptp_buf))
++		return 1;
++
++	spin_lock(&priv->ptp_lock);
++	tmp = (struct fec_ptp_data_t *)(ptp_buf->buf) + ptp_buf->tail;
++
++	tmp->key = data->key;
++	tmp->ts_time.sec = data->ts_time.sec;
++	tmp->ts_time.nsec = data->ts_time.nsec;
++
++	ptp_buf->tail = fec_ptp_calc_index(DEFAULT_PTP_RX_BUF_SZ,
++					ptp_buf->tail, 1);
++	spin_unlock(&priv->ptp_lock);
++
++	return 0;
++}
++
++static int fec_ptp_find_and_remove(struct circ_buf *ptp_buf,
++				   int key,
++				   struct fec_ptp_data_t *data,
++				   struct fec_ptp_private *priv)
++{
++	int i;
++	int size = DEFAULT_PTP_RX_BUF_SZ;
++	int end = ptp_buf->tail;
++	unsigned long flags;
++	struct fec_ptp_data_t *tmp;
++
++	if (fec_ptp_is_empty(ptp_buf))
++		return 1;
++
++	i = ptp_buf->head;
++	while (i != end) {
++		tmp = (struct fec_ptp_data_t *)(ptp_buf->buf) + i;
++		if (tmp->key == key)
++			break;
++		i = fec_ptp_calc_index(size, i, 1);
++	}
++
++	spin_lock_irqsave(&priv->ptp_lock, flags);
++	if (i == end) {
++		ptp_buf->head = end;
++		spin_unlock_irqrestore(&priv->ptp_lock, flags);
++		return 1;
++	}
++
++	data->ts_time.sec = tmp->ts_time.sec;
++	data->ts_time.nsec = tmp->ts_time.nsec;
++
++	ptp_buf->head = fec_ptp_calc_index(size, i, 1);
++	spin_unlock_irqrestore(&priv->ptp_lock, flags);
++
++	return 0;
++}
++
++/* 1588 Module intialization */
++int fec_ptp_start(struct fec_ptp_private *priv)
++{
++	struct fec_ptp_private *fpp = priv;
++
++	/* Select 1588 Timer source and enable module for starting Tmr Clock */
++	writel(FEC_T_CTRL_RESTART, fpp->hwp + FEC_ATIME_CTRL);
++	writel(FEC_T_INC_40MHZ << FEC_T_INC_OFFSET, fpp->hwp + FEC_ATIME_INC);
++	writel(FEC_T_PERIOD_ONE_SEC, fpp->hwp + FEC_ATIME_EVT_PERIOD);
++	/* start counter */
++	writel(FEC_T_CTRL_PERIOD_RST | FEC_T_CTRL_ENABLE,
++			fpp->hwp + FEC_ATIME_CTRL);
++
++	return 0;
++}
++
++/* Cleanup routine for 1588 module.
++ * When PTP is disabled this routing is called */
++void fec_ptp_stop(struct fec_ptp_private *priv)
++{
++	struct fec_ptp_private *fpp = priv;
++
++	writel(0, fpp->hwp + FEC_ATIME_CTRL);
++	writel(FEC_T_CTRL_RESTART, fpp->hwp + FEC_ATIME_CTRL);
++
++}
++
++static void fec_get_curr_cnt(struct fec_ptp_private *priv,
++			struct ptp_rtc_time *curr_time)
++{
++	writel(FEC_T_CTRL_CAPTURE, priv->hwp + FEC_ATIME_CTRL);
++	curr_time->rtc_time.nsec = readl(priv->hwp + FEC_ATIME);
++	curr_time->rtc_time.sec = priv->prtc;
++	writel(FEC_T_CTRL_CAPTURE, priv->hwp + FEC_ATIME_CTRL);
++	if (readl(priv->hwp + FEC_ATIME) < curr_time->rtc_time.nsec)
++		curr_time->rtc_time.sec++;
++}
++
++/* Set the 1588 timer counter registers */
++static void fec_set_1588cnt(struct fec_ptp_private *priv,
++			struct ptp_rtc_time *fec_time)
++{
++	u32 tempval;
++	unsigned long flags;
++
++	spin_lock_irqsave(&priv->cnt_lock, flags);
++	priv->prtc = fec_time->rtc_time.sec;
++
++	tempval = fec_time->rtc_time.nsec;
++	writel(tempval, priv->hwp + FEC_ATIME);
++	spin_unlock_irqrestore(&priv->cnt_lock, flags);
++}
++
++/* Set the BD to ptp */
++int fec_ptp_do_txstamp(struct sk_buff *skb)
++{
++	struct iphdr *iph;
++	struct udphdr *udph;
++
++	if (skb->len > 44) {
++		/* Check if port is 319 for PTP Event, and check for UDP */
++		iph = ip_hdr(skb);
++		if (iph == NULL || iph->protocol != FEC_PACKET_TYPE_UDP)
++			return 0;
++
++		udph = udp_hdr(skb);
++		if (udph != NULL && udph->source == 319)
++			return 1;
++	}
++
++	return 0;
++}
++
++void fec_ptp_store_txstamp(struct fec_ptp_private *priv)
++{
++	struct fec_ptp_private *fpp = priv;
++	unsigned int reg;
++
++	reg = readl(fpp->hwp + FEC_TS_TIMESTAMP);
++	fpp->txstamp.nsec = reg;
++	fpp->txstamp.sec = fpp->prtc;
++}
++
++void fec_ptp_store_rxstamp(struct fec_ptp_private *priv,
++			   struct sk_buff *skb,
++			   struct bufdesc *bdp)
++{
++	int msg_type, seq_id, control;
++	struct fec_ptp_data_t tmp_rx_time;
++	struct fec_ptp_private *fpp = priv;
++	struct iphdr *iph;
++	struct udphdr *udph;
++
++	/* Check for UDP, and Check if port is 319 for PTP Event */
++	iph = (struct iphdr *)(skb->data + FEC_PTP_IP_OFFS);
++	if (iph->protocol != FEC_PACKET_TYPE_UDP)
++		return;
++
++	udph = (struct udphdr *)(skb->data + FEC_PTP_UDP_OFFS);
++	if (udph->source != 319)
++		return;
++
++	seq_id = *((u16 *)(skb->data + FEC_PTP_SEQ_ID_OFFS));
++	control = *((u8 *)(skb->data + FEC_PTP_CTRL_OFFS));
++
++	tmp_rx_time.key = seq_id;
++	tmp_rx_time.ts_time.sec = fpp->prtc;
++	tmp_rx_time.ts_time.nsec = bdp->ts;
++
++	switch (control) {
++
++	case PTP_MSG_SYNC:
++		fec_ptp_insert(&(priv->rx_time_sync), &tmp_rx_time, priv);
++		break;
++
++	case PTP_MSG_DEL_REQ:
++		fec_ptp_insert(&(priv->rx_time_del_req), &tmp_rx_time, priv);
++		break;
++
++	/* clear transportSpecific field*/
++	case PTP_MSG_ALL_OTHER:
++		msg_type = (*((u8 *)(skb->data +
++				FEC_PTP_MSG_TYPE_OFFS))) & 0x0F;
++		switch (msg_type) {
++		case PTP_MSG_P_DEL_REQ:
++			fec_ptp_insert(&(priv->rx_time_pdel_req),
++						&tmp_rx_time, priv);
++			break;
++		case PTP_MSG_P_DEL_RESP:
++			fec_ptp_insert(&(priv->rx_time_pdel_resp),
++					&tmp_rx_time, priv);
++			break;
++		default:
++			break;
++		}
++		break;
++	default:
++		break;
++	}
++
++	wake_up_interruptible(&ptp_rx_ts_wait);
++}
++
++static void fec_get_tx_timestamp(struct fec_ptp_private *priv,
++				 struct ptp_time *tx_time)
++{
++	tx_time->sec = priv->txstamp.sec;
++	tx_time->nsec = priv->txstamp.nsec;
++}
++
++static uint8_t fec_get_rx_time(struct fec_ptp_private *priv,
++			       struct ptp_ts_data *pts,
++			       struct ptp_time *rx_time)
++{
++	struct fec_ptp_data_t tmp;
++	int key, flag;
++	u8 mode;
++
++	key = pts->seq_id;
++	mode = pts->message_type;
++	switch (mode) {
++	case PTP_MSG_SYNC:
++		flag = fec_ptp_find_and_remove(&(priv->rx_time_sync),
++						key, &tmp, priv);
++		break;
++	case PTP_MSG_DEL_REQ:
++		flag = fec_ptp_find_and_remove(&(priv->rx_time_del_req),
++						key, &tmp, priv);
++		break;
++
++	case PTP_MSG_P_DEL_REQ:
++		flag = fec_ptp_find_and_remove(&(priv->rx_time_pdel_req),
++						key, &tmp, priv);
++		break;
++	case PTP_MSG_P_DEL_RESP:
++		flag = fec_ptp_find_and_remove(&(priv->rx_time_pdel_resp),
++						key, &tmp, priv);
++		break;
++
++	default:
++		flag = 1;
++		printk(KERN_ERR "ERROR\n");
++		break;
++	}
++
++	if (!flag) {
++		rx_time->sec = tmp.ts_time.sec;
++		rx_time->nsec = tmp.ts_time.nsec;
++		return 0;
++	} else {
++		wait_event_interruptible_timeout(ptp_rx_ts_wait, 0,
++					PTP_GET_RX_TIMEOUT);
++
++		switch (mode) {
++		case PTP_MSG_SYNC:
++			flag = fec_ptp_find_and_remove(&(priv->rx_time_sync),
++				key, &tmp, priv);
++			break;
++		case PTP_MSG_DEL_REQ:
++			flag = fec_ptp_find_and_remove(
++				&(priv->rx_time_del_req), key, &tmp, priv);
++			break;
++		case PTP_MSG_P_DEL_REQ:
++			flag = fec_ptp_find_and_remove(
++				&(priv->rx_time_pdel_req), key, &tmp, priv);
++			break;
++		case PTP_MSG_P_DEL_RESP:
++			flag = fec_ptp_find_and_remove(
++				&(priv->rx_time_pdel_resp), key, &tmp, priv);
++			break;
++		}
++
++		if (flag == 0) {
++			rx_time->sec = tmp.ts_time.sec;
++			rx_time->nsec = tmp.ts_time.nsec;
++			return 0;
++		}
++
++		return -1;
++	}
++}
++
++static int ptp_open(struct inode *inode, struct file *file)
++{
++	return 0;
++}
++
++static int ptp_release(struct inode *inode, struct file *file)
++{
++	return 0;
++}
++
++static int ptp_ioctl(
++	struct inode *inode,
++	struct file *file,
++	unsigned int cmd,
++	unsigned long arg)
++{
++	struct ptp_rtc_time *cnt;
++	struct ptp_rtc_time curr_time;
++	struct ptp_time rx_time, tx_time;
++	struct ptp_ts_data *p_ts;
++	struct fec_ptp_private *priv;
++	unsigned int minor = MINOR(inode->i_rdev);
++	int retval = 0;
++
++	priv = (struct fec_ptp_private *) ptp_private[minor];
++	switch (cmd) {
++	case PTP_GET_RX_TIMESTAMP:
++		p_ts = (struct ptp_ts_data *)arg;
++		retval = fec_get_rx_time(priv, p_ts, &rx_time);
++		if (retval == 0)
++			copy_to_user((void __user *)(&(p_ts->ts)), &rx_time,
++					sizeof(rx_time));
++		break;
++	case PTP_GET_TX_TIMESTAMP:
++		p_ts = (struct ptp_ts_data *)arg;
++		fec_get_tx_timestamp(priv, &tx_time);
++		copy_to_user((void __user *)(&(p_ts->ts)), &tx_time,
++				sizeof(tx_time));
++		break;
++	case PTP_GET_CURRENT_TIME:
++		fec_get_curr_cnt(priv, &curr_time);
++		copy_to_user((void __user *)arg, &curr_time, sizeof(curr_time));
++		break;
++	case PTP_SET_RTC_TIME:
++		cnt = (struct ptp_rtc_time *)arg;
++		fec_set_1588cnt(priv, cnt);
++		break;
++	case PTP_FLUSH_TIMESTAMP:
++		/* reset sync buffer */
++		priv->rx_time_sync.head = 0;
++		priv->rx_time_sync.tail = 0;
++		/* reset delay_req buffer */
++		priv->rx_time_del_req.head = 0;
++		priv->rx_time_del_req.tail = 0;
++		/* reset pdelay_req buffer */
++		priv->rx_time_pdel_req.head = 0;
++		priv->rx_time_pdel_req.tail = 0;
++		/* reset pdelay_resp buffer */
++		priv->rx_time_pdel_resp.head = 0;
++		priv->rx_time_pdel_resp.tail = 0;
++		break;
++	case PTP_SET_COMPENSATION:
++		/* TBD */
++		break;
++	case PTP_GET_ORIG_COMP:
++		/* TBD */
++		break;
++	default:
++		return -EINVAL;
++	}
++	return retval;
++}
++
++static const struct file_operations ptp_fops = {
++	.owner	= THIS_MODULE,
++	.llseek	= NULL,
++	.read	= NULL,
++	.write	= NULL,
++	.ioctl	= ptp_ioctl,
++	.open	= ptp_open,
++	.release = ptp_release,
++};
++
++static int init_ptp(void)
++{
++	if (register_chrdev(PTP_MAJOR, "ptp", &ptp_fops))
++		printk(KERN_ERR "Unable to register PTP deivce as char\n");
++
++	return 0;
++}
++
++static void ptp_free(void)
++{
++	/*unregister the PTP device*/
++	unregister_chrdev(PTP_MAJOR, "ptp");
++}
++
++/*
++ * Resource required for accessing 1588 Timer Registers.
++ */
++int fec_ptp_init(struct fec_ptp_private *priv, int id)
++{
++	fec_ptp_init_circ(&(priv->rx_time_sync));
++	fec_ptp_init_circ(&(priv->rx_time_del_req));
++	fec_ptp_init_circ(&(priv->rx_time_pdel_req));
++	fec_ptp_init_circ(&(priv->rx_time_pdel_resp));
++
++	spin_lock_init(&priv->ptp_lock);
++	spin_lock_init(&priv->cnt_lock);
++	ptp_private[id] = priv;
++	if (id == 0)
++		init_ptp();
++	return 0;
++}
++EXPORT_SYMBOL(fec_ptp_init);
++
++void fec_ptp_cleanup(struct fec_ptp_private *priv)
++{
++
++	if (priv->rx_time_sync.buf)
++		vfree(priv->rx_time_sync.buf);
++	if (priv->rx_time_del_req.buf)
++		vfree(priv->rx_time_del_req.buf);
++	if (priv->rx_time_pdel_req.buf)
++		vfree(priv->rx_time_pdel_req.buf);
++	if (priv->rx_time_pdel_resp.buf)
++		vfree(priv->rx_time_pdel_resp.buf);
++
++	ptp_free();
++}
++EXPORT_SYMBOL(fec_ptp_cleanup);
+diff --git a/drivers/net/fec_1588.h b/drivers/net/fec_1588.h
+new file mode 100644
+index 0000000..d3ee431
+--- /dev/null
++++ b/drivers/net/fec_1588.h
+@@ -0,0 +1,157 @@
++/*
++ * drivers/net/fec_1588.h
++ *
++ * Copyright (C) 2010 Freescale Semiconductor, Inc. All rights reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ */
++
++#ifndef FEC_1588_H
++#define FEC_1588_H
++
++#include <linux/circ_buf.h>
++
++/* FEC 1588 register bits */
++#define FEC_T_CTRL_CAPTURE		0x00000800
++#define FEC_T_CTRL_RESTART		0x00000200
++#define FEC_T_CTRL_PERIOD_RST		0x00000030
++#define FEC_T_CTRL_ENABLE		0x00000001
++
++#define FEC_T_INC_MASK			0x0000007f
++#define FEC_T_INC_OFFSET		0
++
++#define FEC_T_INC_40MHZ			25
++
++#define FEC_T_PERIOD_ONE_SEC		0x3B9ACA00
++
++/* IEEE 1588 definition */
++#define FEC_ECNTRL_TS_EN	0x10
++#define PTP_MAJOR		232	/*the temporary major number
++						 *used by PTP driver, the major
++						 *number 232~239 is unassigned*/
++
++#define DEFAULT_PTP_RX_BUF_SZ		2048
++#define PTP_MSG_SYNC			0x0
++#define PTP_MSG_DEL_REQ			0x1
++#define PTP_MSG_P_DEL_REQ		0x2
++#define PTP_MSG_P_DEL_RESP		0x3
++#define PTP_MSG_DEL_RESP		0x4
++#define PTP_MSG_ALL_OTHER		0x5
++
++#define PTP_GET_TX_TIMESTAMP		0x1
++#define PTP_GET_RX_TIMESTAMP		0x2
++#define PTP_SET_RTC_TIME		0x3
++#define PTP_SET_COMPENSATION		0x4
++#define PTP_GET_CURRENT_TIME		0x5
++#define PTP_FLUSH_TIMESTAMP		0x6
++#define PTP_ADJ_ADDEND			0x7
++#define PTP_GET_ORIG_COMP		0x8
++#define PTP_GET_ADDEND			0xB
++#define PTP_GET_RX_TIMESTAMP_PDELAY_REQ		0xC
++#define PTP_GET_RX_TIMESTAMP_PDELAY_RESP	0xD
++
++#define FEC_PTP_DOMAIN_DLFT		0xe0000181
++#define FEC_PTP_IP_OFFS			0xE
++#define FEC_PTP_UDP_OFFS		0x22
++#define FEC_PTP_MSG_TYPE_OFFS		0x2A
++#define FEC_PTP_SEQ_ID_OFFS		0x48
++#define FEC_PTP_CTRL_OFFS		0x4A
++#define FEC_PACKET_TYPE_UDP		0x11
++
++/* PTP standard time representation structure */
++struct ptp_time{
++	u64 sec;	/* seconds */
++	u32 nsec;	/* nanoseconds */
++};
++
++/* Structure for PTP Time Stamp */
++struct fec_ptp_data_t {
++	int		key;
++	struct ptp_time	ts_time;
++};
++
++/* interface for PTP driver command GET_TX_TIME */
++struct ptp_ts_data {
++	/* PTP version */
++	u8 version;
++	/* PTP source port ID */
++	u8 spid[10];
++	/* PTP sequence ID */
++	u16 seq_id;
++	/* PTP message type */
++	u8 message_type;
++	/* PTP timestamp */
++	struct ptp_time ts;
++};
++
++/* interface for PTP driver command SET_RTC_TIME/GET_CURRENT_TIME */
++struct ptp_rtc_time {
++	struct ptp_time rtc_time;
++};
++
++/* PTP message version */
++#define PTP_1588_MSG_VER_1	1
++#define PTP_1588_MSG_VER_2	2
++
++#define BD_ENET_TX_TS		0x20000000
++#define BD_ENET_TX_BDU		0x80000000
++
++struct fec_ptp_private {
++	void __iomem *hwp;
++
++	struct	circ_buf rx_time_sync;
++	struct	circ_buf rx_time_del_req;
++	struct	circ_buf rx_time_pdel_req;
++	struct	circ_buf rx_time_pdel_resp;
++	spinlock_t ptp_lock;
++	spinlock_t cnt_lock;
++
++	u64	prtc;
++	struct ptp_time	txstamp;
++};
++
++#ifdef CONFIG_FEC_1588
++extern int fec_ptp_init(struct fec_ptp_private *priv, int id);
++extern void fec_ptp_cleanup(struct fec_ptp_private *priv);
++extern int fec_ptp_start(struct fec_ptp_private *priv);
++extern void fec_ptp_stop(struct fec_ptp_private *priv);
++extern int fec_ptp_do_txstamp(struct sk_buff *skb);
++extern void fec_ptp_store_txstamp(struct fec_ptp_private *priv);
++extern void fec_ptp_store_rxstamp(struct fec_ptp_private *priv,
++				  struct sk_buff *skb,
++				  struct bufdesc *bdp);
++#else
++static inline int fec_ptp_init(struct fec_ptp_private *priv, int id)
++{
++	return 1;
++}
++static inline void fec_ptp_cleanup(struct fec_ptp_private *priv) { }
++static inline int fec_ptp_start(struct fec_ptp_private *priv)
++{
++	return 1;
++}
++static inline void fec_ptp_stop(struct fec_ptp_private *priv) {}
++static inline int fec_ptp_do_txstamp(struct sk_buff *skb)
++{
++	return 0;
++}
++static inline void fec_ptp_store_txstamp(struct fec_ptp_private *priv) {}
++static inline void fec_ptp_store_rxstamp(struct fec_ptp_private *priv,
++					 struct sk_buff *skb,
++					 struct bufdesc *bdp) {}
++#endif /* 1588 */
++
++#endif
+-- 
+1.6.4
+

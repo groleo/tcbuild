@@ -1,0 +1,167 @@
+From b07586b1b233f2d373ae0ef67f72fea234b0a6f7 Mon Sep 17 00:00:00 2001
+From: Lanttor Guo <lanttor.guo@freescale.com>
+Date: Mon, 17 May 2010 15:15:09 +0800
+Subject: [PATCH 03/18] Add I2C bus driver support on m5441x platform
+
+This patch only enables i2c0 controller
+
+Signed-off-by: Lanttor Guo <lanttor.guo@freescale.com>
+---
+ arch/m68k/coldfire/m5441x/devices.c |    3 ++-
+ arch/m68k/include/asm/mcfi2c.h      |    4 ++--
+ drivers/i2c/busses/i2c-mcf.c        |   33 +++++++++++++++++++++++++--------
+ 3 files changed, 29 insertions(+), 11 deletions(-)
+
+diff --git a/arch/m68k/coldfire/m5441x/devices.c b/arch/m68k/coldfire/m5441x/devices.c
+index a7bc0a1..dad1ef0 100644
+--- a/arch/m68k/coldfire/m5441x/devices.c
++++ b/arch/m68k/coldfire/m5441x/devices.c
+@@ -34,7 +34,7 @@
+ #include <asm/cf_io.h>
+ 
+ /*
+- * I2C
++ * I2C: only support i2c0 module on m5441x platform
+  */
+ #if defined(CONFIG_I2C) || defined(CONFIG_I2C_MODULE)
+ static struct resource coldfire_i2c_resources[] = {
+@@ -59,6 +59,7 @@ static struct platform_device coldfire_i2c_device = {
+ 
+ static void mcf5441x_init_i2c(void)
+ {
++	MCF_PM_PPMCR0 = 22;
+ 	platform_device_register(&coldfire_i2c_device);
+ }
+ #endif
+diff --git a/arch/m68k/include/asm/mcfi2c.h b/arch/m68k/include/asm/mcfi2c.h
+index d033e28..eed5807 100644
+--- a/arch/m68k/include/asm/mcfi2c.h
++++ b/arch/m68k/include/asm/mcfi2c.h
+@@ -1,6 +1,6 @@
+ /*
+  *	mcfi2c.h -- ColdFire mcfv4/mcfv4e i2c controller support.
+- *	Copyright 2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ *	Copyright 2009-2010 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ #ifndef MCF_I2C_H
+ #define MCF_I2C_H
+@@ -13,7 +13,7 @@
+ #define MCF_I2SR     MCF_REG08(0x008F0C)	/* I2C Status		 */
+ #define MCF_I2DR     MCF_REG08(0x008F10)	/* I2C Data I/O		 */
+ #define MCF_I2ICR    MCF_REG08(0x008F20)	/* I2C Interrupt Control */
+-#elif defined(CONFIG_M5445X)
++#elif defined(CONFIG_M5445X) || defined(CONFIG_M5441X)
+ #define MCF_I2AR     *(volatile u8 *)(0xFC058000)	/* I2C Address 		 */
+ #define MCF_I2FDR    *(volatile u8 *)(0xFC058004)	/* I2C Frequency Divider */
+ #define MCF_I2CR     *(volatile u8 *)(0xFC058008)	/* I2C Control		 */
+diff --git a/drivers/i2c/busses/i2c-mcf.c b/drivers/i2c/busses/i2c-mcf.c
+index 3ca1cd4..59422c5 100644
+--- a/drivers/i2c/busses/i2c-mcf.c
++++ b/drivers/i2c/busses/i2c-mcf.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2009-2010 Freescale Semiconductor, Inc. All Rights Reserved.
+  * Lanttor.Guo@freescale.com
+  *
+  * I2C bus driver on mcfv4/mcfv4e platform
+@@ -27,7 +27,7 @@
+ 
+ #if defined(CONFIG_M547X_8X)
+ #include <asm/m5485sim.h>
+-#elif defined(CONFIG_M5445X)
++#elif defined(CONFIG_M5445X) || defined(CONFIG_M5441X)
+ #include <asm/mcfsim.h>
+ #endif
+ 
+@@ -36,7 +36,7 @@
+ 
+ #if defined(CONFIG_M547X_8X)
+ static int clock = 0x3b;
+-#elif defined(CONFIG_M5445X)
++#elif defined(CONFIG_M5445X) || defined(CONFIG_M5441X)
+ static int clock = 0x19;
+ #endif
+ module_param(clock, int, 0);
+@@ -215,6 +215,13 @@ mcf_i2c_init(struct i2c_algo_mcf_data *adap)
+ 	MCF_GPIO_PAR_FECI2C |= (0
+ 		| MCF_GPIO_PAR_FECI2C_PAR_SDA(3)
+ 		| MCF_GPIO_PAR_FECI2C_PAR_SCL(3));
++#elif defined(CONFIG_M5441X)
++	MCF_GPIO_PAR_CANI2C =
++		(MCF_GPIO_PAR_CANI2C & MCF_GPIO_PAR_CANI2C_I2C0SCL_MASK) |
++		MCF_GPIO_PAR_CANI2C_I2C0SCL_I2C0SCL;
++	MCF_GPIO_PAR_CANI2C =
++		(MCF_GPIO_PAR_CANI2C & MCF_GPIO_PAR_CANI2C_I2C0SDA_MASK) |
++		MCF_GPIO_PAR_CANI2C_I2C0SDA_I2C0SDA;
+ #endif
+ 
+ 	/*  Ensure slaves are in idle state */
+@@ -227,7 +234,7 @@ mcf_i2c_init(struct i2c_algo_mcf_data *adap)
+ 		MCF_I2SR  = 0x00;
+ 		MCF_I2CR  = 0x00;
+ 		MCF_I2ICR = 0x01;
+-#elif defined(CONFIG_M5445X)
++#elif defined(CONFIG_M5445X) || defined(CONFIG_M5441X)
+ 		MCF_I2CR = 0x00;
+ 		MCF_I2CR = 0xA0;
+ 		dummy = MCF_I2DR;
+@@ -244,7 +251,11 @@ mcf_i2c_init(struct i2c_algo_mcf_data *adap)
+ 	MCF_I2AR = get_own(adap);
+ 
+ 	/* enable I2C module */
++#if	defined(CONFIG_M5441X)
++	MCF_I2CR = (MCF_I2CR_IEN | MCF_I2CR_IIEN);
++#else
+ 	MCF_I2CR = MCF_I2CR_IEN;
++#endif
+ }
+ 
+ static int i2c_outb(
+@@ -396,7 +407,7 @@ mcf_xfer(
+ 		MCF_I2SR  = 0x00;
+ 		MCF_I2CR  = 0x00;
+ 		MCF_I2ICR = 0x01;
+-#elif defined(CONFIG_M5445X)
++#elif defined(CONFIG_M5445X) || defined(CONFIG_M5441X)
+ 		MCF_I2CR = 0x00;
+ 		MCF_I2CR = 0xA0;
+ 		timeout = MCF_I2DR;
+@@ -411,8 +422,11 @@ mcf_xfer(
+ 	/* set slave address */
+ 	MCF_I2AR = get_own(adap);
+ 	/* enable I2C module */
++#if	defined(CONFIG_M5441X)
++	MCF_I2CR = (MCF_I2CR_IEN | MCF_I2CR_IIEN);
++#else
+ 	MCF_I2CR = MCF_I2CR_IEN;
+-
++#endif
+ 	MCF_I2CR |= MCF_I2CR_TXAK;
+ 
+ 	/* Check for bus busy */
+@@ -428,7 +442,7 @@ mcf_xfer(
+ 			MCF_I2SR  = 0x00;
+ 			MCF_I2CR  = 0x00;
+ 			MCF_I2ICR = 0x01;
+-#elif defined(CONFIG_M5445X)
++#elif defined(CONFIG_M5445X) || defined(CONFIG_M5441X)
+ 		MCF_I2CR = 0x00;
+ 		MCF_I2CR = 0xA0;
+ 		timeout = MCF_I2DR;
+@@ -442,8 +456,11 @@ mcf_xfer(
+ 		/* set slave address */
+ 		MCF_I2AR = get_own(adap);
+ 		/* enable I2C module */
++#if		defined(CONFIG_M5441X)
++		MCF_I2CR = (MCF_I2CR_IEN | MCF_I2CR_IIEN);
++#else
+ 		MCF_I2CR = MCF_I2CR_IEN;
+-
++#endif
+ 		MCF_I2CR |= MCF_I2CR_TXAK;
+ 
+ 		/* Check for bus busy */
+-- 
+1.6.4
+
