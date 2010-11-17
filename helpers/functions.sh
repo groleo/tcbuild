@@ -745,29 +745,30 @@ CT_Patch() {
 	[ "${nochdir}" = "nochdir" ] || CT_Pushd "${CT_SRC_DIR}/${basename}"
 
 	official_patch_dir="${CT_TOP_DIR}/patches/${base_file}/${ver_file}"
-	pkg_patch_dir="${base_dir}/patches/${ver_file}"
+	pkg_patch_dir="${base_dir}/${ver_file}/patches"
+	arch_patch_dir="${base_dir}/${CT_ARCH}/${ver_file}/patches/"
 
-	CT_DoLog EXTRA "Patching '${basename}' using patches from ${pkg_patch_dir} ${official_patch_dir}"
+	CT_DoLog EXTRA "Patching '${basename}' using patches from ${arch_patch_dir} ${pkg_patch_dir} ${official_patch_dir}"
 
-	if [ -f "${pkg_patch_dir}/patch.sh" ] ; then
-	CT_DoLog EXTRA "patch found"
-	sleep 2
-	source "${pkg_patch_dir}/patch.sh"
+	if [ -f "${arch_patch_dir}/patch.sh" ] ; then
+		CT_DoLog EXTRA "patch found"
+		sleep 2
+		source "${arch_patch_dir}/patch.sh"
 	else
-	for patch_dir in "${official_patch_dir}" "${pkg_patch_dir}"; do
-		if [ -n "${patch_dir}" -a -d "${patch_dir}" ]; then
-		for p in "${patch_dir}"/*.patch; do
-			if [ -f "${p}" ]; then
-				CT_SubPatch "${p}"
+		for patch_dir in "${official_patch_dir}" "${pkg_patch_dir}"  "${arch_patch_dir}" ; do
+			if [ -n "${patch_dir}" -a -d "${patch_dir}" ]; then
+			for p in "${patch_dir}"/*.patch; do
+				if [ -f "${p}" ]; then
+					CT_SubPatch "${p}"
+				fi
+			done
+			for p in "${patch_dir}"/*.git; do
+				if [ -f "${p}" ]; then
+					CT_SubGitApply "${p}"
+				fi
+			done
 			fi
 		done
-		for p in "${patch_dir}"/*.git; do
-			if [ -f "${p}" ]; then
-				CT_SubGitApply "${p}"
-			fi
-		done
-		fi
-	done
 	fi
 
 	if [ "${CT_OVERIDE_CONFIG_GUESS_SUB}" = "y" ]; then
