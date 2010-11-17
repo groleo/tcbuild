@@ -1,14 +1,17 @@
 #! /bin/sh -e
+#E00E0000
+
+KERNELSIZE=E0000
 
 KERNELSCR='
 echo **************************************************************************
 echo * [stage1] Configuration
 echo Align to block size, the kernel_size and rootfs_size
-set kernel_size 0x000C0000
-set kernel_end  0xE00C0000
+set kernel_size 0x000<KERNELSIZE>
+set kernel_end  0xE00<KERNELSIZE>
 set rootfs_size 0x00F20000
-set kernel_file ltib/uzImage_<FSVERSION>
-set rootfs_file ltib/rootfs_<FSVERSION>.jffs2
+set kernel_file mariusn/uzImage<FSVERSION>
+set rootfs_file mariusn/rootfs<FSVERSION>.jffs2
 set bootargs pci=nodomains root=/dev/mtdblock1 rw rootfstype=jffs2 mtdparts=physmap-flash.0:${kernel_size}(boot)ro,-(root)
 set bootdelay 2
 set bootcmd bootm 0xE0000000
@@ -47,7 +50,7 @@ echo
 
 BOOT='
 echo
-echo You successfully installed Linux on your board.
+echo You successfully installed Nivis Linux on your board.
 echo
 echo Im going to boot now so please dont reset me.
 echo
@@ -69,6 +72,12 @@ if [ $# -lt 1 ]; then
 	exit 0
 fi
 
+if [ "${1}" = "" ] ; then
+	FSVERSION=
+else
+	FSVERSION=_${1}
+fi
+
 check_files() {
 	for file in $*; do
 		if [ ! -f ${file} ]; then
@@ -82,13 +91,13 @@ NEEDED_FILES="../uzImage u-boot.bin uboot_dhcp_0xff800000.srec"
 check_files ${NEEDED_FILES}
 
 echo "**************************************************************************"
-echo "* Creating autoscr.sh with <FSVERSION>=${1}"
-echo "${KERNELSCR}" | sed "s/<FSVERSION>/${1}/" > ${OUT}/autoscr.sh
-echo "${ROOTFSSCR}" | sed "s/<FSVERSION>/${1}/" >> ${OUT}/autoscr.sh
+echo "* Creating autoscr.sh with <FSVERSION>=${FSVERSION}"
+echo "${KERNELSCR}" | sed "s/<FSVERSION>/${FSVERSION}/;s/<KERNELSIZE>/${KERNELSIZE}/" > ${OUT}/autoscr.sh
+echo "${ROOTFSSCR}" | sed "s/<FSVERSION>/${FSVERSION}/;s/<KERNELSIZE>/${KERNELSIZE}/" >> ${OUT}/autoscr.sh
 echo "${BOOT}" >> ${OUT}/autoscr.sh
 
-echo "* Creating kernel.sh with <FSVERSION>=${1}"
-echo "${KERNELSCR}" | sed "s/<FSVERSION>/${1}/" > ${OUT}/kernel.sh
+echo "* Creating kernel.sh with <FSVERSION>=${FSVERSION}"
+echo "${KERNELSCR}" | sed "s/<FSVERSION>/${FSVERSION}/;s/<KERNELSIZE>/${KERNELSIZE}/" > ${OUT}/kernel.sh
 echo "${BOOT}" >> ${OUT}/kernel.sh
 echo "**************************************************************************"
 echo
@@ -102,28 +111,34 @@ echo "* Building kernel.img"
 mkimage -A m68k -O linux -T script -C gzip -a 0x00020000 -e 0x00020000 -n 'Linux Kernel Image' -d ${OUT}/kernel.sh  ${OUT}/kernel.img
 echo "**************************************************************************"
 
-cp u-boot.bin ${OUT}/u-boot_${1}.bin
-cp ../uzImage ${OUT}/"uzImage_${1}"
+cp u-boot.bin ${OUT}/u-boot${FSVERSION}.bin
+cp ../uzImage ${OUT}/"uzImage${FSVERSION}"
 
 # ok, so rootfs.jffs2 is built twice using mkfs.jffs2 (first by the Makefile). Big deal.
 echo
 echo "**************************************************************************"
-echo "* Building rootfs.jffs2 with <FSVERSION>=${1}"
+echo "* Building rootfs.jffs2 with <FSVERSION>=${FSVERSION}"
 
 if [ ! -d "$CT_FS_DIR" ]; then
     echo "Needed directory missing: $CT_FS_DIR"
     exit 0
 fi
 
-# NO dropbear by default (it invalidates telnet)
-#[ -f ../_rootfs/usr/sbin/dropbear ] && mv ../_rootfs/usr/sbin/dropbear ../_rootfs/usr/sbin/dropbear.0.52
-
 # -v will crash mkfs.jffs2 if owner is not right
 sudo chown root:root -R ${CT_FS_DIR}
-mkfs.jffs2 -v -b -n  -e128KiB -p0xF2D0E7 -r $CT_FS_DIR -o ${OUT}/rootfs_${1}.jffs2 > rootfs.jffs2.log
+mkfs.jffs2 -v -b -n  -e128KiB -p0xF2D0E7 -r $CT_FS_DIR -o ${OUT}/rootfs${FSVERSION}.jffs2 > rootfs.jffs2.log
 echo "**************************************************************************"
 
-cp uboot_dhcp_0xff800000.srec ${OUT}/uboot_${1}.srec
+cp uboot_dhcp_0xff800000.srec ${OUT}/uboot${FSVERSION}.srec
 echo
+echo "**************************************************************************"
+echo "* Building vr900img${FSVERSION}.tar.gz"
+tar czvf img${FSVERSION}.tar.gz ${OUT}/autoscr.img ${OUT}/kernel.img "${OUT}/uzImage${FSVERSION}" "${OUT}/rootfs${FSVERSION}.jffs2" "${OUT}/u-boot${FSVERSION}.bin" "${OUT}/uboot${FSVERSION}.srec"
+echo "**************************************************************************"
 
 rm -rf ${OUT}
+echo ""
+echo "* VR900 image vr900img${FSVERSION}.tar.gz created"
+echo ""
+pwd
+echo ""
