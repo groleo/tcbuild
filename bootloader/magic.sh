@@ -132,13 +132,13 @@ echo "**************************************************************************
 cp uboot_M28W160CB70N6E.srec ${OUT}/uboot${FSVERSION}.srec
 echo
 echo "**************************************************************************"
-echo "* Building vr900img${FSVERSION}.tar.gz"
+echo "* Building img${FSVERSION}.tar.gz"
 tar czvf img${FSVERSION}.tar.gz ${OUT}/autoscr.img ${OUT}/kernel.img "${OUT}/uzImage${FSVERSION}" "${OUT}/rootfs${FSVERSION}.jffs2" "${OUT}/u-boot${FSVERSION}.bin" "${OUT}/uboot${FSVERSION}.srec"
 echo "**************************************************************************"
 
 rm -rf ${OUT}
 echo ""
-echo "* VR900 image vr900img${FSVERSION}.tar.gz created"
+echo "* image img${FSVERSION}.tar.gz created"
 echo ""
 pwd
 echo ""
