@@ -4,7 +4,6 @@
 
 PKG_NAME=linux
 PKG_SRC="${PKG_NAME}-${CT_KERNEL_VERSION}"
-PKG_URL={ftp,http}://ftp.{de.,eu.,}kernel.org/pub/linux/kernel/v2.{6{,/testing},4,2}
 
 CT_DoKernelTupleValues() {
     # Nothing to do, keep the default value
@@ -14,7 +13,7 @@ CT_DoKernelTupleValues() {
 # Download the kernel
 do_kernel_get() {
     if [ "${CT_KERNEL_LINUX_USE_CUSTOM_HEADERS}" != "y" ]; then
-	CT_GetFile "${PKG_SRC}" "${PKG_URL}"
+	CT_GetFile "${PKG_SRC}" {ftp,http}://ftp.{de.,eu.,}kernel.org/pub/linux/kernel/v2.{6{,/testing},4,2}
     fi
     return 0
 }
@@ -33,9 +32,9 @@ do_kernel_configure() {
 
     if [ "${CT_KERNEL_RUN_CONFIG}" = "y" ]; then
 	if [ -f "${CT_KERNEL_CONFIG_FILE}" ]; then
-		CT_Pushd "${CT_SRC_DIR}/${PKG_SRC}"
+		CT_Pushd "${CT_BUILD_DIR}/${PKG_NAME}"
 			CT_DoExecLog INFO cp "${CT_KERNEL_CONFIG_FILE}" .config
-			${make}		\
+			${make} -C "${CT_SRC_DIR}/${PKG_SRC}" \
 				O=$(pwd)					\
 				ARCH=${CT_KERNEL_ARCH}				\
 				INSTALL_HDR_PATH="${CT_SYSROOT_DIR}/usr"	\
