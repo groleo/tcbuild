@@ -148,7 +148,7 @@ CT_SubPatch ${arch_patch_dir}/1257329293_0002-cfV4e-enable-memory-cache.patch
 CT_SubPatch ${arch_patch_dir}/add_cf_dcache_flush.patch
 CT_SubGitApply ${arch_patch_dir}/0007-flush-data-cache-in-FEC-driver.patch
 #CT_SubPatch ${arch_patch_dir}/1257329293_0001-cfV4e-add-dma-zone.patch
-
+CT_SubPatch ${arch_patch_dir}/i2c-remove-MOD_INC_USE_COUNT.patch
 #drop 5 - freescale speed improvements and (failed)attempts at fixing the hang
 #Patches below were added after the PCI hang
 #CT_SubPatch ${arch_patch_dir}/1257852157_make_it_work.patch

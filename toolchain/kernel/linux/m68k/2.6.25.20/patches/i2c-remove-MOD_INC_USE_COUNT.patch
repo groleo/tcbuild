@@ -1,0 +1,13 @@
+--- a/drivers/i2c/busses/i2c-mcf548x.c	2010-11-18 12:06:34.318868859 +0200
++++ b/drivers/i2c/busses/i2c-mcf548x.c	2010-11-18 12:12:22.497058628 +0200
+@@ -520,10 +520,6 @@
+ 
+ 	mcf_i2c_init(mcf_adap);
+ 
+-#ifdef MODULE
+-	MOD_INC_USE_COUNT;
+-#endif
+-
+ 	i2c_add_adapter(adap);
+ 
+ 	return 0;
