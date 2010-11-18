@@ -1,7 +1,7 @@
 #! /bin/sh -e
-#E00E0000
 
-KERNELSIZE=E0000
+KERNELSIZE=C0000
+TFTPDIR=ltib
 
 KERNELSCR='
 echo **************************************************************************
@@ -10,8 +10,8 @@ echo Align to block size, the kernel_size and rootfs_size
 set kernel_size 0x000<KERNELSIZE>
 set kernel_end  0xE00<KERNELSIZE>
 set rootfs_size 0x00F20000
-set kernel_file mariusn/uzImage<FSVERSION>
-set rootfs_file mariusn/rootfs<FSVERSION>.jffs2
+set kernel_file <TFTPDIR>/uzImage<FSVERSION>
+set rootfs_file <TFTPDIR>/rootfs<FSVERSION>.jffs2
 set bootargs pci=nodomains root=/dev/mtdblock1 rw rootfstype=jffs2 mtdparts=physmap-flash.0:${kernel_size}(boot)ro,-(root)
 set bootdelay 2
 set bootcmd bootm 0xE0000000
@@ -87,17 +87,17 @@ check_files() {
 	done
 }
 
-NEEDED_FILES="../uzImage u-boot.bin uboot_dhcp_0xff800000.srec"
+NEEDED_FILES="../uzImage uboot_M28W160CB70N6E.bin uboot_M28W160CB70N6E.srec"
 check_files ${NEEDED_FILES}
 
 echo "**************************************************************************"
 echo "* Creating autoscr.sh with <FSVERSION>=${FSVERSION}"
-echo "${KERNELSCR}" | sed "s/<FSVERSION>/${FSVERSION}/;s/<KERNELSIZE>/${KERNELSIZE}/" > ${OUT}/autoscr.sh
-echo "${ROOTFSSCR}" | sed "s/<FSVERSION>/${FSVERSION}/;s/<KERNELSIZE>/${KERNELSIZE}/" >> ${OUT}/autoscr.sh
+echo "${KERNELSCR}" | sed "s/<FSVERSION>/${FSVERSION}/;s/<KERNELSIZE>/${KERNELSIZE}/;s/<TFTPDIR>/${TFTPDIR}/" > ${OUT}/autoscr.sh
+echo "${ROOTFSSCR}" | sed "s/<FSVERSION>/${FSVERSION}/" >> ${OUT}/autoscr.sh
 echo "${BOOT}" >> ${OUT}/autoscr.sh
 
 echo "* Creating kernel.sh with <FSVERSION>=${FSVERSION}"
-echo "${KERNELSCR}" | sed "s/<FSVERSION>/${FSVERSION}/;s/<KERNELSIZE>/${KERNELSIZE}/" > ${OUT}/kernel.sh
+echo "${KERNELSCR}" | sed "s/<FSVERSION>/${FSVERSION}/;s/<KERNELSIZE>/${KERNELSIZE}/;s/<TFTPDIR>/${TFTPDIR}/" > ${OUT}/kernel.sh
 echo "${BOOT}" >> ${OUT}/kernel.sh
 echo "**************************************************************************"
 echo
@@ -111,7 +111,7 @@ echo "* Building kernel.img"
 mkimage -A m68k -O linux -T script -C gzip -a 0x00020000 -e 0x00020000 -n 'Linux Kernel Image' -d ${OUT}/kernel.sh  ${OUT}/kernel.img
 echo "**************************************************************************"
 
-cp u-boot.bin ${OUT}/u-boot${FSVERSION}.bin
+cp uboot_M28W160CB70N6E.bin ${OUT}/u-boot${FSVERSION}.bin
 cp ../uzImage ${OUT}/"uzImage${FSVERSION}"
 
 # ok, so rootfs.jffs2 is built twice using mkfs.jffs2 (first by the Makefile). Big deal.
@@ -129,7 +129,7 @@ sudo chown root:root -R ${CT_FS_DIR}
 mkfs.jffs2 -v -b -n  -e128KiB -p0xF2D0E7 -r $CT_FS_DIR -o ${OUT}/rootfs${FSVERSION}.jffs2 > rootfs.jffs2.log
 echo "**************************************************************************"
 
-cp uboot_dhcp_0xff800000.srec ${OUT}/uboot${FSVERSION}.srec
+cp uboot_M28W160CB70N6E.srec ${OUT}/uboot${FSVERSION}.srec
 echo
 echo "**************************************************************************"
 echo "* Building vr900img${FSVERSION}.tar.gz"
