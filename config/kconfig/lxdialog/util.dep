@@ -1,1 +1,0 @@
-config/kconfig/lxdialog/util.o config/kconfig/lxdialog/util.dep: config/kconfig/lxdialog/util.c config/kconfig/lxdialog/dialog.h
