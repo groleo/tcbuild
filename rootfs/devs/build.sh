@@ -32,6 +32,10 @@ do_devs() {
 	CT_DoExecLog ALL sudo mknod ./dev/ttyS2    c 4 66
 	CT_DoExecLog ALL sudo mknod ./dev/ttyS3    c 4 67
 	CT_DoExecLog ALL sudo mknod ./dev/ttyS4    c 4 68
+	CT_DoExecLog ALL sudo mknod ./dev/tty1     c 4 1
+	CT_DoExecLog ALL sudo mknod ./dev/tty2     c 4 2
+	CT_DoExecLog ALL sudo mknod ./dev/tty3     c 4 3
+	CT_DoExecLog ALL sudo mknod ./dev/tty4     c 4 4
 	CT_DoExecLog ALL sudo mknod ./dev/tty      c 5 0
 	CT_DoExecLog ALL sudo mknod ./dev/console  c 5 1
 	CT_DoExecLog ALL sudo mknod ./dev/ptmx     c 5 2

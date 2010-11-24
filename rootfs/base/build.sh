@@ -20,5 +20,14 @@ do_base() {
 	CT_DoExecLog ALL sudo tar xzvf ${CT_TARBALLS_DIR}/_aaa_base.tar.gz
 	CT_DoExecLog ALL sudo chown -R ${USER} .
 
+	CT_DoExecLog ALL mkdir -p etc/init.d
+	cat > etc/init.d/rcS <<-ENDOFMESSAGE
+	#!/bin/sh
+	echo "Welcome to Linux"
+	/bin/mount -t proc none /proc
+	/bin/mount
+ENDOFMESSAGE
+	CT_DoExecLog ALL chmod +x etc/init.d/rcS
+
 	CT_EndStep
 }
