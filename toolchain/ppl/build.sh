@@ -29,10 +29,7 @@ do_ppl() {
 	--enable-cxx				\
 	--with-gmp=${CT_PREFIX_DIR}		\
 	--with-gmpxx=${CT_PREFIX_DIR}		\
-	--disable-debugging			\
-	--disable-ppl_lpsol			\
-	--disable-ppl_lcdd			\
-	--enable-shared --disable-static
+	--enable-shared
 
     CT_DoLog EXTRA "Building ${PKG_SRC}"
     CT_DoExecLog ALL make ${PARALLELMFLAGS}

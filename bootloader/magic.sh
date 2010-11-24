@@ -6,7 +6,7 @@ IMAGE_NAME=img
 BOARD_NAME=TestB
 CT_FS_DIR=../tmp/_rootfs
 OUT=out
-NEEDED_FILES="../uzImage uboot_M28W160CB70N6E.bin uboot_M28W160CB70N6E.srec"
+NEEDED_FILES="../uzImage"
 
 KERNELSCR='
 echo **************************************************************************
@@ -47,7 +47,8 @@ protect on 0xE0000000 +${kernel_size}
 echo Downloading rootfs
 tftp 0x00020000  ${rootfs_file}
 erase all
-cp.b 0x00020000  ${kernel_end} ${filesize}
+echo cp.b 0x00020000  ${kernel_end} ${filesize}
+cp.b 0x00020000  ${kernel_end} F00000
 echo * [stage3] done. Rootfs loaded.
 echo **************************************************************************
 echo
@@ -113,8 +114,8 @@ echo "* Building kernel.img"
 mkimage -A m68k -O linux -T script -C gzip -a 0x00020000 -e 0x00020000 -n 'Linux Kernel Image' -d ${OUT}/kernel.sh  ${OUT}/kernel.img
 echo "**************************************************************************"
 
-cp uboot_M28W160CB70N6E.bin ${OUT}/u-boot${FSVERSION}.bin
-cp ../uzImage ${OUT}/"uzImage${FSVERSION}"
+#cp uboot_M28W160CB70N6E.bin ${OUT}/u-boot${FSVERSION}.bin
+#cp ../uzImage ${OUT}/"uzImage${FSVERSION}"
 
 # ok, so rootfs.jffs2 is built twice using mkfs.jffs2 (first by the Makefile). Big deal.
 echo
@@ -131,7 +132,7 @@ sudo chown root:root -R ${CT_FS_DIR}
 mkfs.jffs2 -v -b -n  -e128KiB -p0xF2D0E7 -r ${CT_FS_DIR} -o ${OUT}/rootfs${FSVERSION}.jffs2 > rootfs.jffs2.log
 echo "**************************************************************************"
 
-cp uboot_M28W160CB70N6E.srec ${OUT}/uboot${FSVERSION}.srec
+#cp uboot_M28W160CB70N6E.srec ${OUT}/uboot${FSVERSION}.srec
 echo
 echo "**************************************************************************"
 echo "* Building ${IMAGE_NAME}${FSVERSION}.tar.gz"

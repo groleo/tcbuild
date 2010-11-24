@@ -1,5 +1,5 @@
---- ppp-2.4.4/pppd/Makefile.linux.orig	2010-11-23 19:41:57.104239426 +0200
-+++ ppp-2.4.4/pppd/Makefile.linux	2010-11-23 19:42:06.636586295 +0200
+--- a/pppd/Makefile.linux	2010-11-23 19:41:57.104239426 +0200
++++ b/pppd/Makefile.linux	2010-11-23 19:42:06.636586295 +0200
 @@ -48,7 +48,7 @@
  # Uncomment the next line to include support for PPP packet filtering.
  # This requires that the libpcap library and headers be installed

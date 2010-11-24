@@ -3,8 +3,9 @@ help_config::
 help_module::
 	@echo  '  list-pkg   - List all packages'
 
-CT_PKG_COMPONENTS := kernel \
+CT_PKG_COMPONENTS := \
 	bootloader \
+	kernel \
 	strace		\
 	busybox		\
 	ncurses		\
@@ -20,8 +21,7 @@ CT_PKG_COMPONENTS := kernel \
 	sqlite		\
 	popt		\
 	oprofile	\
-	gdbserver \
-	new_package
+	gdbserver
 
 
 export CT_PKG_STEPS:=$(CT_PKG_COMPONENTS)

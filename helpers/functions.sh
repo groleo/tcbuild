@@ -32,6 +32,7 @@ CT_OnError() {
 
 	CT_DoLog ERROR "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
 	CT_DoLog ERROR "PATH=${PATH}"
+	CT_DoLog ERROR "CWD=`pwd`"
 	CT_DoLog ERROR "------------------------------------------------------"
 
 	CT_STEP_COUNT=1
@@ -723,7 +724,7 @@ CT_Extract() {
 
 CT_SubGitApply() {
 	CT_DoLog DEBUG "GIT-APPLY '${1}'"
-	CT_DoExecLog ALL ${git_apply} -v --apply --whitespace=nowarn "${1}"
+	CT_DoExecLog ALL ${git_apply} -v --apply --whitespace=nowarn --directory=. "${1}"
 	CT_TestAndAbort "FAIL GIT-APPLY '${1}'" ${PIPESTATUS[0]} -ne 0
 }
 
@@ -764,9 +765,9 @@ CT_Patch() {
 	CT_DoLog EXTRA "Patching '${basename}' using patches from ${arch_patch_dir} ${pkg_patch_dir} ${official_patch_dir}"
 
 	if [ -f "${arch_patch_dir}/patch.sh" ] ; then
-		CT_DoLog EXTRA "patch found"
-		sleep 2
 		source "${arch_patch_dir}/patch.sh"
+	elif [ -f "${pkg_patch_dir}/patch.sh" ] ; then
+		source "${pkg_patch_dir}/patch.sh"
 	else
 		for patch_dir in "${official_patch_dir}" "${pkg_patch_dir}"  "${arch_patch_dir}" ; do
 			if [ -n "${patch_dir}" -a -d "${patch_dir}" ]; then

@@ -13,7 +13,7 @@ config USE_EXTERNAL_TOOLCHAIN
 config EXTERNAL_TOOLCHAIN_DIR
     string
     prompt "External toolchain path."
-    default "/opt/xchain/m68k-unknown-linux-uclibc/"
+    default "/opt/nivis/m68k-unknown-linux-uclibc/"
     depends on USE_EXTERNAL_TOOLCHAIN
     help
       This is the path pointing to an external toolchain. You may want

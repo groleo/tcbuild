@@ -1,0 +1,17 @@
+diff -ruN linux-2.6.25.20-orig/drivers/i2c/busses/i2c-mcf548x.c linux-2.6.25.20/drivers/i2c/busses/i2c-mcf548x.c
+--- linux-2.6.25.20-orig/drivers/i2c/busses/i2c-mcf548x.c	2010-08-23 11:24:17.000000000 +0300
++++ linux-2.6.25.20/drivers/i2c/busses/i2c-mcf548x.c	2010-11-22 12:38:41.000000000 +0200
+@@ -24,10 +24,11 @@
+ #define get_clock(adap) (clock)
+ #define get_own(adap) 	(own)
+ 
+-static int clock = 0x3b;  /*50000 / 1024 ~ 49 KHz*/
++//static int clock = 0x3b;  /*50000 / 1024 ~ 49 KHz*/
++static int clock = 0x1f;  /*50000 / 3840 ~ 13 kHz*/
+ module_param(clock, int, 0);
+ MODULE_PARM_DESC(clock,
+-	"Set I2C clock in kHz: 400=fast mode (default == 49khz)");
++	"Set I2C clock prescaler: default 0x1f == 13kHz");
+ 
+ static int own = 0x78;
+ module_param(own, int, 0);
