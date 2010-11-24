@@ -3,7 +3,7 @@
 
 
 do_base_get() {
-	:
+	CT_GetFile _aaa_base http://serghei.net/linux/slackware/slackware-current/source/a/aaa_base
 }
 
 do_base_extract() {
@@ -17,7 +17,7 @@ do_base() {
 	mkdir -p "${CT_FS_DIR}/"
 	CT_Pushd "${CT_FS_DIR}/"
 
-	CT_DoExecLog ALL tar xzvf ${CT_ROOTFS_DIR}/base/base.tar.gz
+	  CT_DoExecLog ALL tar xzvf ${CT_TARBALLS_DIR}/_aaa_base.tar.gz
 
 	CT_EndStep
 }
