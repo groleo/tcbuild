@@ -312,7 +312,20 @@ CT_DoForceRmdir() {
 		CT_DoExecLog ALL chmod ${mode} "$(dirname "${dir}")"
 	done
 }
-
+CT_DoForceStrip() {
+	local dir
+	local mode
+	local STRIP="$1"
+	shift
+	for dir in "${@}"; do
+		[ -d "${dir}" ] || continue
+		mode="$(stat -c '%a' "$(dirname "${dir}")")"
+		CT_DoExecLog ALL chmod u+w "$(dirname "${dir}")"
+		CT_DoExecLog ALL chmod -R u+w "${dir}"
+		CT_DoExecLog ALL $STRIP"${dir}"
+		CT_DoExecLog ALL chmod ${mode} "$(dirname "${dir}")"
+	done
+}
 # Echoes the specified string on stdout until the pipe breaks.
 # Doesn't fail
 # $1: string to echo
@@ -732,7 +745,7 @@ CT_Patch() {
 	local ver_file="${basename##*[_-]}"
 	local official_patch_dir
 	local pkg_patch_dir
-
+	CT_DoLog EXTRA "PATCHING ${basename}"
 	# Check if already patched
 	if [ -e "${CT_SRC_DIR}/_${basename}.patched" ]; then
 		CT_DoLog DEBUG "Already patched '${basename}'"
