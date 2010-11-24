@@ -169,7 +169,6 @@ nohup
 objcopy
 objdump
 od
-oxdvi
 paste
 patch
 pathchk
@@ -248,8 +247,6 @@ which
 who
 whoami
 xargs
-xdvi
-xdvi-xaw.bin
 yes
 zcat
 '

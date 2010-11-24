@@ -35,6 +35,7 @@ export SHELL=$(bash)
 # Make the restart/stop steps availabe to scripts/crostool-NG.sh
 export CT_STOP:=$(STOP)
 export CT_RESTART:=$(RESTART)
+export do
 
 SILENT=@
 ECHO=echo
@@ -69,19 +70,19 @@ $(CT_LOG_DIR):
 help:: help_head help_config help_samples help_module help_clean help_distrib help_env help_tail
 
 help_head:: version
-	@echo  'See below for a list of available targets, listed by category:'
+	@echo  'help_head:    See below for a list of available targets, listed by category:'
 
 help_config::
 	@echo
-	@echo  'Configuration targets:'
+	@echo  'help_config:  Configuration targets:'
 
 help_samples::
 	@echo
-	@echo  'Preconfigured toolchains (#: force number of // jobs):'
+	@echo  'help_samples: Preconfigured toolchains (#: force number of // jobs):'
 
 help_module::
 	@echo
-	@echo  'Build targets (#: force number of // jobs):'
+	@echo  'help_module:  Build targets (#: force number of // jobs):'
 
 help_clean::
 	@echo
@@ -93,7 +94,7 @@ help_distrib::
 
 help_env::
 	@echo
-	@echo  'Environement variables (see /tmp/crap_shit/share/doc/ct-ng-svn_trunk@1424MS/overview.txt):'
+
 
 help_tail::
 	@echo
@@ -102,9 +103,14 @@ help_tail::
 	@echo 'Use action "menuconfig" to configure chainbuilder'
 	@echo 'Use action "toolchain" to build your toolchain'
 	@echo 'Use action "version" to see the version'
+	@echo 
+	@echo 'Incremental build howto:'
+	@echo 'a) Use `make list-tlc` to list toolchain steps'
+	@echo 'b) Use `make tlc-libc do=list-functions` to list the steps of the `libc` build.'
+	@echo 'a) Use `make tlc-libc do=do_libc` to compile and install the libc.'
 	@echo
-	@echo 'To build the packages (including kernel) run `make packages`'
-	@echo 'To build the root file system run `make rootfs`'
+	@echo 'To build only the packages (this will not build the toolchain) run `make packages`'
+	@echo 'To build the root file system run `make fs`'
 	@echo
 	@echo 'To build the VR900 IMAGE run `make image ver=<version>` (will create rootfs first)'
 	@echo '  (VR900 image needs packages to be already built - THERE IS NO CHECK)'
@@ -163,7 +169,7 @@ include $(CT_CFG_DIR)/kconfig/kconfig.mk
 	@echo ' There is no existing .config file!'
 	@false
 
-image: rootfs
+image: fs
 	cd magic && ./magic.sh $(ver) && cp vr900img_$(ver).tar.gz ..
 	@pwd
 	@echo
