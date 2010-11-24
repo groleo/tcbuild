@@ -26,7 +26,7 @@ do_libc() {
 		SOURCE_DIR="${CT_EXTERNAL_TOOLCHAIN_DIR}/${CT_TARGET}/sys-root/lib"
 	fi
 
-        { cd "${SOURCE_DIR}"; tar cf - .; } |tar xf -
+        { cd "${SOURCE_DIR}"; tar cf - .; } | tar xf -
 
 	CT_EndStep
 }
