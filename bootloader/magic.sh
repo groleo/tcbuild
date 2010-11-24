@@ -48,7 +48,7 @@ echo Downloading rootfs
 tftp 0x00020000  ${rootfs_file}
 erase all
 echo cp.b 0x00020000  ${kernel_end} ${filesize}
-cp.b 0x00020000  ${kernel_end} F00000
+cp.b 0x00020000  ${kernel_end} ${filesize}
 echo * [stage3] done. Rootfs loaded.
 echo **************************************************************************
 echo
@@ -128,8 +128,8 @@ if [ ! -d "${CT_FS_DIR}" ]; then
 fi
 
 # -v will crash mkfs.jffs2 if owner is not right
-sudo chown root:root -R ${CT_FS_DIR}
-mkfs.jffs2 -v -b -n  -e128KiB -p0xF2D0E7 -r ${CT_FS_DIR} -o ${OUT}/rootfs${FSVERSION}.jffs2 > rootfs.jffs2.log
+#sudo chown root:root -R ${CT_FS_DIR}
+#mkfs.jffs2 -v -b -n  -e128KiB -p0xF2D0E7 -r ${CT_FS_DIR} -o ${OUT}/rootfs${FSVERSION}.jffs2 > rootfs.jffs2.log
 echo "**************************************************************************"
 
 #cp uboot_M28W160CB70N6E.srec ${OUT}/uboot${FSVERSION}.srec
