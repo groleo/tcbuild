@@ -1,7 +1,12 @@
 #! /bin/sh -e
 
 KERNELSIZE=C0000
-TFTPDIR=ltib
+TFTPDIR=mariusn
+IMAGE_NAME=img
+BOARD_NAME=TestB
+CT_FS_DIR=../tmp/_rootfs
+OUT=out
+NEEDED_FILES="../uzImage uboot_M28W160CB70N6E.bin uboot_M28W160CB70N6E.srec"
 
 KERNELSCR='
 echo **************************************************************************
@@ -50,7 +55,7 @@ echo
 
 BOOT='
 echo
-echo You successfully installed Nivis Linux on your board.
+echo You successfully installed Linux on your board.
 echo
 echo Im going to boot now so please dont reset me.
 echo
@@ -61,8 +66,6 @@ boot
 rm -rf kernel.img kernel.sh
 rm -rf autoscr.img autoscr.sh
 
-CT_FS_DIR=../tmp/_rootfs
-OUT=out
 if [ ! -d ${OUT} ];then
 	mkdir ${OUT}
 fi
@@ -87,7 +90,6 @@ check_files() {
 	done
 }
 
-NEEDED_FILES="../uzImage uboot_M28W160CB70N6E.bin uboot_M28W160CB70N6E.srec"
 check_files ${NEEDED_FILES}
 
 echo "**************************************************************************"
@@ -119,26 +121,26 @@ echo
 echo "**************************************************************************"
 echo "* Building rootfs.jffs2 with <FSVERSION>=${FSVERSION}"
 
-if [ ! -d "$CT_FS_DIR" ]; then
-    echo "Needed directory missing: $CT_FS_DIR"
+if [ ! -d "${CT_FS_DIR}" ]; then
+    echo "Needed directory missing: ${CT_FS_DIR}"
     exit 0
 fi
 
 # -v will crash mkfs.jffs2 if owner is not right
 sudo chown root:root -R ${CT_FS_DIR}
-mkfs.jffs2 -v -b -n  -e128KiB -p0xF2D0E7 -r $CT_FS_DIR -o ${OUT}/rootfs${FSVERSION}.jffs2 > rootfs.jffs2.log
+mkfs.jffs2 -v -b -n  -e128KiB -p0xF2D0E7 -r ${CT_FS_DIR} -o ${OUT}/rootfs${FSVERSION}.jffs2 > rootfs.jffs2.log
 echo "**************************************************************************"
 
 cp uboot_M28W160CB70N6E.srec ${OUT}/uboot${FSVERSION}.srec
 echo
 echo "**************************************************************************"
-echo "* Building img${FSVERSION}.tar.gz"
-tar czvf img${FSVERSION}.tar.gz ${OUT}/autoscr.img ${OUT}/kernel.img "${OUT}/uzImage${FSVERSION}" "${OUT}/rootfs${FSVERSION}.jffs2" "${OUT}/u-boot${FSVERSION}.bin" "${OUT}/uboot${FSVERSION}.srec"
+echo "* Building ${IMAGE_NAME}${FSVERSION}.tar.gz"
+tar czvf ${IMAGE_NAME}${FSVERSION}.tar.gz ${OUT}/autoscr.img ${OUT}/kernel.img "${OUT}/uzImage${FSVERSION}" "${OUT}/rootfs${FSVERSION}.jffs2" "${OUT}/u-boot${FSVERSION}.bin" "${OUT}/uboot${FSVERSION}.srec"
 echo "**************************************************************************"
 
 rm -rf ${OUT}
 echo ""
-echo "* image img${FSVERSION}.tar.gz created"
+echo "* ${BOARD_NAME} image ${IMAGE_NAME}${FSVERSION}.tar.gz created"
 echo ""
 pwd
 echo ""
