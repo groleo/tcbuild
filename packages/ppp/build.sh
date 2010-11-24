@@ -63,6 +63,7 @@ do_ppp() {
 	 all
 
 	CT_DoLog EXTRA "INSTALL ${PKG_NAME}"
+	CT_DoExecLog ALL chmod -R u+wr ${CT_FS_DIR}/lib
 	CT_DoExecLog ALL			\
 	${make} CROSS=${CT_TARGET}-		\
 	 DESTDIR="${CT_FS_DIR}/"		\
