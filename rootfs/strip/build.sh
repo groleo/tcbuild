@@ -11,26 +11,26 @@ do_strip_extract() {
 }
 
 do_strip() {
-	CT_DoForceRmdir ${CT_FS_DIR}/linuxrc
+	CT_ForceRmdir ${CT_FS_DIR}/linuxrc
 
 	CT_DoLog ALL "Removing un-necesary libraries"
-	CT_DoForceRmdir ${CT_FS_DIR}/lib/{*.a,*.la,libmenu*,libpanel*,libform*,ldscripts}
-	CT_DoForceRmdir ${CT_FS_DIR}/usr/lib/{*.a,*.la,libmenu*,libpanel*,libform*,pkgconfig}
+	CT_ForceRmdir ${CT_FS_DIR}/lib/{*.a,*.la,libmenu*,libpanel*,libform*,ldscripts}
+	CT_ForceRmdir ${CT_FS_DIR}/usr/lib/{*.a,*.la,libmenu*,libpanel*,libform*,pkgconfig}
 
 	CT_DoLog ALL "Removing un-necesary binaries"
-	CT_DoForceRmdir ${CT_FS_DIR}/usr/bin/{ntp-wait,ntptrace,ntp-keygen,ntpdate,ntpdc,ntptime,xminicom,ncurses5-config,strace-graph}
+	CT_ForceRmdir ${CT_FS_DIR}/usr/bin/{ntp-wait,ntptrace,ntp-keygen,ntpdate,ntpdc,ntptime,xminicom,ncurses5-config,strace-graph}
 
 	CT_DoLog ALL "Removing man and info"
-	CT_DoForceRmdir ${CT_FS_DIR}/share/{doc,man,info}
-	CT_DoForceRmdir ${CT_FS_DIR}/usr/{doc,man,info}
-	CT_DoForceRmdir ${CT_FS_DIR}/usr/share/{doc,man,info}
-	CT_DoForceRmdir ${CT_FS_DIR}/usr/include ${CT_FS_DIR}/include
-	CT_DoForceRmdir ${CT_FS_DIR}/usr/lib/php
-	CT_DoForceRmdir ${CT_FS_DIR}/lib/pppd
-	CT_DoForceRmdir ${CT_FS_DIR}/lib/modules/${CT_KERNEL_VERSION}/{modules.*,source,build}
+	CT_ForceRmdir ${CT_FS_DIR}/share/{doc,man,info}
+	CT_ForceRmdir ${CT_FS_DIR}/usr/{doc,man,info}
+	CT_ForceRmdir ${CT_FS_DIR}/usr/share/{doc,man,info}
+	CT_ForceRmdir ${CT_FS_DIR}/usr/include ${CT_FS_DIR}/include
+	CT_ForceRmdir ${CT_FS_DIR}/usr/lib/php
+	CT_ForceRmdir ${CT_FS_DIR}/lib/pppd
+	CT_ForceRmdir ${CT_FS_DIR}/lib/modules/${CT_KERNEL_VERSION}/{modules.*,source,build}
 
 #mv   ${CT_FS_DIR}/usr/share/terminfo/l .
-	CT_DoForceRmdir ${CT_FS_DIR}/usr/share/terminfo/*
+	CT_ForceRmdir ${CT_FS_DIR}/usr/share/terminfo/*
 #mv   ${CT_FS_DIR}/l ${CT_FS_DIR}/usr/share/terminfo/
 
 	CT_DoLog ALL "Stripping executables"

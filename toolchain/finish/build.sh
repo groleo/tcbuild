@@ -40,9 +40,9 @@ do_finish() {
     # Remove the generated documentation files
     if [ "${CT_REMOVE_DOCS}" = "y" ]; then
         CT_DoLog EXTRA "Removing installed documentation"
-        CT_DoForceRmdir "${CT_PREFIX_DIR}/"{,usr/}{man,info}
-        CT_DoForceRmdir "${CT_SYSROOT_DIR}/"{,usr/}{man,info}
-        CT_DoForceRmdir "${CT_DEBUGROOT_DIR}/"{,usr/}{man,info}
+        CT_ForceRmdir "${CT_PREFIX_DIR}/"{,usr/}{man,info}
+        CT_ForceRmdir "${CT_SYSROOT_DIR}/"{,usr/}{man,info}
+        CT_ForceRmdir "${CT_DEBUGROOT_DIR}/"{,usr/}{man,info}
     fi
 
     CT_EndStep

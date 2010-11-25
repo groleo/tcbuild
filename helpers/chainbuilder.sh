@@ -130,7 +130,7 @@ prepareWorkingDirs()
 
 	# Ah! The build directory shall be eradicated, even if we restart!
 	if [ -d "${CT_BUILD_DIR}" ]; then
-		CT_DoForceRmdir "${CT_BUILD_DIR}"
+		CT_ForceRmdir "${CT_BUILD_DIR}"
 	fi
 
 	# Don't eradicate directories if we need to restart
@@ -139,10 +139,10 @@ prepareWorkingDirs()
 		# We need to do that _before_ we can safely log, because the log file will
 		# most probably be in the toolchain directory.
 		if [ "${CT_FORCE_DOWNLOAD}" = "y" -a -d "${CT_TARBALLS_DIR}" ]; then
-			CT_DoForceRmdir "${CT_TARBALLS_DIR}"
+			CT_ForceRmdir "${CT_TARBALLS_DIR}"
 		fi
 		if [ "${CT_FORCE_EXTRACT}" = "y" -a -d "${CT_SRC_DIR}" ]; then
-			CT_DoForceRmdir "${CT_SRC_DIR}"
+			CT_ForceRmdir "${CT_SRC_DIR}"
 		fi
 		if [ "${CT_USE_EXTERNAL_TOOLCHAIN}" = "n" ] ; then
 			# Check now if we can write to the destination directory:
@@ -152,12 +152,12 @@ prepareWorkingDirs()
 			fi
 			if [ -d "${CT_INSTALL_DIR}" ]; then
 				echo "Removing CT_INSTALL_DIR=${CT_INSTALL_DIR}"
-				#CT_DoForceRmdir "${CT_INSTALL_DIR}"
+				#CT_ForceRmdir "${CT_INSTALL_DIR}"
 			fi
 		fi
 		if [ -d "${CT_STATE_DIR}" ]; then
 			CT_DoLog DEBUG "we start anew, get rid of the previously saved state directory" 
-			CT_DoForceRmdir "${CT_STATE_DIR}"
+			CT_ForceRmdir "${CT_STATE_DIR}"
 		fi
 	fi
 
@@ -497,7 +497,7 @@ restart_build(){
 			:
 		fi
 		if [ "${CT_FORCE_EXTRACT}" = "y" ]; then
-			CT_DoForceRmdir "${CT_SRC_DIR}"
+			CT_ForceRmdir "${CT_SRC_DIR}"
 			CT_DoExecLog ALL mkdir -p "${CT_SRC_DIR}"
 		fi
 		do_${component}_extract
@@ -616,6 +616,7 @@ for step in ${CT_STEPS}; do
 	fi
 
 	if [ ${do_it} -eq 1 ]; then
+		# calling certain step
 		if [ -n "${CT_CALL}" ]; then
 			restart_build
 			. "${CT_COMPONENTS_DIR}/${IT}/build.sh"

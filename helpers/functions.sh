@@ -299,8 +299,8 @@ CT_MktempDir() {
 }
 
 # Removes one or more directories, even if it is read-only, or its parent is
-# Usage: CT_DoForceRmdir dir [...]
-CT_DoForceRmdir() {
+# Usage: CT_ForceRmdir dir [...]
+CT_ForceRmdir() {
 	local dir
 	local mode
 	for dir in "${@}"; do
@@ -998,7 +998,7 @@ CT_DoLoadState(){
 
 	CT_DoLog DEBUG "  Removing previous build directories"
 	CT_DoExecLog ALL chmod -R u+rwX "${CT_PREFIX_DIR}" "${CT_CC_CORE_SHARED_PREFIX_DIR}" "${CT_CC_CORE_STATIC_PREFIX_DIR}"
-	CT_DoForceRmdir             "${CT_PREFIX_DIR}" "${CT_CC_CORE_SHARED_PREFIX_DIR}" "${CT_CC_CORE_STATIC_PREFIX_DIR}"
+	CT_ForceRmdir             "${CT_PREFIX_DIR}" "${CT_CC_CORE_SHARED_PREFIX_DIR}" "${CT_CC_CORE_STATIC_PREFIX_DIR}"
 	CT_DoExecLog DEBUG mkdir -p "${CT_PREFIX_DIR}" "${CT_CC_CORE_SHARED_PREFIX_DIR}" "${CT_CC_CORE_STATIC_PREFIX_DIR}"
 
 	CT_DoLog DEBUG "  Restoring CT_PREFIX_DIR='${CT_PREFIX_DIR}'"
