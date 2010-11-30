@@ -50,9 +50,23 @@ do_ntp_configure() {
     CT_EndStep
 }
 
+do_ntp_make() {
+    CT_DoLog EXTRA "BUILD ${PKG_NAME}"                \
+    CT_DoExecLog ALL                                    \
+    ${make} ${CT_NTP_PARALLEL:+${PARALLELMFLAGS}}          \
+         CROSS=${CT_TARGET}-                            \
+         DESTDIR="${CT_FS_DIR}/"                    \
+         ${CT_NTP_VERBOSITY}                            \
+         all
+}
 
-do_ntp_start_files() {
-    :
+do_ntp_make_install() {
+    CT_DoLog EXTRA "INSTALL ${PKG_NAME}"
+    CT_DoExecLog ALL                    \
+    ${make} CROSS=${CT_TARGET}-            \
+         DESTDIR="${CT_FS_DIR}/"                    \
+         ${CT_NTP_VERBOSITY}    \
+         install
 }
 
 do_ntp() {
@@ -66,21 +80,8 @@ do_ntp() {
     { cd "${CT_SRC_DIR}/${PKG_SRC}"; tar cf - .; } |tar xf -
 
     do_ntp_configure
-
-    CT_DoLog EXTRA "BUILD ${PKG_NAME}"                \
-    CT_DoExecLog ALL                                    \
-    ${make} ${CT_NTP_PARALLEL:+${PARALLELMFLAGS}}          \
-         CROSS=${CT_TARGET}-                            \
-         DESTDIR="${CT_FS_DIR}/"                    \
-         ${CT_NTP_VERBOSITY}                            \
-         all
-
-    CT_DoLog EXTRA "INSTALL ${PKG_NAME}"
-    CT_DoExecLog ALL                    \
-    ${make} CROSS=${CT_TARGET}-            \
-         DESTDIR="${CT_FS_DIR}/"                    \
-         ${CT_NTP_VERBOSITY}    \
-         install
+    do_ntp_make
+    do_ntp_make_install
 
     CT_Popd
     CT_EndStep
@@ -88,6 +89,10 @@ do_ntp() {
 
 # This function is used to install those components needing the final C compiler
 do_ntp_finish() {
+    :
+}
+
+do_ntp_start_files() {
     :
 }
 
